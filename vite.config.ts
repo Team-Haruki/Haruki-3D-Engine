@@ -5,7 +5,7 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 4173,
     watch: {
-      // WSL drvfs paths such as /mnt/d do not reliably emit file change events.
+      // Windows-mounted WSL paths do not reliably emit file change events.
       usePolling: true,
       interval: 250,
     },
