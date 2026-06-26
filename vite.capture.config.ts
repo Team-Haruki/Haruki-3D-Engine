@@ -15,17 +15,24 @@ export default defineConfig({
   },
   build: {
     emptyOutDir: false,
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       input: {
         capture: `${projectRoot}capture.html`,
       },
       output: {
-        manualChunks: {
-          "three-core": ["three"],
-          "three-extras": [
-            "three/examples/jsm/controls/OrbitControls.js",
-            "three/examples/jsm/loaders/GLTFLoader.js",
-          ],
+        manualChunks(id) {
+          const normalized = id.replace(/\\/g, "/");
+          if (
+            normalized.includes("/node_modules/three/examples/jsm/controls/OrbitControls.js") ||
+            normalized.includes("/node_modules/three/examples/jsm/loaders/GLTFLoader.js")
+          ) {
+            return "three-extras";
+          }
+          if (normalized.includes("/node_modules/three/")) {
+            return "three-core";
+          }
+          return undefined;
         },
       },
     },
