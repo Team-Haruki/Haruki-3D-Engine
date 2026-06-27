@@ -134,3 +134,9 @@ test("part registry runtime path keeps role motion separate from part packages",
   assert.match(engineSource, /applyCustomRoleDefaultMotion/);
   assert.match(engineSource, /nativeMeshes: this\.lastNativeMeshInstallDiagnostics/);
 });
+
+test("docker runtime image includes capture server config module", () => {
+  const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+
+  assert.match(dockerfile, /COPY\s+config\s+\.\/config/);
+});

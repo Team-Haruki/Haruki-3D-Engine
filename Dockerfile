@@ -21,6 +21,7 @@ ENV NODE_ENV=production \
   PORT=8080
 
 COPY --from=build /app/dist ./dist
+COPY config ./config
 COPY capture-server.mjs ./capture-server.mjs
 
 EXPOSE 8080
