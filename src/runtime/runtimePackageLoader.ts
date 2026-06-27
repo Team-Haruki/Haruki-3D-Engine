@@ -18,7 +18,6 @@ import {
   getDefaultCustomSelection,
   tryNormalizeRuntimePartType,
   type Character3dIndex,
-  type CustomPartSelection,
   type HeadHairCompatibility,
   type PartPackageSet,
   type PartRegistryEntry,
@@ -45,7 +44,6 @@ export type RuntimePackageLoadResult = {
 
 export type RuntimePackageLoadOptions = {
   fullRuntimeOnly?: boolean;
-  preferredSelection?: CustomPartSelection;
 };
 
 export async function loadRuntimePackageFromBaseUrl(
@@ -57,20 +55,13 @@ export async function loadRuntimePackageFromBaseUrl(
 
   if (!options.fullRuntimeOnly) {
     try {
-      const partSet = await loadPartPackageSetFromBaseUrl(baseUrl, options);
+      const partSet = await loadPartPackageSetFromBaseUrl(baseUrl);
       const wardrobe = new CustomWardrobeController({
         resolveUrl: (path) => resolveRuntimePackageUrl(baseUrl, path),
         loadPartRuntime: async (entry) =>
           loadPartRuntimePackage(partSet, entry, baseUrl),
       });
-      let combinedCharacter = wardrobe.loadPartPackageSet(partSet);
-      if (!combinedCharacter && options.preferredSelection) {
-        wardrobe.selectRole(
-          options.preferredSelection.characterId,
-          options.preferredSelection.unit
-        );
-        combinedCharacter = await wardrobe.setCustomSelection(options.preferredSelection);
-      }
+      const combinedCharacter = wardrobe.loadPartPackageSet(partSet);
       if (!combinedCharacter) {
         throw new Error(`Part registry package did not expose a default custom selection from ${baseUrl}.`);
       }
@@ -179,10 +170,7 @@ async function loadFullRuntimePackageFromBaseUrl(
   };
 }
 
-async function loadPartPackageSetFromBaseUrl(
-  baseUrl: string,
-  options: RuntimePackageLoadOptions = {}
-): Promise<PartPackageSet> {
+async function loadPartPackageSetFromBaseUrl(baseUrl: string): Promise<PartPackageSet> {
   const registry = normalizePartRegistry(await fetchRuntimeJson(
     resolveRuntimePackageUrl(baseUrl, "parts/part-registry.json")
   ) as PartRegistryInput);
@@ -193,12 +181,7 @@ async function loadPartPackageSetFromBaseUrl(
     resolveRuntimePackageUrl(baseUrl, "parts/head-hair-compatibility.json")
   );
   const packages = new Map<string, PartRuntimePackage>();
-  const candidates = selectPartRuntimeCandidates(
-    registry,
-    characterIndex,
-    compatibility,
-    options.preferredSelection
-  );
+  const candidates = selectPartRuntimeCandidates(registry, characterIndex, compatibility);
   const batchSize = 24;
   const maxCandidates = 720;
   for (let offset = 0; offset < Math.min(candidates.length, maxCandidates); offset += batchSize) {
@@ -214,25 +197,11 @@ async function loadPartPackageSetFromBaseUrl(
         packages.set(result.entry.packagePath, result.runtime);
       }
     }
-    if (hasUsableCustomPartSelection(
-      registry,
-      characterIndex,
-      compatibility,
-      packages,
-      baseUrl,
-      options.preferredSelection
-    )) {
+    if (hasUsableCustomPartSelection(registry, characterIndex, compatibility, packages, baseUrl)) {
       break;
     }
   }
-  if (!hasUsableCustomPartSelection(
-    registry,
-    characterIndex,
-    compatibility,
-    packages,
-    baseUrl,
-    options.preferredSelection
-  )) {
+  if (!hasUsableCustomPartSelection(registry, characterIndex, compatibility, packages, baseUrl)) {
     throw new Error(
       `Part registry package did not expose a compatible loaded body/head/hair selection from ${baseUrl}.`
     );
@@ -285,8 +254,7 @@ function normalizePartRegistry(input: PartRegistryInput): PartRegistryEntry[] {
 function selectPartRuntimeCandidates(
   registry: PartRegistryEntry[],
   characterIndex: Character3dIndex | null,
-  compatibility: HeadHairCompatibility | null,
-  preferredSelection: CustomPartSelection | undefined
+  compatibility: HeadHairCompatibility | null
 ) {
   const indexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
   const preferredCharacterId = indexEntries.find((entry) =>
@@ -318,35 +286,6 @@ function selectPartRuntimeCandidates(
     entry.status !== "missing"
   );
   const deniedHeadHairKeys = buildDeniedHeadHairKeys(compatibility);
-
-  if (preferredSelection) {
-    addEntry(findRegistryEntry(
-      preferredSelection.characterId,
-      "body",
-      preferredSelection.bodyCostume3dId,
-      preferredSelection.unit
-    ));
-    addEntry(findRegistryEntry(
-      preferredSelection.characterId,
-      "head",
-      preferredSelection.headCostume3dId,
-      preferredSelection.unit
-    ));
-    addEntry(findRegistryEntry(
-      preferredSelection.characterId,
-      "hair",
-      preferredSelection.hairCostume3dId,
-      preferredSelection.unit
-    ));
-    if (typeof preferredSelection.headOptionalCostume3dId === "number") {
-      addEntry(findRegistryEntry(
-        preferredSelection.characterId,
-        "head_optional",
-        preferredSelection.headOptionalCostume3dId,
-        preferredSelection.unit
-      ));
-    }
-  }
 
   if (preferredCharacterId !== null) {
     for (const entry of indexEntries) {
@@ -440,8 +379,7 @@ function hasUsableCustomPartSelection(
   characterIndex: Character3dIndex | null,
   compatibility: HeadHairCompatibility | null,
   packages: Map<string, PartRuntimePackage>,
-  baseUrl: string,
-  preferredSelection: CustomPartSelection | undefined
+  baseUrl: string
 ) {
   const loadedTypes = new Set(
     [...packages.values()]
@@ -458,38 +396,7 @@ function hasUsableCustomPartSelection(
     packages,
     baseUrl,
   };
-  if (preferredSelection && hasLoadedPreferredSelection(partSet, preferredSelection)) {
-    return true;
-  }
   return Boolean(getDefaultCustomSelection(partSet));
-}
-
-function hasLoadedPreferredSelection(
-  partSet: PartPackageSet,
-  selection: CustomPartSelection
-) {
-  return hasLoadedSelectionPart(partSet, selection, "body", selection.bodyCostume3dId) &&
-    hasLoadedSelectionPart(partSet, selection, "head", selection.headCostume3dId) &&
-    hasLoadedSelectionPart(partSet, selection, "hair", selection.hairCostume3dId) &&
-    (
-      !selection.headOptionalCostume3dId ||
-      hasLoadedSelectionPart(partSet, selection, "head_optional", selection.headOptionalCostume3dId)
-    );
-}
-
-function hasLoadedSelectionPart(
-  partSet: PartPackageSet,
-  selection: CustomPartSelection,
-  partType: RuntimePartType,
-  costume3dId: number
-) {
-  const entry = partSet.registry.find((candidate) =>
-    candidate.characterId === selection.characterId &&
-    candidate.costume3dId === costume3dId &&
-    tryNormalizeRuntimePartType(candidate.partType) === partType &&
-    candidate.unit === selection.unit
-  );
-  return Boolean(entry && partSet.packages.has(entry.packagePath));
 }
 
 function buildDeniedHeadHairKeys(compatibility: HeadHairCompatibility | null) {

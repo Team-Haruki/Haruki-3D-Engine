@@ -102,7 +102,6 @@ export type ComposePartAssetInput = {
 type RuntimeSetup = {
   version?: string;
   prefabGraphs?: unknown[];
-  bodyHeadAssembly?: RuntimeBodyHeadAssembly;
   rootSelectionProfile?: Record<string, unknown>;
   setupPlan?: Record<string, unknown>;
   activeRootProfile?: Record<string, unknown>;
@@ -114,25 +113,6 @@ type RuntimeSetup = {
   managerColliderCaches?: RuntimeManagerColliderCache[];
   warnings?: string[];
   [key: string]: unknown;
-};
-
-type RuntimePrefabGraph = {
-  transforms?: Array<{
-    transformPath?: string | null;
-  }>;
-};
-
-type RuntimeBodyHeadAssembly = {
-  version: string;
-  sourceKind: string;
-  parentRootPath: string | null;
-  parentAttachPath: string;
-  childRootPath: string;
-  childOriginPath: string;
-  runtimeMountPath: string;
-  parentingMode: string;
-  coordinateSpace: string;
-  notes: string[];
 };
 
 type RuntimeManager = Record<string, unknown> & {
@@ -525,30 +505,19 @@ function normalizeBodyManifestFromPart(
   runtime: PartRuntimePackage,
   resolveUrl: (path: string) => string
 ): BodyAssetManifest {
-  const manifest = cloneRecord(runtime.manifest) as BodyAssetManifest & Record<string, unknown>;
+  const manifest = cloneRecord(runtime.manifest) as BodyAssetManifest;
   manifest.id ||= `body-${runtime.part.costume3dId}`;
   manifest.displayName ||= runtime.part.name ?? manifest.id;
   manifest.characterId = String(runtime.part.characterId).padStart(2, "0");
   manifest.source ||= { bundleRoot: "", manifestUrl: "", meshUrl: "" };
   manifest.neckAnchor = normalizeVec3(manifest.neckAnchor, { x: 0, y: 1.75, z: 0.15 });
   manifest.skeleton ||= {} as BodyAssetManifest["skeleton"];
-  manifest.skeleton.skeletonId ||= characterSkeletonId(runtime.part.characterId);
-  manifest.skeleton.rootNodeName ||= readOptionalString(manifest.rootNodeName) || "body";
   manifest.skeleton.neckAttach ||= { fallbackPosition: { x: 0, y: 1.75, z: 0.15 } };
-  manifest.skeleton.neckAttach.nodeName ||= readOptionalString(manifest.attachNode) || "Neck";
   manifest.skeleton.neckAttach.fallbackPosition = normalizeVec3(
     manifest.skeleton.neckAttach.fallbackPosition,
     { x: 0, y: 1.75, z: 0.15 }
   );
   manifest.bodyMaterials ||= [];
-  const bodyProxy = manifest.proxy ?? {};
-  manifest.proxy = {
-    bodyColor: bodyProxy.bodyColor ?? "#f2d0c3",
-    shadowColor: bodyProxy.shadowColor ?? "#bf958a",
-    bodyScale: bodyProxy.bodyScale ?? 1,
-    torsoLength: bodyProxy.torsoLength ?? 2.2,
-    shoulderWidth: bodyProxy.shoulderWidth ?? 1.1,
-  };
   const resolvePartUrl = createPartUrlResolver(runtime, resolveUrl);
   manifest.source = {
     ...manifest.source,
@@ -566,38 +535,19 @@ function normalizeHeadManifestFromParts(
   resolveUrl: (path: string) => string
 ): HeadAssetManifest {
   const head = runtimes.find((runtime) => normalizeRuntimePartType(runtime.part.partType) === "head") ?? runtimes[0];
-  const manifest = cloneRecord(head.manifest) as HeadAssetManifest & Record<string, unknown>;
+  const manifest = cloneRecord(head.manifest) as HeadAssetManifest;
   manifest.id = `head-${selection.headCostume3dId}-hair-${selection.hairCostume3dId}`;
   manifest.displayName = `Head ${selection.headCostume3dId} / Hair ${selection.hairCostume3dId}`;
   manifest.characterId = String(selection.characterId).padStart(2, "0");
   manifest.source ||= { bundleRoot: "", manifestUrl: "", meshUrl: "" };
   manifest.rawImportOffset = normalizeVec3(manifest.rawImportOffset, { x: 0, y: 0, z: 0 });
   manifest.assembly ||= {} as HeadAssetManifest["assembly"];
-  manifest.assembly.expectedSkeletonId ||= characterSkeletonId(selection.characterId);
-  manifest.assembly.rootNodeName ||= readOptionalString(manifest.rootNodeName) || "face";
   manifest.assembly.attachOrigin ||= { fallbackPosition: { x: 0, y: 1.75, z: 0.15 } };
-  manifest.assembly.attachOrigin.nodeName ||= readOptionalString(manifest.attachNode) || "Neck";
   manifest.assembly.attachOrigin.fallbackPosition = normalizeVec3(
     manifest.assembly.attachOrigin.fallbackPosition,
     { x: 0, y: 1.75, z: 0.15 }
   );
   manifest.faceMaterials ||= [];
-  manifest.defaultFaceMode ||= "clean";
-  const headProxy = manifest.proxy ?? {};
-  const faceColor = headProxy.faceColor ?? "#fde2d9";
-  const faceShadeColor = headProxy.faceShadeColor ?? "#f7cdbf";
-  manifest.proxy = {
-    faceColor,
-    faceShadeColor,
-    skinColorDefault: headProxy.skinColorDefault ?? faceColor,
-    skinColor1: headProxy.skinColor1 ?? faceShadeColor,
-    skinColor2: headProxy.skinColor2 ?? faceShadeColor,
-    hairColor: headProxy.hairColor ?? "#7b5b4a",
-    hairShadowColor: headProxy.hairShadowColor ?? "#513d33",
-    headRadius: headProxy.headRadius ?? 0.74,
-    faceDepth: headProxy.faceDepth ?? 0.82,
-    hairArc: headProxy.hairArc ?? 0.98,
-  };
   const resolveHeadUrl = createPartUrlResolver(head, resolveUrl);
   manifest.source = {
     ...manifest.source,
@@ -679,11 +629,6 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     ...((runtime.springBone?.warnings as string[] | undefined) ?? []),
   ]);
   const activeRoots = uniqueStrings(remappedParts.flatMap((part) => part.activeRoots));
-  const defaultBodyRoot = resolveDefaultBodyRoot(remappedParts, activeRoots);
-  const prefabGraphs = remappedParts
-    .map((part) => part.runtime.springBone?.prefabGraph)
-    .filter((value): value is RuntimePrefabGraph => isRecord(value));
-  const bodyHeadAssembly = buildRuntimeBodyHeadAssembly(defaultBodyRoot, prefabGraphs);
   const managers = remappedParts.flatMap((part) => part.managers);
   const bones = remappedParts.flatMap((part) => part.bones);
   const colliders = remappedParts.flatMap((part) => part.colliders);
@@ -693,8 +638,9 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
   return {
     ...firstSetup,
     version: "0414",
-    prefabGraphs,
-    ...(bodyHeadAssembly ? { bodyHeadAssembly } : {}),
+    prefabGraphs: remappedParts
+      .map((part) => part.runtime.springBone?.prefabGraph)
+      .filter((value) => value !== undefined),
     rootSelectionProfile: {
       policy: "viewer_composed_active_parts",
       rootCandidates: [],
@@ -713,7 +659,7 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
       colliderFlagBindingCount: colliderBindings.filter((binding) => binding.sourceKind === "colliderFlag").length,
     },
     activeRootProfile: {
-      defaultBodyRoot,
+      defaultBodyRoot: activeRoots[0] ?? "body",
       activeRoots: activeRoots.length ? activeRoots : ["body", "face"],
       inactiveRoots: [],
     },
@@ -725,70 +671,6 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     managerColliderCaches,
     warnings,
   };
-}
-
-function characterSkeletonId(characterId: number) {
-  return `char${String(characterId).padStart(2, "0")}_humanoid`;
-}
-
-function resolveDefaultBodyRoot(parts: RemappedRuntimePart[], activeRoots: string[]) {
-  const bodyRoots = uniqueStrings(
-    parts
-      .filter((part) => part.partType === "body")
-      .flatMap((part) => part.activeRoots)
-  );
-  return bodyRoots.find((root) => root === "body")
-    ?? bodyRoots.find((root) => root.endsWith("_body") || root.includes("body"))
-    ?? activeRoots.find((root) => root === "body")
-    ?? activeRoots[0]
-    ?? "body";
-}
-
-function buildRuntimeBodyHeadAssembly(
-  defaultBodyRoot: string,
-  prefabGraphs: RuntimePrefabGraph[]
-): RuntimeBodyHeadAssembly | undefined {
-  const transformPaths = new Set(
-    prefabGraphs.flatMap((graph) =>
-      (graph.transforms ?? [])
-        .map((transform) => transform.transformPath)
-        .filter((path): path is string => Boolean(path))
-    )
-  );
-  const parentAttachPath = resolveFirstExistingPath(transformPaths, [
-    `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck`,
-    `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/Neck`,
-  ]);
-  const childRootPath = resolveFirstExistingPath(transformPaths, ["face"]);
-  const childOriginPath = resolveFirstExistingPath(transformPaths, [
-    "face/Position/Hip/Waist/Spine/Chest/Neck",
-  ]);
-  if (!parentAttachPath || !childRootPath || !childOriginPath) {
-    return undefined;
-  }
-  const runtimeMountPath = `${parentAttachPath}/__PJSK_RuntimeMount_${childRootPath.replace(/\//g, "_")}`;
-  return {
-    version: "0414",
-    sourceKind: "viewer-composed-unity-source-prefab-assembly",
-    parentRootPath: resolveFirstExistingPath(transformPaths, [defaultBodyRoot]),
-    parentAttachPath,
-    childRootPath,
-    childOriginPath,
-    runtimeMountPath,
-    parentingMode: "parent_child_runtime_mount",
-    coordinateSpace: "unity-left-handed",
-    notes: [
-      "Body and head prefab roots are stored as separate part runtime packages.",
-      "The viewer creates the runtime mount while composing active part packages.",
-    ],
-  };
-}
-
-function resolveFirstExistingPath(
-  transformPaths: ReadonlySet<string>,
-  candidates: string[]
-) {
-  return candidates.find((candidate) => transformPaths.has(candidate)) ?? null;
 }
 
 function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {

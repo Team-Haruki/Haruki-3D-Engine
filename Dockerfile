@@ -22,7 +22,6 @@ ENV NODE_ENV=production \
 
 COPY --from=build /app/dist ./dist
 COPY capture-server.mjs ./capture-server.mjs
-COPY config ./config
 
 EXPOSE 8080
 CMD ["node", "capture-server.mjs"]
