@@ -114,6 +114,7 @@ export type HarukiCaptureRolePartsRequest = {
   headOptionalCostume3dId?: number | null;
   imageId?: string;
   phase?: number;
+  cameraPreset?: PjskCameraPreset;
 };
 
 export type HarukiCaptureRolePartsResult = {
@@ -607,6 +608,7 @@ type RuntimePrefabTransformSource = {
   name?: string | null;
   transformPath?: string | null;
   poseRoot?: string | null;
+  runtimePartIndex?: number;
   parentPathId?: number | null;
   childPathIds?: number[];
   localPosition?: {
@@ -2142,6 +2144,7 @@ function buildUnityPrefabSourceGraph(
       const node = new THREE.Object3D();
       node.name = transform.name ?? transform.transformPath.split("/").pop() ?? `path_${transform.pathId}`;
       node.userData.pjskTransformPath = transform.transformPath;
+      node.userData.pjskRuntimePartIndex = transform.runtimePartIndex;
       node.userData.pjskPoseRoot = transform.poseRoot ?? null;
       node.position.copy(convertUnityPositionToThree(
         readUnityVector3(transform.localPosition, new THREE.Vector3())
@@ -3774,6 +3777,7 @@ export class Haruki3DEngine {
     this.currentBodyAsset = characterAsset.bodyAsset;
     this.currentHeadAsset = characterAsset.headAsset;
     this.currentImportIsCombined = true;
+    this.applyCharacterHeight(characterAsset.bodyAsset.characterHeightMeters ?? this.characterHeight);
     const loaded = await this.loadCombinedCharacterAsset(characterAsset);
 
     if (revision !== this.importRevision) {
@@ -4836,7 +4840,7 @@ export class Haruki3DEngine {
     this.seekAnimationLoopPhase(request.phase ?? 0.5);
     this.stepCaptureFrame(0, false);
     this.frameCurrentCharacterForCapture();
-    this.applyCameraPreset("id5-debug");
+    this.applyCameraPreset(request.cameraPreset ?? "id5-debug");
     this.shiftCameraRight(1);
     this.renderFrame();
     return {

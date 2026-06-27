@@ -61,6 +61,7 @@ type RuntimePrefabTransform = {
   parentPathId?: number | null;
   childPathIds?: number[];
   localPosition?: VectorLike | null;
+  runtimePartIndex?: number;
 };
 
 type RuntimePrefabMonoBehaviour = {
@@ -69,10 +70,13 @@ type RuntimePrefabMonoBehaviour = {
   name?: string | null;
   transformPath?: string | null;
   enabled?: boolean;
+  runtimePartIndex?: number;
 };
 
 type RuntimeManagerSource = {
   partKind?: string;
+  runtimePartIndex?: number;
+  runtimePartType?: string;
   pathId?: number;
   nodeName?: string | null;
   nodePath?: string | null;
@@ -100,6 +104,8 @@ type RuntimeManagerSource = {
 
 type RuntimeBoneSource = {
   partKind?: string;
+  runtimePartIndex?: number;
+  runtimePartType?: string;
   pathId?: number;
   nodeName?: string | null;
   nodePath?: string | null;
@@ -131,6 +137,7 @@ type RuntimeLengthLimitTargetSource = {
   nodeName?: string | null;
   nodePath?: string | null;
   sourcePathId?: number;
+  runtimePartIndex?: number;
 };
 
 type RuntimeAngleLimitSource = {
@@ -142,6 +149,8 @@ type RuntimeAngleLimitSource = {
 type RuntimeColliderSource = {
   index?: number;
   partKind?: string;
+  runtimePartIndex?: number;
+  runtimePartType?: string;
   pathId?: number;
   scriptName?: string;
   nodeName?: string | null;
@@ -201,12 +210,14 @@ type RuntimeManagerColliderCacheSource = {
 
 type NodeResolution = {
   nodeByPath: Map<string, THREE.Object3D>;
+  nodeByPartPath: Map<string, THREE.Object3D>;
   canonicalNodeByPath: Map<string, THREE.Object3D>;
 };
 
 type PrefabGraphIndex = {
   transformByPathId: Map<number, RuntimePrefabTransform>;
   transformByPath: Map<string, RuntimePrefabTransform>;
+  transformByPartPath: Map<string, RuntimePrefabTransform>;
   pivotTransformPathIds: Set<number>;
   pivotTransformPaths: Set<string>;
 };
@@ -252,6 +263,8 @@ type LastCollisionInfo = {
 
 type RuntimeBone = {
   managerPathId: number | null;
+  runtimePartIndex: number | null;
+  runtimePartType: string | null;
   springName: string;
   sourceBoneName: string | null;
   sourceBonePath: string | null;
@@ -368,7 +381,7 @@ export class UnityPrefabSpringRuntime {
         if (!sourceBone || !isSourceActive(sourceBone) || !isRuntimePathActive(sourceBone.nodePath, activeRoots)) {
           continue;
         }
-        const node = resolveNode(resolution, sourceBone.nodePath);
+        const node = resolveNodeForPart(resolution, sourceBone.nodePath, sourceBone.runtimePartIndex);
         if (!node) {
           missingNodes.push(sourceBone.nodePath ?? sourceBone.nodeName ?? `bone:${bonePathId}`);
           continue;
@@ -377,7 +390,7 @@ export class UnityPrefabSpringRuntime {
           continue;
         }
         const tailBinding = computeUnityPrefabChildPosition(sourceBone, node, graphIndex, resolution);
-        const pivotNode = resolveNode(resolution, sourceBone.pivotNodePath);
+        const pivotNode = resolveNodeForPart(resolution, sourceBone.pivotNodePath, sourceBone.runtimePartIndex);
         const colliderBinding = resolveColliderBinding(
           setup,
           manager,
@@ -614,6 +627,7 @@ export class UnityPrefabSpringRuntime {
     }
     topOffsets.sort((a, b) => b.offset - a.offset);
     skirtOffsets.sort((a, b) => b.offset - a.offset);
+    const controlledPartDiagnostics = buildControlledPartDiagnostics(this.bones, this.skinnedBones);
     return {
       runtimeMode: "unity-prefab",
       enabled,
@@ -629,6 +643,8 @@ export class UnityPrefabSpringRuntime {
       maxSleeveOffset,
       maxSkirtOffset,
       topOffsets: topOffsets.slice(0, 8),
+      controlledPartCounts: controlledPartDiagnostics.counts,
+      controlledHairSamples: controlledPartDiagnostics.hairSamples,
       skirtOffsets,
       bindingDiagnostics: this.bones
         .flatMap((bone) => bone.colliderBindingDiagnostics)
@@ -1078,6 +1094,63 @@ export class UnityPrefabSpringRuntime {
   }
 }
 
+function buildControlledPartDiagnostics(
+  bones: RuntimeBone[],
+  skinnedBones: ReadonlySet<THREE.Object3D>
+): {
+  counts: NonNullable<UtjSpringBoneRuntimeSnapshot["controlledPartCounts"]>;
+  hairSamples: NonNullable<UtjSpringBoneRuntimeSnapshot["controlledHairSamples"]>;
+} {
+  const counts = new Map<string, NonNullable<UtjSpringBoneRuntimeSnapshot["controlledPartCounts"]>[number]>();
+  const hairSamples: NonNullable<UtjSpringBoneRuntimeSnapshot["controlledHairSamples"]> = [];
+  for (const bone of bones) {
+    const sourceRoot = rootNameFromPath(bone.sourceBonePath);
+    const key = `${bone.runtimePartIndex ?? "null"}|${bone.runtimePartType ?? "null"}|${sourceRoot ?? "null"}`;
+    let entry = counts.get(key);
+    if (!entry) {
+      entry = {
+        runtimePartIndex: bone.runtimePartIndex,
+        runtimePartType: bone.runtimePartType,
+        sourceRoot,
+        count: 0,
+        sampleNames: [],
+        samplePaths: [],
+      };
+      counts.set(key, entry);
+    }
+    entry.count += 1;
+    if (entry.sampleNames.length < 6) {
+      entry.sampleNames.push(bone.node.name);
+      entry.samplePaths.push(getObjectPath(bone.node));
+    }
+    if (
+      hairSamples.length < 12 &&
+      (
+        bone.runtimePartType === "hair" ||
+        bone.node.name.toLowerCase().includes("hair") ||
+        (bone.sourceBonePath ?? "").toLowerCase().includes("hair")
+      )
+    ) {
+      hairSamples.push({
+        name: bone.node.name,
+        path: getObjectPath(bone.node),
+        sourceBonePath: bone.sourceBonePath,
+        runtimePartIndex: bone.runtimePartIndex,
+        runtimePartType: bone.runtimePartType,
+        resolvedIsSkinnedBone: skinnedBones.has(bone.node),
+      });
+    }
+  }
+  return {
+    counts: [...counts.values()].sort((a, b) =>
+      (a.runtimePartIndex ?? -1) - (b.runtimePartIndex ?? -1) ||
+      String(a.runtimePartType ?? "").localeCompare(String(b.runtimePartType ?? "")) ||
+      String(a.sourceRoot ?? "").localeCompare(String(b.sourceRoot ?? ""))
+    ),
+    hairSamples,
+  };
+}
+
 function createRuntimeBone(
   manager: RuntimeManagerSource,
   sourceBone: RuntimeBoneSource,
@@ -1101,6 +1174,8 @@ function createRuntimeBone(
 
   return {
     managerPathId: readFiniteNumber(manager.pathId),
+    runtimePartIndex: readFiniteNumber(sourceBone.runtimePartIndex) ?? readFiniteNumber(manager.runtimePartIndex),
+    runtimePartType: sourceBone.runtimePartType ?? manager.runtimePartType ?? sourceBone.partKind ?? manager.partKind ?? null,
     springName: `${manager.partKind ?? sourceBone.partKind ?? "Part"}:${manager.nodeName ?? manager.pathId ?? "manager"}`,
     sourceBoneName: sourceBone.nodeName ?? null,
     sourceBonePath: sourceBone.nodePath ?? null,
@@ -1166,7 +1241,7 @@ function buildRuntimeColliders(
     if (!isSourceActive(source) || !isRuntimePathActive(source.nodePath, activeRoots)) {
       continue;
     }
-    const node = resolveNode(resolution, source.nodePath);
+    const node = resolveNodeForPart(resolution, source.nodePath, source.runtimePartIndex);
     if (!node) {
       missingNodes.push(source.nodePath ?? source.nodeName ?? `collider:${source.index}`);
       continue;
@@ -1277,9 +1352,11 @@ function computeUnityPrefabChildPosition(
   const headPosition = node.getWorldPosition(new THREE.Vector3());
   const right = convertUnityAxisToThree("right").transformDirection(node.matrixWorld);
   const fallback = headPosition.clone().addScaledVector(right, -0.1);
-  const transform = bone.nodePath ? graphIndex.transformByPath.get(bone.nodePath) : undefined;
+  const transform = bone.nodePath
+    ? resolvePrefabTransformForPart(graphIndex, bone.nodePath, bone.runtimePartIndex)
+    : undefined;
   const validChildren = transform
-    ? collectUnityPrefabTailChildren(transform, graphIndex, resolution)
+    ? collectUnityPrefabTailChildren(transform, graphIndex, resolution, bone.runtimePartIndex)
     : [];
   const childNames = validChildren.map((child) => child.source.name ?? child.node.name);
   const childPaths = validChildren.map((child) => child.source.transformPath ?? getObjectPath(child.node));
@@ -1331,7 +1408,8 @@ function computeUnityPrefabChildPosition(
 function collectUnityPrefabTailChildren(
   transform: RuntimePrefabTransform,
   graphIndex: PrefabGraphIndex,
-  resolution: NodeResolution
+  resolution: NodeResolution,
+  runtimePartIndex?: number
 ): { source: RuntimePrefabTransform; node: THREE.Object3D }[] {
   const result: { source: RuntimePrefabTransform; node: THREE.Object3D }[] = [];
   for (const childPathId of transform.childPathIds ?? []) {
@@ -1343,7 +1421,7 @@ function collectUnityPrefabTailChildren(
       continue;
     }
 
-    const node = resolveNode(resolution, child.transformPath);
+    const node = resolveNodeForPart(resolution, child.transformPath, runtimePartIndex ?? child.runtimePartIndex);
     if (node) {
       result.push({ source: child, node });
     }
@@ -1361,6 +1439,7 @@ function isValidPrefabSpringTailChild(child: RuntimePrefabTransform, graphIndex:
 function buildPrefabGraphIndex(setup: RuntimeUnitySetup0414): PrefabGraphIndex {
   const transformByPathId = new Map<number, RuntimePrefabTransform>();
   const transformByPath = new Map<string, RuntimePrefabTransform>();
+  const transformByPartPath = new Map<string, RuntimePrefabTransform>();
   const pivotTransformPathIds = new Set<number>();
   const pivotTransformPaths = new Set<string>();
 
@@ -1371,6 +1450,9 @@ function buildPrefabGraphIndex(setup: RuntimeUnitySetup0414): PrefabGraphIndex {
       }
       if (transform.transformPath) {
         transformByPath.set(transform.transformPath, transform);
+        if (typeof transform.runtimePartIndex === "number") {
+          transformByPartPath.set(partPathKey(transform.runtimePartIndex, transform.transformPath), transform);
+        }
       }
     }
   }
@@ -1393,6 +1475,7 @@ function buildPrefabGraphIndex(setup: RuntimeUnitySetup0414): PrefabGraphIndex {
   return {
     transformByPathId,
     transformByPath,
+    transformByPartPath,
     pivotTransformPathIds,
     pivotTransformPaths,
   };
@@ -1400,6 +1483,7 @@ function buildPrefabGraphIndex(setup: RuntimeUnitySetup0414): PrefabGraphIndex {
 
 function buildNodeResolution(root: THREE.Object3D): NodeResolution {
   const nodeByPath = new Map<string, THREE.Object3D>();
+  const nodeByPartPath = new Map<string, THREE.Object3D>();
   const canonicalNodeByPath = new Map<string, THREE.Object3D>();
   root.traverse((node) => {
     const path = getObjectPath(node, root);
@@ -1411,13 +1495,17 @@ function buildNodeResolution(root: THREE.Object3D): NodeResolution {
     if (canonicalPath && canonicalPath !== path) {
       canonicalNodeByPath.set(canonicalPath, node);
     }
+    const runtimePartIndex = readRuntimePartIndex(node);
     for (const sourcePath of collectUnitySourcePathAliases(node, path, canonicalPath)) {
+      if (typeof runtimePartIndex === "number") {
+        nodeByPartPath.set(partPathKey(runtimePartIndex, sourcePath), node);
+      }
       if (!nodeByPath.has(sourcePath)) {
         nodeByPath.set(sourcePath, node);
       }
     }
   });
-  return { nodeByPath, canonicalNodeByPath };
+  return { nodeByPath, nodeByPartPath, canonicalNodeByPath };
 }
 
 function collectUnitySourcePathAliases(
@@ -1459,6 +1547,44 @@ function resolveNode(
   return resolution.nodeByPath.get(sourcePath) ??
     resolution.canonicalNodeByPath.get(sourcePath) ??
     null;
+}
+
+function resolveNodeForPart(
+  resolution: NodeResolution,
+  sourcePath?: string | null,
+  runtimePartIndex?: number
+): THREE.Object3D | null {
+  if (!sourcePath) {
+    return null;
+  }
+  if (typeof runtimePartIndex === "number") {
+    const partNode = resolution.nodeByPartPath.get(partPathKey(runtimePartIndex, sourcePath));
+    if (partNode) {
+      return partNode;
+    }
+  }
+  return resolveNode(resolution, sourcePath);
+}
+
+function resolvePrefabTransformForPart(
+  graphIndex: PrefabGraphIndex,
+  sourcePath: string,
+  runtimePartIndex?: number
+): RuntimePrefabTransform | undefined {
+  if (typeof runtimePartIndex === "number") {
+    return graphIndex.transformByPartPath.get(partPathKey(runtimePartIndex, sourcePath)) ??
+      graphIndex.transformByPath.get(sourcePath);
+  }
+  return graphIndex.transformByPath.get(sourcePath);
+}
+
+function partPathKey(runtimePartIndex: number, path: string) {
+  return `${runtimePartIndex}:${path}`;
+}
+
+function readRuntimePartIndex(node: THREE.Object3D): number | undefined {
+  const value = node.userData.pjskRuntimePartIndex;
+  return typeof value === "number" ? value : undefined;
 }
 
 function collectSkinnedBones(root: THREE.Object3D): Set<THREE.Object3D> {
@@ -1579,7 +1705,11 @@ function resolveLengthLimitTargets(
 ): RuntimeLengthLimitTarget[] {
   const targets: RuntimeLengthLimitTarget[] = [];
   for (const target of bone.lengthLimitTargets ?? []) {
-    const node = resolveNode(resolution, target.nodePath);
+    const node = resolveNodeForPart(
+      resolution,
+      target.nodePath,
+      target.runtimePartIndex ?? bone.runtimePartIndex
+    );
     if (!node) {
       continue;
     }

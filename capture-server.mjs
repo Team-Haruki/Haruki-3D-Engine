@@ -24,6 +24,10 @@ const {
   defaultHeight,
   defaultScale,
   defaultTimeoutMs,
+  defaultPhase,
+  defaultClip,
+  defaultSpringRuntimeMode,
+  defaultCameraPreset,
 } = resolveCaptureServerOptions(engineConfig);
 
 const mimeByExtension = new Map([
@@ -147,7 +151,8 @@ function validateCaptureRequest(input) {
       optionalHeadOptional === undefined || optionalHeadOptional === null
         ? null
         : readId("headOptionalCostume3dId"),
-    phase: 0.5,
+    phase: Number(input.phase) || defaultPhase,
+    cameraPreset: input.cameraPreset === "default" ? "default" : defaultCameraPreset,
     width: Math.max(Math.trunc(Number(input.width) || defaultWidth), 320),
     height: Math.max(Math.trunc(Number(input.height) || defaultHeight), 320),
     scale: Math.min(Math.max(Number(input.scale) || defaultScale, 1), 2),
@@ -438,7 +443,14 @@ class CaptureRuntimeSession {
     this.chromiumLog = "";
     this.tempRoot = makeTempDir();
     const debugPort = await getFreePort();
-    const pageUrl = `http://127.0.0.1:${port}/capture.html?captureBase=/runtime/&capturePhase=0.5&captureClip=motion_loop&springRuntimeMode=unity-prefab&cameraPreset=id5-debug`;
+    const pageParams = new URLSearchParams({
+      captureBase: "/runtime/",
+      capturePhase: String(defaultPhase),
+      captureClip: defaultClip,
+      springRuntimeMode: defaultSpringRuntimeMode,
+      cameraPreset: defaultCameraPreset,
+    });
+    const pageUrl = `http://127.0.0.1:${port}/capture.html?${pageParams.toString()}`;
     this.chromium = spawn(chromiumPath, [
       "--headless=new",
       "--hide-scrollbars",

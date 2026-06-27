@@ -136,6 +136,23 @@ type RuntimeSetup = {
   [key: string]: unknown;
 };
 
+type RuntimePrefabGraph = Record<string, unknown> & {
+  transforms?: RuntimePrefabTransform[];
+  monoBehaviours?: RuntimePrefabMonoBehaviour[];
+};
+
+type RuntimePrefabTransform = Record<string, unknown> & {
+  pathId?: number;
+  parentPathId?: number | null;
+  childPathIds?: number[];
+  runtimePartIndex?: number;
+};
+
+type RuntimePrefabMonoBehaviour = Record<string, unknown> & {
+  pathId?: number;
+  runtimePartIndex?: number;
+};
+
 type RuntimeManager = Record<string, unknown> & {
   partKind?: string;
   pathId?: number;
@@ -211,6 +228,7 @@ type RuntimePartWithIndex = {
 
 type RemappedRuntimePart = RuntimePartWithIndex & {
   setup: RuntimeSetup;
+  prefabGraph: RuntimePrefabGraph | null;
   managers: RuntimeManager[];
   bones: RuntimeBone[];
   colliders: RuntimeCollider[];
@@ -689,8 +707,8 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
   const remappedParts = runtimes.map((runtime, partIndex) => remapRuntimePart(runtime, partIndex));
   const firstSetup = remappedParts[0]?.setup ?? {};
   const prefabGraphs = remappedParts
-    .map((part) => part.runtime.springBone?.prefabGraph)
-    .filter((value) => value !== undefined);
+    .map((part) => part.prefabGraph)
+    .filter((value): value is RuntimePrefabGraph => value !== null);
   const warnings = runtimes.flatMap((runtime) => [
     ...(runtime.warnings ?? []),
     ...((runtime.springBone?.warnings as string[] | undefined) ?? []),
@@ -799,11 +817,12 @@ function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {
 function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): RemappedRuntimePart {
   const setup = getPartRuntimeSetup(runtime);
   const partType = normalizeRuntimePartType(runtime.part.partType);
-  const managers = cloneArrayWithPartPrefix(setup.managers, partIndex) as RuntimeManager[];
-  const bones = cloneArrayWithPartPrefix(setup.bones, partIndex) as RuntimeBone[];
+  const managers = cloneArrayWithPartPrefix(setup.managers, partIndex, partType) as RuntimeManager[];
+  const bones = cloneArrayWithPartPrefix(setup.bones, partIndex, partType) as RuntimeBone[];
   const managerColliderCaches = cloneArrayWithPartPrefix(
     setup.managerColliderCaches,
-    partIndex
+    partIndex,
+    partType
   ) as RuntimeManagerColliderCache[];
   withInferredSpringManagerBoneRefs(managers, bones, managerColliderCaches);
   return {
@@ -811,13 +830,45 @@ function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): Remap
     partIndex,
     partType,
     setup,
+    prefabGraph: remapPrefabGraph(runtime.springBone?.prefabGraph, partIndex),
     managers,
     bones,
-    colliders: cloneArrayWithPartPrefix(setup.colliders, partIndex) as RuntimeCollider[],
-    colliderBindings: cloneArrayWithPartPrefix(setup.colliderBindings, partIndex) as RuntimeColliderBinding[],
+    colliders: cloneArrayWithPartPrefix(setup.colliders, partIndex, partType) as RuntimeCollider[],
+    colliderBindings: cloneArrayWithPartPrefix(setup.colliderBindings, partIndex, partType) as RuntimeColliderBinding[],
     managerColliderCaches,
     activeRoots: readStringArray(setup.activeRootProfile?.activeRoots),
   };
+}
+
+function remapPrefabGraph(value: unknown, partIndex: number): RuntimePrefabGraph | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const graph = { ...value } as RuntimePrefabGraph;
+  graph.runtimePartIndex = partIndex;
+  graph.transforms = readRecordArray(value.transforms).map((entry) => {
+    const cloned = { ...entry, runtimePartIndex: partIndex } as RuntimePrefabTransform;
+    if (typeof cloned.pathId === "number") {
+      cloned.pathId = remapNumericId(cloned.pathId, partIndex);
+    }
+    if (typeof cloned.parentPathId === "number") {
+      cloned.parentPathId = remapNumericId(cloned.parentPathId, partIndex);
+    }
+    if (Array.isArray(cloned.childPathIds)) {
+      cloned.childPathIds = cloned.childPathIds.map((id) =>
+        typeof id === "number" ? remapNumericId(id, partIndex) : id
+      );
+    }
+    return cloned;
+  });
+  graph.monoBehaviours = readRecordArray(value.monoBehaviours).map((entry) => {
+    const cloned = { ...entry, runtimePartIndex: partIndex } as RuntimePrefabMonoBehaviour;
+    if (typeof cloned.pathId === "number") {
+      cloned.pathId = remapNumericId(cloned.pathId, partIndex);
+    }
+    return cloned;
+  });
+  return graph;
 }
 
 function withInferredSpringManagerBoneRefs(
@@ -866,7 +917,11 @@ function isSameOrDescendantRuntimePath(
   return childPath === parentPath || childPath.startsWith(`${parentPath}/`);
 }
 
-function cloneArrayWithPartPrefix<T = unknown>(value: unknown, partIndex: number): T[] {
+function cloneArrayWithPartPrefix<T = unknown>(
+  value: unknown,
+  partIndex: number,
+  partType: RuntimePartType
+): T[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -875,6 +930,8 @@ function cloneArrayWithPartPrefix<T = unknown>(value: unknown, partIndex: number
       return entry;
     }
     const cloned = { ...entry };
+    cloned.runtimePartIndex = partIndex;
+    cloned.runtimePartType = partType;
     if (typeof cloned.pathId === "number") {
       cloned.pathId = remapNumericId(cloned.pathId, partIndex);
     }

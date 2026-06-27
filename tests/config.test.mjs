@@ -53,6 +53,50 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(server.runtimeRoot, "/data/runtime-from-config");
   assert.equal(server.captureOutputDir, "/data/captures-from-config");
   assert.equal(server.port, 18080);
+  assert.equal(server.defaultWidth, 700);
+  assert.equal(server.defaultHeight, 500);
+  assert.equal(server.defaultScale, 2);
+  assert.equal(server.defaultTimeoutMs, 12000);
+  assert.equal(server.defaultPhase, 0.25);
+  assert.equal(server.defaultClip, "motion_loop");
+  assert.equal(server.defaultSpringRuntimeMode, "unity-prefab");
+  assert.equal(server.defaultCameraPreset, "id5-debug");
+});
+
+test("persistent capture server propagates config defaults into role parts capture", () => {
+  const serverSource = fs.readFileSync(
+    path.join(repoRoot, "capture-server.mjs"),
+    "utf8"
+  );
+  const harnessSource = fs.readFileSync(
+    path.join(repoRoot, "src/captureHarness.ts"),
+    "utf8"
+  );
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(serverSource, /defaultPhase/);
+  assert.match(serverSource, /defaultCameraPreset/);
+  assert.match(serverSource, /new URLSearchParams\(\{/);
+  assert.doesNotMatch(serverSource, /capturePhase=0\.5&captureClip=motion_loop&springRuntimeMode=unity-prefab&cameraPreset=id5-debug/);
+  assert.match(harnessSource, /phase: request\.phase \?\? config\.phase/);
+  assert.match(harnessSource, /cameraPreset: request\.cameraPreset \?\? config\.cameraPreset/);
+  assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
+  assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "id5-debug"\)/);
+});
+
+test("combined runtime imports apply character height before capture camera framing", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    engineSource,
+    /this\.currentBodyAsset = characterAsset\.bodyAsset;\s+this\.currentHeadAsset = characterAsset\.headAsset;\s+this\.currentImportIsCombined = true;\s+this\.applyCharacterHeight\(characterAsset\.bodyAsset\.characterHeightMeters \?\? this\.characterHeight\);/s
+  );
 });
 
 test("experimental neck contact shadow cannot be enabled in production shading", () => {
@@ -285,4 +329,44 @@ test("part composer infers missing spring manager bone references from part-loca
   assert.match(composerSource, /isSameOrDescendantRuntimePath/);
   assert.match(composerSource, /manager\.bonePathIds = inferredBonePathIds/);
   assert.match(composerSource, /cache\.springBonePathIds = inferredBonePathIds/);
+});
+
+test("composed spring setup keeps duplicate head and hair prefab paths part scoped", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+  const springSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /function remapPrefabGraph/);
+  assert.match(composerSource, /runtimePartIndex:\s*partIndex/);
+  assert.match(composerSource, /cloned\.runtimePartType = partType/);
+  assert.match(composerSource, /graph\.transforms = readRecordArray\(value\.transforms\)/);
+  assert.match(composerSource, /cloned\.pathId = remapNumericId\(cloned\.pathId, partIndex\)/);
+  assert.match(composerSource, /cloned\.parentPathId = remapNumericId\(cloned\.parentPathId, partIndex\)/);
+  assert.match(composerSource, /cloned\.childPathIds = cloned\.childPathIds\.map/);
+  assert.match(composerSource, /\.map\(\(part\) => part\.prefabGraph\)/);
+  assert.match(composerSource, /cloned\.runtimePartIndex = partIndex/);
+
+  assert.match(engineSource, /node\.userData\.pjskRuntimePartIndex = transform\.runtimePartIndex/);
+
+  assert.match(springSource, /nodeByPartPath: Map<string, THREE\.Object3D>/);
+  assert.match(springSource, /transformByPartPath: Map<string, RuntimePrefabTransform>/);
+  assert.match(springSource, /runtimePartType\?: string/);
+  assert.match(springSource, /buildControlledPartDiagnostics/);
+  assert.match(springSource, /controlledPartCounts: controlledPartDiagnostics\.counts/);
+  assert.match(springSource, /controlledHairSamples: controlledPartDiagnostics\.hairSamples/);
+  assert.match(springSource, /resolveNodeForPart\(resolution, sourceBone\.nodePath, sourceBone\.runtimePartIndex\)/);
+  assert.match(springSource, /resolveNodeForPart\(resolution, sourceBone\.pivotNodePath, sourceBone\.runtimePartIndex\)/);
+  assert.match(springSource, /resolveNodeForPart\(resolution, source\.nodePath, source\.runtimePartIndex\)/);
+  assert.match(springSource, /resolvePrefabTransformForPart\(graphIndex, bone\.nodePath, bone\.runtimePartIndex\)/);
+  assert.match(springSource, /target\.runtimePartIndex \?\? bone\.runtimePartIndex/);
+  assert.match(springSource, /partPathKey\(runtimePartIndex, sourcePath\)/);
 });

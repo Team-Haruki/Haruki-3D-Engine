@@ -530,6 +530,22 @@ export type UtjSpringBoneRuntimeSnapshot = {
     springForce: VectorSnapshot;
     colliderBindings: RuntimeColliderBindingDiagnostic[];
   }[];
+  controlledPartCounts?: {
+    runtimePartIndex: number | null;
+    runtimePartType: string | null;
+    sourceRoot: string | null;
+    count: number;
+    sampleNames: string[];
+    samplePaths: string[];
+  }[];
+  controlledHairSamples?: {
+    name: string;
+    path: string;
+    sourceBonePath: string | null;
+    runtimePartIndex: number | null;
+    runtimePartType: string | null;
+    resolvedIsSkinnedBone: boolean;
+  }[];
   skirtOffsets: {
     name: string;
     path: string;

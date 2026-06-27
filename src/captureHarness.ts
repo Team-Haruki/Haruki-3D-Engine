@@ -225,7 +225,8 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
     engine.setViewportSize(root.clientWidth, root.clientHeight);
     const result = await engine.captureRoleParts({
       ...request,
-      phase: request.phase ?? 0.5,
+      phase: request.phase ?? config.phase,
+      cameraPreset: request.cameraPreset ?? config.cameraPreset,
     });
     await waitForAnimationFrames(2);
     getCaptureWindow().__PJSK_CAPTURE_SNAPSHOT__ = result.snapshots;
