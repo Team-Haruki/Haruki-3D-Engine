@@ -87,6 +87,13 @@ test("persistent capture server propagates config defaults into role parts captu
   assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture"\)/);
 });
 
+test("docker runtime image includes capture server support modules", () => {
+  const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
+
+  assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);
+  assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
+});
+
 test("role parts capture supports warmup frames for spring runtime settling", () => {
   const serverSource = fs.readFileSync(
     path.join(repoRoot, "capture-server.mjs"),
