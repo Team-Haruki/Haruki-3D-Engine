@@ -11,6 +11,7 @@ import {
   loadEngineConfig,
   resolveCaptureServerOptions,
 } from "./config/haruki-3d-engine-config.mjs";
+import { ensurePngRgba } from "./png-rgba.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -613,7 +614,7 @@ async function captureRoleParts(input) {
       await captureSession.restart(request.timeoutMs);
       result = await captureSession.capture(request);
     }
-    fs.writeFileSync(tempOutputPath, result.png);
+    fs.writeFileSync(tempOutputPath, ensurePngRgba(result.png));
     fs.renameSync(tempOutputPath, outputPath);
     return {
       imageId: request.imageId,
