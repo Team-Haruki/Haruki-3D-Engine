@@ -280,6 +280,29 @@ test("custom composer filters complete-head hair packages instead of stacking du
   assert.doesNotMatch(composerSource, /runtimes\.flatMap\(\(runtime\) => runtime\.materialSlots \?\? \[\]\)/);
 });
 
+test("custom composer emits preset-shaped grouped material slots", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /materialSlots:\s*\{/);
+  assert.match(composerSource, /body:\s*bodyAsset\.bodyMaterials/);
+  assert.match(composerSource, /head:\s*headAsset\.faceMaterials/);
+  assert.doesNotMatch(composerSource, /materialSlots:\s*contributorRuntimes\.flatMap/);
+});
+
+test("custom composer rejects stale part packages without material proxy metadata", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /assertPartRuntimeProxyMetadata/);
+  assert.match(composerSource, /missing manifest\.proxy material metadata/);
+  assert.match(composerSource, /Haruki-3D-Exporter/);
+});
+
 test("custom composer narrows SpringBone records to the active root for each part", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),

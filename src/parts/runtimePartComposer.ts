@@ -358,6 +358,8 @@ export function composeRuntimeCombinedCharacterAsset(
     ? requirePart(partSet, selection.characterId, selection.unit, "head_optional", selection.headOptionalCostume3dId)
     : null;
 
+  assertPartRuntimeProxyMetadata(body, "body");
+  assertPartRuntimeProxyMetadata(head, "head");
   assertSameRole(selection.characterId, selection.unit, [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[]);
   assertHeadHairCompatible(partSet.compatibility, selection);
   const allRuntimes = [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[];
@@ -464,6 +466,19 @@ function requirePart(
   }
   const runtime = partSet.packages.get(entry.packagePath);
   return runtime!;
+}
+
+function assertPartRuntimeProxyMetadata(
+  runtime: PartRuntimePackage,
+  expectedPartType: "body" | "head"
+) {
+  const manifest = isRecord(runtime.manifest) ? runtime.manifest : {};
+  const proxy = manifest.proxy ?? manifest.Proxy;
+  if (!isRecord(proxy)) {
+    throw new Error(
+      `Part runtime package '${runtime.packagePath ?? runtime.part.costume3dId}' is missing manifest.proxy material metadata for ${expectedPartType}; regenerate it with a current Haruki-3D-Exporter before capture.`
+    );
+  }
 }
 
 function findLoadedPart(
@@ -804,7 +819,11 @@ function composeRuntimeExtension(
     headAsset,
     bodyManifest: bodyAsset,
     headManifest: headAsset,
-    materialSlots: contributorRuntimes.flatMap((runtime) => runtime.materialSlots ?? []),
+    materialSlots: {
+      body: bodyAsset.bodyMaterials,
+      head: headAsset.faceMaterials,
+      accessory: [],
+    },
     textureRoles: contributorRuntimes.flatMap((runtime) => runtime.textureRoles ?? []),
     characterTextures: Object.assign({}, ...contributorRuntimes.map((runtime) => runtime.characterTextures ?? {})),
     nativeMeshes: mergeNativeMeshes(contributorRuntimes, runtimeSetup),
