@@ -39,17 +39,18 @@ export function ensurePngRgba(png) {
     throw new Error(`Unexpected PNG scanline length: ${inflated.length}, expected ${expectedLength}.`);
   }
 
+  const rgb = unfilterScanlines(inflated, width, height, 3);
   const rgba = Buffer.alloc(rgbaStride * height);
   for (let row = 0; row < height; row += 1) {
-    const sourceRow = row * rgbStride;
+    const sourceRow = row * width * 3;
     const targetRow = row * rgbaStride;
-    rgba[targetRow] = inflated[sourceRow];
+    rgba[targetRow] = 0;
     for (let x = 0; x < width; x += 1) {
-      const source = sourceRow + 1 + x * 3;
+      const source = sourceRow + x * 3;
       const target = targetRow + 1 + x * 4;
-      rgba[target] = inflated[source];
-      rgba[target + 1] = inflated[source + 1];
-      rgba[target + 2] = inflated[source + 2];
+      rgba[target] = rgb[source];
+      rgba[target + 1] = rgb[source + 1];
+      rgba[target + 2] = rgb[source + 2];
       rgba[target + 3] = 0xff;
     }
   }
@@ -107,6 +108,57 @@ function writeChunk(type, data) {
   data.copy(chunk, 8);
   chunk.writeUInt32BE(crc32(Buffer.concat([typeBuffer, data])), 8 + data.length);
   return chunk;
+}
+
+function unfilterScanlines(raw, width, height, bytesPerPixel) {
+  const rowLength = width * bytesPerPixel;
+  const stride = 1 + rowLength;
+  const decoded = Buffer.alloc(rowLength * height);
+  for (let row = 0; row < height; row += 1) {
+    const rawRow = row * stride;
+    const decodedRow = row * rowLength;
+    const filterType = raw[rawRow];
+    for (let i = 0; i < rowLength; i += 1) {
+      const value = raw[rawRow + 1 + i];
+      const left = i >= bytesPerPixel ? decoded[decodedRow + i - bytesPerPixel] : 0;
+      const up = row > 0 ? decoded[decodedRow - rowLength + i] : 0;
+      const upLeft = row > 0 && i >= bytesPerPixel ? decoded[decodedRow - rowLength + i - bytesPerPixel] : 0;
+      switch (filterType) {
+        case 0:
+          decoded[decodedRow + i] = value;
+          break;
+        case 1:
+          decoded[decodedRow + i] = (value + left) & 0xff;
+          break;
+        case 2:
+          decoded[decodedRow + i] = (value + up) & 0xff;
+          break;
+        case 3:
+          decoded[decodedRow + i] = (value + Math.floor((left + up) / 2)) & 0xff;
+          break;
+        case 4:
+          decoded[decodedRow + i] = (value + paeth(left, up, upLeft)) & 0xff;
+          break;
+        default:
+          throw new Error(`Unsupported PNG scanline filter: ${filterType}.`);
+      }
+    }
+  }
+  return decoded;
+}
+
+function paeth(left, up, upLeft) {
+  const estimate = left + up - upLeft;
+  const distanceLeft = Math.abs(estimate - left);
+  const distanceUp = Math.abs(estimate - up);
+  const distanceUpLeft = Math.abs(estimate - upLeft);
+  if (distanceLeft <= distanceUp && distanceLeft <= distanceUpLeft) {
+    return left;
+  }
+  if (distanceUp <= distanceUpLeft) {
+    return up;
+  }
+  return upLeft;
 }
 
 function crc32(buffer) {
