@@ -6437,6 +6437,9 @@ export class Haruki3DEngine {
         : [mesh.material];
       const meshKey = normalizeMeshSlotName(mesh.name);
       const meshSlots = slotEntries.filter((entry) => entry.meshKey === meshKey);
+      if (meshSlots.length === 0) {
+        return;
+      }
       const resolvedEntriesByIndex: Array<typeof slotEntries[number] | null> = [];
       const rebound = originalMaterials.map((original, index) => {
         const originalMaterialKey = typeof original.userData.pjskMaterialKey === "string"
@@ -6873,6 +6876,9 @@ export class Haruki3DEngine {
         : [mesh.material];
       const meshKey = normalizeMeshSlotName(mesh.name);
       const meshSlots = slotEntries.filter((entry) => entry.meshKey === meshKey);
+      if (meshSlots.length === 0) {
+        return;
+      }
       const resolvedEntriesByIndex: Array<typeof slotEntries[number] | null> = [];
       const rebound = originalMaterials.map((original, index) => {
         const originalMaterialKey = typeof original.userData.pjskMaterialKey === "string"
