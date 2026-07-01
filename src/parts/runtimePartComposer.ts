@@ -14,6 +14,14 @@ export type PartRegistryEntry = {
   characterId: number;
   unit?: string | null;
   name?: string | null;
+  colorId?: number | null;
+  colorName?: string | null;
+  costume3dGroupId?: number | null;
+  modelAssetbundleName?: string | null;
+  headCostume3dAssetbundleType?: string | null;
+  baseSourceKey?: string | null;
+  sourceKey?: string | null;
+  sourcePackagePath?: string | null;
   packagePath: string;
   status?: string;
 };
@@ -74,6 +82,10 @@ export type PartRuntimePackage = {
     characterId: number;
     unit?: string | null;
     name?: string | null;
+    colorId?: number | null;
+    colorName?: string | null;
+    costume3dGroupId?: number | null;
+    modelAssetbundleName?: string | null;
     headCostume3dAssetbundleType?: string | null;
   };
   mount?: Record<string, unknown>;
@@ -465,7 +477,49 @@ function requirePart(
     throw new Error(`Missing loaded ${partType} package for role ${runtimeRoleId(characterId, unit)}, costume3dId ${costume3dId}.`);
   }
   const runtime = partSet.packages.get(entry.packagePath);
-  return runtime!;
+  return withRegistryEntryRuntimeMetadata(runtime!, entry);
+}
+
+function withRegistryEntryRuntimeMetadata(
+  runtime: PartRuntimePackage,
+  entry: PartRegistryEntry
+): PartRuntimePackage {
+  const partType = tryNormalizeRuntimePartType(entry.partType) ?? runtime.part.partType;
+  const manifest = isRecord(runtime.manifest)
+    ? cloneRecord(runtime.manifest)
+    : runtime.manifest;
+  if (isRecord(manifest)) {
+    manifest.id = `${partType}-${entry.characterId}-${entry.costume3dId}-${entry.unit ?? "default"}`;
+    manifest.displayName = entry.name ?? readOptionalString(manifest.displayName) ?? manifest.id;
+    manifest.characterId = String(entry.characterId).padStart(2, "0");
+    manifest.characterHeightMeters = resolveRuntimePartCharacterHeightMeters(entry.characterId);
+  }
+
+  return {
+    ...runtime,
+    packagePath: entry.packagePath,
+    part: {
+      ...runtime.part,
+      costume3dId: entry.costume3dId,
+      partType,
+      characterId: entry.characterId,
+      unit: entry.unit,
+      name: entry.name ?? runtime.part.name,
+      colorId: typeof entry.colorId === "number" ? entry.colorId : runtime.part.colorId,
+      colorName: entry.colorName ?? runtime.part.colorName,
+      costume3dGroupId: typeof entry.costume3dGroupId === "number"
+        ? entry.costume3dGroupId
+        : runtime.part.costume3dGroupId,
+      modelAssetbundleName: entry.modelAssetbundleName ?? runtime.part.modelAssetbundleName,
+      headCostume3dAssetbundleType: entry.headCostume3dAssetbundleType ?? runtime.part.headCostume3dAssetbundleType,
+    },
+    manifest,
+    mount: {
+      ...(runtime.mount ?? {}),
+      packagePath: entry.packagePath,
+      expectedSkeletonId: String(entry.characterId).padStart(2, "0"),
+    },
+  };
 }
 
 function assertPartRuntimeProxyMetadata(

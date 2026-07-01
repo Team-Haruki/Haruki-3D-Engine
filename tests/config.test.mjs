@@ -502,6 +502,20 @@ test("part runtime loader preserves registry package path on loaded packages", (
 
   assert.match(loaderSource, /withPartRuntimePackagePath/);
   assert.match(loaderSource, /packagePath:\s*entry\.packagePath/);
+  assert.match(loaderSource, /const key = entry\.packagePath/);
+});
+
+test("part composer applies registry identity over shared source packages", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /withRegistryEntryRuntimeMetadata/);
+  assert.match(composerSource, /costume3dId:\s*entry\.costume3dId/);
+  assert.match(composerSource, /characterId:\s*entry\.characterId/);
+  assert.match(composerSource, /manifest\.characterHeightMeters\s*=\s*resolveRuntimePartCharacterHeightMeters\(entry\.characterId\)/);
+  assert.match(composerSource, /expectedSkeletonId:\s*String\(entry\.characterId\)\.padStart/);
 });
 
 test("part composer resolves material textures relative to each source package", () => {

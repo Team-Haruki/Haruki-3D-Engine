@@ -412,7 +412,7 @@ function selectPartRuntimeCandidates(
     if (!entry || entry.status === "missing") {
       return;
     }
-    const key = `${entry.characterId}|${entry.partType}|${entry.costume3dId}|${entry.packagePath}`;
+    const key = entry.packagePath;
     if (seen.has(key)) {
       return;
     }
