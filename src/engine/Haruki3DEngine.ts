@@ -4682,34 +4682,6 @@ export class Haruki3DEngine {
     this.sceneReference.visible = false;
   }
 
-  frameCurrentCharacterForCapture() {
-    const bounds = new THREE.Box3();
-    let hasBounds = false;
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.updateMatrixWorld(true);
-      slot.traverse((object) => {
-        if (!object.visible || !(object instanceof THREE.Mesh)) {
-          return;
-        }
-        bounds.expandByObject(object);
-        hasBounds = true;
-      });
-    }
-    if (!hasBounds || bounds.isEmpty()) {
-      return;
-    }
-
-    const center = bounds.getCenter(new THREE.Vector3());
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    const nextTarget = this.controls.target.clone();
-    nextTarget.x = center.x;
-    nextTarget.z = center.z;
-    this.controls.target.copy(nextTarget);
-    this.camera.position.copy(nextTarget).add(offset);
-    this.controls.update();
-    this.cameraDebugChangeCallback?.();
-  }
-
   stepCaptureFrame(delta: number, advanceAnimation: boolean) {
     const stepDelta = Math.max(0, delta);
     if (advanceAnimation) {
@@ -4938,10 +4910,8 @@ export class Haruki3DEngine {
       this.setAnimationPaused(true);
     }
 
-    this.stepCaptureFrame(0, false);
-    this.frameCurrentCharacterForCapture();
     this.applyCameraPreset(request.cameraPreset ?? "capture");
-    this.shiftCameraRight(1);
+    this.stepCaptureFrame(0, false);
     this.renderFrame();
   }
 
