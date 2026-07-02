@@ -8,6 +8,8 @@
     "timeoutMs": 45000,
     "phase": 0.5,
     "clip": "motion_loop",
+    "warmupFrames": 60,
+    "warmupMode": "animation",
     "springRuntimeMode": "unity-prefab",
     "cameraPreset": "capture",
     "tempTtl": "6h",
