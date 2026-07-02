@@ -56,10 +56,15 @@ export function resolveCaptureServerOptions(config, env = process.env) {
     defaultWarmupFrames: intAtLeast(env.HARUKI_CAPTURE_WARMUP_FRAMES, capture.warmupFrames, 0, 0),
     defaultWarmupMode: stringValue(env.HARUKI_CAPTURE_WARMUP_MODE, capture.warmupMode, "animation"),
     defaultSpringRuntimeMode: springRuntimeMode(
+      env.HARUKI_CAPTURE_SPRING_RUNTIME_MODE,
       env.HARUKI_SPRING_RUNTIME_MODE,
       capture.springRuntimeMode
     ),
-    defaultCameraPreset: cameraPreset(env.HARUKI_CAMERA_PRESET, capture.cameraPreset),
+    defaultCameraPreset: cameraPreset(
+      env.HARUKI_CAPTURE_CAMERA_PRESET,
+      env.HARUKI_CAMERA_PRESET,
+      capture.cameraPreset
+    ),
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
     captureGCIntervalMs: durationMsAtLeast(env.HARUKI_CAPTURE_GC_INTERVAL, capture.gcInterval, "1h", 0),
   };

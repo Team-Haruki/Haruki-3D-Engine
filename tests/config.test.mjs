@@ -67,6 +67,18 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(server.captureGCIntervalMs, 15 * 60 * 1000);
 });
 
+test("capture server accepts documented HARUKI_CAPTURE camera and spring env names", () => {
+  const server = resolveCaptureServerOptions({}, {
+    HARUKI_CAPTURE_SPRING_RUNTIME_MODE: "off",
+    HARUKI_SPRING_RUNTIME_MODE: "unity-prefab",
+    HARUKI_CAPTURE_CAMERA_PRESET: "default",
+    HARUKI_CAMERA_PRESET: "capture",
+  });
+
+  assert.equal(server.defaultSpringRuntimeMode, "off");
+  assert.equal(server.defaultCameraPreset, "default");
+});
+
 test("runtime package loader prefers gzip JSON packages with plain JSON fallback", () => {
   const loaderSource = fs.readFileSync(
     path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
@@ -140,6 +152,12 @@ test("docker runtime image includes capture server support modules", () => {
 
   assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);
   assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1400/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1000/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_SCALE=2/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_WARMUP_FRAMES=60/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_SPRING_RUNTIME_MODE=unity-prefab/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_CAMERA_PRESET=capture/);
 });
 
 test("role parts capture supports warmup frames for spring runtime settling", () => {
