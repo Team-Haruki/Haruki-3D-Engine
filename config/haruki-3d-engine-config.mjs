@@ -66,6 +66,7 @@ export function resolveCaptureServerOptions(config, env = process.env) {
       capture.cameraPreset
     ),
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
+    tempCaptureMaxBytes: sizeBytesAtLeast(env.HARUKI_CAPTURE_TEMP_MAX_BYTES, capture.tempMaxBytes, "10GB", 0),
     captureGCIntervalMs: durationMsAtLeast(env.HARUKI_CAPTURE_GC_INTERVAL, capture.gcInterval, "1h", 0),
     idleShutdownMs: durationMsAtLeast(env.HARUKI_CAPTURE_IDLE_SHUTDOWN, capture.idleShutdown, "1h", 0),
   };
@@ -107,6 +108,11 @@ function durationMsAtLeast(primary, secondary, fallback, min) {
   return Math.max(Math.trunc(value), min);
 }
 
+function sizeBytesAtLeast(primary, secondary, fallback, min) {
+  const value = sizeBytesValue(primary, secondary, fallback);
+  return Math.max(Math.trunc(value), min);
+}
+
 function durationMsValue(...values) {
   for (const value of values) {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -128,6 +134,43 @@ function durationMsValue(...values) {
     const unit = match[2].toLowerCase();
     const multiplier = unit === "h" ? 3600000 : unit === "m" ? 60000 : unit === "s" ? 1000 : 1;
     return amount * multiplier;
+  }
+  return 0;
+}
+
+function sizeBytesValue(...values) {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+    const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*([kmgt]?i?b?)?$/i);
+    if (!match) {
+      continue;
+    }
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) {
+      continue;
+    }
+    const unit = (match[2] || "b").toLowerCase();
+    const multipliers = {
+      b: 1,
+      kb: 1000,
+      mb: 1000 ** 2,
+      gb: 1000 ** 3,
+      tb: 1000 ** 4,
+      kib: 1024,
+      mib: 1024 ** 2,
+      gib: 1024 ** 3,
+      tib: 1024 ** 4,
+      k: 1000,
+      m: 1000 ** 2,
+      g: 1000 ** 3,
+      t: 1000 ** 4,
+    };
+    return amount * (multipliers[unit] ?? 1);
   }
   return 0;
 }

@@ -227,6 +227,7 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
 test("capture server supports temporary cache mode and GC configuration", () => {
   const server = resolveCaptureServerOptions({}, {
     HARUKI_CAPTURE_TEMP_TTL: "6h",
+    HARUKI_CAPTURE_TEMP_MAX_BYTES: "512MB",
     HARUKI_CAPTURE_GC_INTERVAL: "1h",
   });
   const serverSource = fs.readFileSync(
@@ -235,6 +236,7 @@ test("capture server supports temporary cache mode and GC configuration", () => 
   );
 
   assert.equal(server.tempCaptureTtlMs, 6 * 60 * 60 * 1000);
+  assert.equal(server.tempCaptureMaxBytes, 512 * 1000 * 1000);
   assert.equal(server.captureGCIntervalMs, 60 * 60 * 1000);
   assert.match(serverSource, /cacheMode = input\.cacheMode === "temporary" \? "temporary" : "persistent"/);
   assert.match(serverSource, /if \(imageId === ""\)/);
@@ -242,6 +244,7 @@ test("capture server supports temporary cache mode and GC configuration", () => 
   assert.match(serverSource, /const expiresAt = Date\.now\(\) \+ request\.ttlMs/);
   assert.match(serverSource, /fs\.utimesSync\(outputPath, gcRelativeMtime, gcRelativeMtime\)/);
   assert.match(serverSource, /cleanupExpiredTemporaryCaptures\(Date\.now\(\)\)/);
+  assert.match(serverSource, /total <= tempCaptureMaxBytes/);
   assert.ok(serverSource.includes('/^tmp_[A-Za-z0-9._-]+\\.png$/'));
 });
 

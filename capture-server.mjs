@@ -33,6 +33,7 @@ const {
   defaultSpringRuntimeMode,
   defaultCameraPreset,
   tempCaptureTtlMs,
+  tempCaptureMaxBytes,
   captureGCIntervalMs,
   idleShutdownMs,
 } = resolveCaptureServerOptions(engineConfig);
@@ -760,6 +761,7 @@ server.listen(port, "0.0.0.0", () => {
     captureOutputDir,
     chromium: chromiumPath,
     tempCaptureTtlMs,
+    tempCaptureMaxBytes,
     captureGCIntervalMs,
     idleShutdownMs,
   }));
@@ -772,7 +774,7 @@ server.listen(port, "0.0.0.0", () => {
 });
 
 function startTemporaryCaptureGC() {
-  if (captureGCIntervalMs <= 0 || tempCaptureTtlMs <= 0) {
+  if (captureGCIntervalMs <= 0 || (tempCaptureTtlMs <= 0 && tempCaptureMaxBytes <= 0)) {
     return;
   }
   const cleanup = () => {
@@ -795,16 +797,39 @@ async function cleanupExpiredTemporaryCaptures(nowMs) {
     }
     throw error;
   }
-  await Promise.all(entries
-    .filter((entry) => entry.isFile() && /^tmp_[A-Za-z0-9._-]+\.png$/.test(entry.name))
-    .map(async (entry) => {
-      const filePath = path.join(captureOutputDir, entry.name);
-      const stat = await fs.promises.stat(filePath);
-      if (nowMs - stat.mtimeMs <= tempCaptureTtlMs) {
-        return;
+  const files = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^tmp_[A-Za-z0-9._-]+\.png$/.test(entry.name)) {
+      continue;
+    }
+    const filePath = path.join(captureOutputDir, entry.name);
+    let stat;
+    try {
+      stat = await fs.promises.stat(filePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        continue;
       }
+      throw error;
+    }
+    if (tempCaptureTtlMs > 0 && nowMs - stat.mtimeMs > tempCaptureTtlMs) {
       await fs.promises.rm(filePath, { force: true });
-    }));
+      continue;
+    }
+    files.push({ filePath, mtimeMs: stat.mtimeMs, size: stat.size });
+  }
+  if (tempCaptureMaxBytes <= 0) {
+    return;
+  }
+  let total = files.reduce((sum, file) => sum + file.size, 0);
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  for (const file of files) {
+    if (total <= tempCaptureMaxBytes) {
+      break;
+    }
+    await fs.promises.rm(file.filePath, { force: true });
+    total -= file.size;
+  }
 }
 
 async function shutdown(signal) {
