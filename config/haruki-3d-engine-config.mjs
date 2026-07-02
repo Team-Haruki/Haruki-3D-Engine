@@ -66,7 +66,7 @@ export function resolveCaptureServerOptions(config, env = process.env) {
       capture.cameraPreset
     ),
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
-    tempCaptureMaxBytes: sizeBytesAtLeast(env.HARUKI_CAPTURE_TEMP_MAX_BYTES, capture.tempMaxBytes, "5GB", 0),
+    tempCaptureMaxBytes: sizeBytesAtLeast(env.HARUKI_CAPTURE_TEMP_MAX_BYTES, capture.tempMaxBytes, "2.5GB", 0),
     captureGCIntervalMs: durationMsAtLeast(env.HARUKI_CAPTURE_GC_INTERVAL, capture.gcInterval, "1h", 0),
     idleShutdownMs: durationMsAtLeast(env.HARUKI_CAPTURE_IDLE_SHUTDOWN, capture.idleShutdown, "1h", 0),
   };

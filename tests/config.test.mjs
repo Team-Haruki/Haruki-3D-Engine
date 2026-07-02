@@ -245,6 +245,8 @@ test("capture server supports temporary cache mode and GC configuration", () => 
   assert.match(serverSource, /fs\.utimesSync\(outputPath, gcRelativeMtime, gcRelativeMtime\)/);
   assert.match(serverSource, /cleanupExpiredTemporaryCaptures\(Date\.now\(\)\)/);
   assert.match(serverSource, /total <= tempCaptureMaxBytes/);
+  assert.match(serverSource, /createdMs: Number\.isFinite\(stat\.birthtimeMs\) \? stat\.birthtimeMs : stat\.ctimeMs/);
+  assert.match(serverSource, /files\.sort\(\(a, b\) => a\.createdMs - b\.createdMs\)/);
   assert.ok(serverSource.includes('/^tmp_[A-Za-z0-9._-]+\\.png$/'));
 });
 

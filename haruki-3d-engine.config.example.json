@@ -13,7 +13,7 @@
     "springRuntimeMode": "unity-prefab",
     "cameraPreset": "capture",
     "tempTtl": "6h",
-    "tempMaxBytes": "5GB",
+    "tempMaxBytes": "2.5GB",
     "gcInterval": "1h"
   },
   "chromium": {

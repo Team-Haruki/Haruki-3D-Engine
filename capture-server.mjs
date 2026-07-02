@@ -816,13 +816,17 @@ async function cleanupExpiredTemporaryCaptures(nowMs) {
       await fs.promises.rm(filePath, { force: true });
       continue;
     }
-    files.push({ filePath, mtimeMs: stat.mtimeMs, size: stat.size });
+    files.push({
+      filePath,
+      createdMs: Number.isFinite(stat.birthtimeMs) ? stat.birthtimeMs : stat.ctimeMs,
+      size: stat.size,
+    });
   }
   if (tempCaptureMaxBytes <= 0) {
     return;
   }
   let total = files.reduce((sum, file) => sum + file.size, 0);
-  files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  files.sort((a, b) => a.createdMs - b.createdMs);
   for (const file of files) {
     if (total <= tempCaptureMaxBytes) {
       break;
