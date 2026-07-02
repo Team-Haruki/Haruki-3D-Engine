@@ -54,6 +54,11 @@ export function parseArgs(argv) {
     traceOut: "",
     chromium: "",
     configPath: "",
+    roleId: "",
+    bodyCostume3dId: undefined,
+    headCostume3dId: undefined,
+    hairCostume3dId: undefined,
+    headOptionalCostume3dId: undefined,
     build: false,
   };
 
@@ -125,6 +130,16 @@ export function parseArgs(argv) {
       options.chromium = readValue();
     } else if (arg === "--config") {
       options.configPath = readValue();
+    } else if (arg === "--role-id") {
+      options.roleId = readValue();
+    } else if (arg === "--body-costume3d-id") {
+      options.bodyCostume3dId = Number(readValue());
+    } else if (arg === "--head-costume3d-id") {
+      options.headCostume3dId = Number(readValue());
+    } else if (arg === "--hair-costume3d-id") {
+      options.hairCostume3dId = Number(readValue());
+    } else if (arg === "--head-optional-costume3d-id") {
+      options.headOptionalCostume3dId = Number(readValue());
     } else if (arg === "--build") {
       options.build = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -199,6 +214,34 @@ export function parseArgs(argv) {
   if (!renderIsolationModes.has(options.renderIsolation)) {
     throw new Error(`Invalid --render-isolation ${options.renderIsolation}`);
   }
+  const partCaptureFields = [
+    options.roleId,
+    options.bodyCostume3dId,
+    options.headCostume3dId,
+    options.hairCostume3dId,
+    options.headOptionalCostume3dId,
+  ];
+  options.partCapture = partCaptureFields.some((value) => value !== "" && value !== undefined);
+  if (options.partCapture) {
+    if (!options.roleId) {
+      throw new Error("Missing --role-id for part-registry capture.");
+    }
+    for (const [name, value] of [
+      ["--body-costume3d-id", options.bodyCostume3dId],
+      ["--head-costume3d-id", options.headCostume3dId],
+      ["--hair-costume3d-id", options.hairCostume3dId],
+    ]) {
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`Missing or invalid ${name} for part-registry capture.`);
+      }
+    }
+    if (
+      options.headOptionalCostume3dId !== undefined &&
+      (!Number.isInteger(options.headOptionalCostume3dId) || options.headOptionalCostume3dId <= 0)
+    ) {
+      throw new Error("Invalid --head-optional-costume3d-id for part-registry capture.");
+    }
+  }
   options.input = path.resolve(options.input);
   options.out = path.resolve(options.out || path.join(process.cwd(), "capture.png"));
   options.outDir = options.outDir ? path.resolve(options.outDir) : "";
@@ -242,6 +285,15 @@ Options:
   --trace-out <json>   Write only snapshot.utjSpringBoneTrace to a JSON file
   --chromium <path>    Chromium executable. Default: chromium
   --config <json>      Config file. Default: haruki-3d-engine.config.json
+  --role-id <id>       Part-registry capture role, formatted as <characterId>:<unit>
+  --body-costume3d-id <id>
+                       Part-registry body costume3d id
+  --head-costume3d-id <id>
+                       Part-registry head costume3d id
+  --hair-costume3d-id <id>
+                       Part-registry hair costume3d id
+  --head-optional-costume3d-id <id>
+                       Optional part-registry accessory/head_optional costume3d id
   --build              Run npm run build before capture
 `);
 }
@@ -252,6 +304,18 @@ function assertConverterPackage(inputDir) {
     throw new Error(
       `Capture requires a full runtime package: missing ${runtimePath}`
     );
+  }
+}
+
+function assertPartRegistryPackage(inputDir) {
+  const registryPath = path.join(inputDir, "parts", "part-registry.json");
+  const characterIndexPath = path.join(inputDir, "character3d-index.json");
+  for (const filePath of [registryPath, characterIndexPath]) {
+    if (!fs.existsSync(filePath) && !fs.existsSync(`${filePath}.gz`)) {
+      throw new Error(
+        `Part-registry capture requires ${filePath} or ${filePath}.gz`
+      );
+    }
   }
 }
 
@@ -613,8 +677,41 @@ async function waitForCaptureReady(client, timeoutMs) {
   throw new Error("Timed out waiting for capture harness readiness.");
 }
 
+async function evaluateCaptureRequest(client, options) {
+  const request = {
+    roleId: options.roleId,
+    bodyCostume3dId: options.bodyCostume3dId,
+    headCostume3dId: options.headCostume3dId,
+    hairCostume3dId: options.hairCostume3dId,
+    headOptionalCostume3dId: options.headOptionalCostume3dId ?? null,
+    imageId: options.imageId || undefined,
+    phase: options.phase,
+    warmupFrames: options.warmupFrames,
+    warmupMode: options.warmupMode,
+    cameraPreset: options.cameraPreset,
+    traceUtjBones: options.traceUtjBones,
+    traceUtjMaxEvents: options.traceUtjMaxEvents,
+  };
+  const result = await client.send("Runtime.evaluate", {
+    expression: `window.__HARUKI_CAPTURE_REQUEST__(${JSON.stringify(request)}).then((result) => result.snapshots)`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (result.exceptionDetails) {
+    const text = result.exceptionDetails.exception?.description ??
+      result.exceptionDetails.text ??
+      "Part-registry capture request failed.";
+    throw new Error(text);
+  }
+  return result.result?.value ?? null;
+}
+
 async function capture(options) {
-  assertConverterPackage(options.input);
+  if (options.partCapture) {
+    assertPartRegistryPackage(options.input);
+  } else {
+    assertConverterPackage(options.input);
+  }
   maybeBuildDist(options.build);
   const outputPath = buildOutputPath(options);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -640,7 +737,7 @@ async function capture(options) {
     `&renderIsolation=${encodeURIComponent(options.renderIsolation)}` +
     `&springRuntimeMode=${encodeURIComponent(options.springRuntimeMode)}` +
     `&cameraPreset=${encodeURIComponent(options.cameraPreset)}` +
-    `&captureFullRuntimeOnly=true` +
+    `&captureFullRuntimeOnly=${options.partCapture ? "false" : "true"}` +
     `&utjTraceMaxEvents=${options.traceUtjMaxEvents}` +
     options.traceUtjBones.map((filter) => `&utjTraceBone=${encodeURIComponent(filter)}`).join("") +
     (options.yaw ? `&characterYawMode=${encodeURIComponent(options.yaw)}` : "");
@@ -665,6 +762,10 @@ async function capture(options) {
   ], {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const chromiumStarted = new Promise((resolve, reject) => {
+    chromium.once("spawn", resolve);
+    chromium.once("error", reject);
+  });
   let chromiumLog = "";
   chromium.stderr.on("data", (chunk) => {
     chromiumLog += chunk.toString("utf8");
@@ -672,6 +773,7 @@ async function capture(options) {
 
   let client;
   try {
+    await chromiumStarted;
     const target = await waitForPageTarget(debugPort, pageUrl, options.timeoutMs);
     client = new DevToolsSocket(target.webSocketDebuggerUrl);
     await client.connect();
@@ -684,7 +786,10 @@ async function capture(options) {
       mobile: false,
     });
     await client.send("Page.navigate", { url: pageUrl });
-    const snapshot = await waitForCaptureReady(client, options.timeoutMs);
+    let snapshot = await waitForCaptureReady(client, options.timeoutMs);
+    if (options.partCapture) {
+      snapshot = await evaluateCaptureRequest(client, options);
+    }
     await client.send("Runtime.evaluate", {
       expression: "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
       awaitPromise: true,
@@ -711,6 +816,8 @@ async function capture(options) {
       width: options.width,
       height: options.height,
       scale: options.scale,
+      partCapture: options.partCapture,
+      roleId: options.partCapture ? options.roleId : null,
       snapshot,
     }, null, 2));
   } catch (error) {

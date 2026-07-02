@@ -79,6 +79,38 @@ test("runtime package loader prefers gzip JSON packages with plain JSON fallback
   assert.ok(loaderSource.includes('const response = await fetch(url, { cache: "no-store" })'));
 });
 
+test("capture runtime accepts part-registry role capture options", () => {
+  const options = parseArgs([
+    "--input", "/tmp/input",
+    "--out", "/tmp/out.png",
+    "--role-id", "5:light_sound",
+    "--body-costume3d-id", "2",
+    "--head-costume3d-id", "3",
+    "--hair-costume3d-id", "4",
+    "--head-optional-costume3d-id", "9",
+  ]);
+
+  assert.equal(options.partCapture, true);
+  assert.equal(options.roleId, "5:light_sound");
+  assert.equal(options.bodyCostume3dId, 2);
+  assert.equal(options.headCostume3dId, 3);
+  assert.equal(options.hairCostume3dId, 4);
+  assert.equal(options.headOptionalCostume3dId, 9);
+});
+
+test("capture runtime rejects incomplete part-registry capture options", () => {
+  assert.throws(
+    () => parseArgs([
+      "--input", "/tmp/input",
+      "--out", "/tmp/out.png",
+      "--role-id", "5:light_sound",
+      "--body-costume3d-id", "2",
+      "--head-costume3d-id", "3",
+    ]),
+    /Missing or invalid --hair-costume3d-id/
+  );
+});
+
 test("persistent capture server propagates config defaults into role parts capture", () => {
   const serverSource = fs.readFileSync(
     path.join(repoRoot, "capture-server.mjs"),
