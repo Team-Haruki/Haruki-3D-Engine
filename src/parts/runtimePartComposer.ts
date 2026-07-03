@@ -347,8 +347,8 @@ export function listSelectableParts(
     .filter((entry) => entry.characterId === characterId)
     .filter((entry) => options.unit === undefined || sameUnit(entry.unit, options.unit))
     .filter((entry) => tryNormalizeRuntimePartType(entry.partType) === partType)
-    .filter((entry) => entry.status !== "missing")
-    .filter((entry) => !options.loadedOnly || partSet.packages.has(entry.packagePath))
+    .filter(isUsableRegistryEntry)
+    .filter((entry) => !options.loadedOnly || isEmptyHeadOptionalEntry(entry) || partSet.packages.has(entry.packagePath))
     .sort((left, right) => left.costume3dId - right.costume3dId);
 }
 
@@ -366,9 +366,7 @@ export function composeRuntimeCombinedCharacterAsset(
   const body = requirePart(partSet, selection.characterId, selection.unit, "body", selection.bodyCostume3dId);
   const head = requirePart(partSet, selection.characterId, selection.unit, "head", selection.headCostume3dId);
   const hair = requirePart(partSet, selection.characterId, selection.unit, "hair", selection.hairCostume3dId);
-  const optional = selection.headOptionalCostume3dId
-    ? requirePart(partSet, selection.characterId, selection.unit, "head_optional", selection.headOptionalCostume3dId)
-    : null;
+  const optional = resolveOptionalHeadRuntime(partSet, selection);
 
   assertPartRuntimeProxyMetadata(body, "body");
   assertPartRuntimeProxyMetadata(head, "head");
@@ -451,7 +449,8 @@ function hasLoadedPart(
   partType: RuntimePartType,
   costume3dId: number
 ) {
-  return Boolean(findLoadedPart(partSet, characterId, unit, partType, costume3dId));
+  const entry = findRegistryPart(partSet, characterId, unit, partType, costume3dId);
+  return Boolean(entry && (isEmptyHeadOptionalEntry(entry) || partSet.packages.has(entry.packagePath)));
 }
 
 function hasCompletePresetParts(entry: Character3dIndexEntry): entry is Character3dIndexEntry & {
@@ -478,6 +477,31 @@ function requirePart(
   }
   const runtime = partSet.packages.get(entry.packagePath);
   return withRegistryEntryRuntimeMetadata(runtime!, entry);
+}
+
+function resolveOptionalHeadRuntime(
+  partSet: PartPackageSet,
+  selection: CustomPartSelection
+): PartRuntimePackage | null {
+  if (!selection.headOptionalCostume3dId) {
+    return null;
+  }
+
+  const entry = findRegistryPart(
+    partSet,
+    selection.characterId,
+    selection.unit,
+    "head_optional",
+    selection.headOptionalCostume3dId
+  );
+  if (!entry) {
+    throw new Error(`Missing loaded head_optional package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headOptionalCostume3dId}.`);
+  }
+  if (isEmptyHeadOptionalEntry(entry)) {
+    return null;
+  }
+
+  return requirePart(partSet, selection.characterId, selection.unit, "head_optional", selection.headOptionalCostume3dId);
 }
 
 function withRegistryEntryRuntimeMetadata(
@@ -542,15 +566,34 @@ function findLoadedPart(
   partType: RuntimePartType,
   costume3dId: number
 ) {
+  const entry = findRegistryPart(partSet, characterId, unit, partType, costume3dId);
+  return entry && partSet.packages.has(entry.packagePath) ? entry : undefined;
+}
+
+function findRegistryPart(
+  partSet: PartPackageSet,
+  characterId: number,
+  unit: string | null | undefined,
+  partType: RuntimePartType,
+  costume3dId: number
+) {
   return partSet.registry.find(
     (candidate) =>
       candidate.characterId === characterId &&
       sameUnit(candidate.unit, unit) &&
       candidate.costume3dId === costume3dId &&
       tryNormalizeRuntimePartType(candidate.partType) === partType &&
-      candidate.status !== "missing" &&
-      partSet.packages.has(candidate.packagePath)
+      isUsableRegistryEntry(candidate)
   );
+}
+
+function isUsableRegistryEntry(entry: PartRegistryEntry) {
+  return entry.status !== "missing";
+}
+
+function isEmptyHeadOptionalEntry(entry: PartRegistryEntry) {
+  return entry.status === "empty" &&
+    tryNormalizeRuntimePartType(entry.partType) === "head_optional";
 }
 
 function assertSameRole(characterId: number, unit: string | null | undefined, packages: PartRuntimePackage[]) {

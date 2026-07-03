@@ -495,11 +495,11 @@ function selectPartRuntimeCandidates(
   const indexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
   const preferredCharacterId = indexEntries.find((entry) =>
     typeof entry.characterId === "number"
-  )?.characterId ?? registry.find((entry) => entry.status !== "missing")?.characterId ?? null;
+  )?.characterId ?? registry.find(isLoadableRegistryEntry)?.characterId ?? null;
   const ordered: PartRegistryEntry[] = [];
   const seen = new Set<string>();
   const addEntry = (entry: PartRegistryEntry | undefined) => {
-    if (!entry || entry.status === "missing") {
+    if (!entry || !isLoadableRegistryEntry(entry)) {
       return;
     }
     const key = entry.packagePath;
@@ -519,7 +519,7 @@ function selectPartRuntimeCandidates(
     entry.costume3dId === costume3dId &&
     tryNormalizeRuntimePartType(entry.partType) === partType &&
     (unit === undefined || entry.unit === unit) &&
-    entry.status !== "missing"
+    isUsableRegistryEntry(entry)
   );
   const deniedHeadHairKeys = buildDeniedHeadHairKeys(compatibility);
 
@@ -545,7 +545,7 @@ function selectPartRuntimeCandidates(
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
         tryNormalizeRuntimePartType(entry.partType) === "body" &&
-        entry.status !== "missing"
+        isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId)[0]);
 
@@ -553,14 +553,14 @@ function selectPartRuntimeCandidates(
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
         tryNormalizeRuntimePartType(entry.partType) === "head" &&
-        entry.status !== "missing"
+        isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId);
     const hairs = registry
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
         tryNormalizeRuntimePartType(entry.partType) === "hair" &&
-        entry.status !== "missing"
+        isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId);
     for (const head of heads) {
@@ -592,7 +592,7 @@ function selectPartRuntimeCandidates(
   }
 
   const scored = registry
-    .filter((entry) => entry.status !== "missing")
+    .filter(isLoadableRegistryEntry)
     .filter((entry) => {
       const key = `${entry.characterId}|${entry.partType}|${entry.costume3dId}|${entry.packagePath}`;
       return !seen.has(key);
@@ -608,6 +608,14 @@ function selectPartRuntimeCandidates(
     }))
     .sort((left, right) => left.score - right.score || left.index - right.index);
   return [...ordered, ...scored.map((item) => item.entry)];
+}
+
+function isUsableRegistryEntry(entry: PartRegistryEntry) {
+  return entry.status !== "missing";
+}
+
+function isLoadableRegistryEntry(entry: PartRegistryEntry) {
+  return isUsableRegistryEntry(entry) && entry.status !== "empty";
 }
 
 function hasUsableCustomPartSelection(

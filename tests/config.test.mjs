@@ -612,6 +612,17 @@ test("part runtime loader preserves registry package path on loaded packages", (
   assert.match(loaderSource, /const key = entry\.packagePath/);
 });
 
+test("part runtime loader skips empty head optional registry packages", () => {
+  const loaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
+    "utf8"
+  );
+
+  assert.match(loaderSource, /isLoadableRegistryEntry/);
+  assert.match(loaderSource, /entry\.status !== "empty"/);
+  assert.match(loaderSource, /if \(!entry \|\| !isLoadableRegistryEntry\(entry\)\)/);
+});
+
 test("part composer applies registry identity over shared source packages", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
@@ -623,6 +634,17 @@ test("part composer applies registry identity over shared source packages", () =
   assert.match(composerSource, /characterId:\s*entry\.characterId/);
   assert.match(composerSource, /manifest\.characterHeightMeters\s*=\s*resolveRuntimePartCharacterHeightMeters\(entry\.characterId\)/);
   assert.match(composerSource, /expectedSkeletonId:\s*String\(entry\.characterId\)\.padStart/);
+});
+
+test("part composer treats empty head optional slots as no-op selections", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /resolveOptionalHeadRuntime/);
+  assert.match(composerSource, /isEmptyHeadOptionalEntry\(entry\)/);
+  assert.match(composerSource, /return null/);
 });
 
 test("part composer resolves material textures relative to each source package", () => {
