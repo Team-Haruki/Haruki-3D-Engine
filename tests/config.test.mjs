@@ -450,6 +450,23 @@ test("custom composer emits preset-shaped grouped material slots", () => {
   assert.doesNotMatch(composerSource, /materialSlots:\s*contributorRuntimes\.flatMap/);
 });
 
+test("custom selection mutations are serialized and skip exact resolved reimports", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /private customSelectionQueue: Promise<unknown> = Promise\.resolve\(\)/);
+  assert.match(engineSource, /private enqueueCustomSelectionMutation<T>/);
+  assert.match(engineSource, /this\.customSelectionQueue\.then\(operation, operation\)/);
+  assert.match(engineSource, /private async applyCustomSelection/);
+  assert.match(engineSource, /previousCombinedId === combined\.id/);
+  assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined\)/);
+  assert.match(engineSource, /sameResolvedSelection[\s\S]*this\.resetAndSettleCurrentSpringRuntime\(\)/);
+  assert.match(engineSource, /private async captureRolePartsInternal/);
+  assert.doesNotMatch(engineSource, /await this\.setCustomSelection\(selection\)/);
+});
+
 test("custom composer rejects stale part packages without material proxy metadata", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),

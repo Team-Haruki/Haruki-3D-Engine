@@ -3604,6 +3604,7 @@ export class Haruki3DEngine {
   private captureBackgroundTexture: THREE.CanvasTexture | null = null;
   private animationFrame = 0;
   private importRevision = 0;
+  private customSelectionQueue: Promise<unknown> = Promise.resolve();
   private currentBodyAsset: BodyAssetManifest | null = null;
   private currentHeadAsset: HeadAssetManifest | null = null;
   private currentImportIsCombined = false;
@@ -4696,11 +4697,15 @@ export class Haruki3DEngine {
     }
     const isEnabled = this.isSpringRuntimeEnabled();
     if (isEnabled) {
-      this.currentSpringRuntime?.resetStateToCurrentPose();
-      this.currentSpringRuntime?.settleCurrentPose();
+      this.resetAndSettleCurrentSpringRuntime();
     } else if (wasEnabled) {
       this.currentSpringRuntime?.resetPose();
     }
+  }
+
+  private resetAndSettleCurrentSpringRuntime() {
+    this.currentSpringRuntime?.resetStateToCurrentPose();
+    this.currentSpringRuntime?.settleCurrentPose();
   }
 
   private isSpringRuntimeEnabled(): boolean {
@@ -4905,15 +4910,71 @@ export class Haruki3DEngine {
   async setCustomSelection(
     selection: CustomPartSelection
   ): Promise<RuntimeCombinedCharacterAsset> {
+    return this.enqueueCustomSelectionMutation(() =>
+      this.applyCustomSelection(selection)
+    );
+  }
+
+  async updateCustomSelection(
+    partType: RuntimePartType,
+    costume3dId: number | null
+  ): Promise<RuntimeCombinedCharacterAsset> {
+    return this.enqueueCustomSelectionMutation(async () => {
+      const wardrobe = this.currentLoadedRuntimePackage?.wardrobe;
+      if (!wardrobe) {
+        throw new Error("No custom part package is loaded.");
+      }
+      const selection = wardrobe.getCustomSelection();
+      if (!selection) {
+        throw new Error("No custom selection is active.");
+      }
+      return this.applyCustomSelection({
+        ...selection,
+        bodyCostume3dId: partType === "body" && costume3dId !== null
+          ? costume3dId
+          : selection.bodyCostume3dId,
+        headCostume3dId: partType === "head" && costume3dId !== null
+          ? costume3dId
+          : selection.headCostume3dId,
+        hairCostume3dId: partType === "hair" && costume3dId !== null
+          ? costume3dId
+          : selection.hairCostume3dId,
+        headOptionalCostume3dId: partType === "head_optional"
+          ? costume3dId
+          : selection.headOptionalCostume3dId,
+      });
+    });
+  }
+
+  private enqueueCustomSelectionMutation<T>(
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const queued = this.customSelectionQueue.then(operation, operation);
+    this.customSelectionQueue = queued.catch(() => undefined);
+    return queued;
+  }
+
+  private async applyCustomSelection(
+    selection: CustomPartSelection
+  ): Promise<RuntimeCombinedCharacterAsset> {
     const wardrobe = this.currentLoadedRuntimePackage?.wardrobe;
     if (!wardrobe) {
       throw new Error("No custom part package is loaded.");
     }
     const previousRoleId = wardrobe.getActiveRoleId();
+    const previousCombinedId = wardrobe.getCombinedCharacter()?.id ?? null;
     const previousAnimation = this.captureAnimationPlaybackState();
     const combined = await wardrobe.setCustomSelection(selection);
-    await this.importCombinedCharacter(combined);
     const roleChanged = previousRoleId !== wardrobe.getActiveRoleId();
+    const sameResolvedSelection = !roleChanged &&
+      previousCombinedId !== null &&
+      previousCombinedId === combined.id &&
+      this.currentImportIsCombined;
+    if (!sameResolvedSelection) {
+      await this.importCombinedCharacter(combined);
+    } else {
+      this.resetAndSettleCurrentSpringRuntime();
+    }
     if (!roleChanged && previousAnimation.selection.motionUrl) {
       await this.continueAnimationPlaybackState(previousAnimation);
     } else {
@@ -4922,26 +4983,15 @@ export class Haruki3DEngine {
     return combined;
   }
 
-  async updateCustomSelection(
-    partType: RuntimePartType,
-    costume3dId: number | null
-  ): Promise<RuntimeCombinedCharacterAsset> {
-    const wardrobe = this.currentLoadedRuntimePackage?.wardrobe;
-    if (!wardrobe) {
-      throw new Error("No custom part package is loaded.");
-    }
-    const previousAnimation = this.captureAnimationPlaybackState();
-    const combined = await wardrobe.updateCustomSelection(partType, costume3dId);
-    await this.importCombinedCharacter(combined);
-    if (previousAnimation.selection.motionUrl) {
-      await this.continueAnimationPlaybackState(previousAnimation);
-    } else {
-      await this.applyCustomRoleDefaultMotion(combined, false);
-    }
-    return combined;
+  async captureRoleParts(
+    request: HarukiCaptureRolePartsRequest
+  ): Promise<HarukiCaptureRolePartsResult> {
+    return this.enqueueCustomSelectionMutation(() =>
+      this.captureRolePartsInternal(request)
+    );
   }
 
-  async captureRoleParts(
+  private async captureRolePartsInternal(
     request: HarukiCaptureRolePartsRequest
   ): Promise<HarukiCaptureRolePartsResult> {
     const wardrobe = this.currentLoadedRuntimePackage?.wardrobe;
@@ -4969,7 +5019,7 @@ export class Haruki3DEngine {
       headOptionalCostume3dId: request.headOptionalCostume3dId ?? null,
       origin: "custom",
     };
-    const combinedCharacter = await this.setCustomSelection(selection);
+    const combinedCharacter = await this.applyCustomSelection(selection);
     await this.prepareCaptureFrame({
       phase: request.phase,
       clip: "motion_loop",
