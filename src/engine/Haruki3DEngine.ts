@@ -51,16 +51,22 @@ import { runtimeRoleId } from "../parts/runtimePartComposer";
 
 const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241);
 const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
-const CAPTURE_CAMERA_TARGET_SCALE = new THREE.Vector3(
-  -0.032911392405063286,
-  0.4893037974683544,
-  0.06841772151898734
-);
-const CAPTURE_CAMERA_OFFSET_SCALE = new THREE.Vector3(
-  -0.08468354430379746,
-  0.270253164556962,
-  1.920886075949367
-);
+const DEFAULT_CAMERA_FOV = 35;
+const COSTUME_SHOP_CAMERA = {
+  zoomDuration: 0.35,
+  bottomLowerLimitPosition: 0.4,
+  bottomUpperLimitPosition: 0.85,
+  topLowerLimitPosition: 1.25,
+  topUpperLimitPosition: 0.85,
+  nearZ: 2.3,
+  farZ: 4.5,
+  fov: 25,
+} as const;
+const COSTUME_SHOP_CAMERA_DEFAULT_STATE = {
+  rotationYDegrees: 0,
+  zoomValue: 0,
+  zoomMoveValue: 1,
+} as const;
 const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0.0245;
 const CHARACTER_EYE_STENCIL_BIT = 0x01;
 const CHARACTER_EYELASH_STENCIL_BIT = 0x02;
@@ -1193,6 +1199,46 @@ function getDefaultCameraTarget(characterHeight: number) {
 function getDefaultCameraPosition(characterHeight: number) {
   return getDefaultCameraTarget(characterHeight)
     .add(DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(characterHeight));
+}
+
+function calculateCostumeShopCameraPose(
+  state = COSTUME_SHOP_CAMERA_DEFAULT_STATE
+) {
+  const zoomValue = THREE.MathUtils.clamp(
+    state.zoomValue,
+    0,
+    COSTUME_SHOP_CAMERA.zoomDuration
+  );
+  const zoomRatio = COSTUME_SHOP_CAMERA.zoomDuration > 0
+    ? zoomValue / COSTUME_SHOP_CAMERA.zoomDuration
+    : 0;
+  const bottomY = THREE.MathUtils.lerp(
+    COSTUME_SHOP_CAMERA.bottomLowerLimitPosition,
+    COSTUME_SHOP_CAMERA.bottomUpperLimitPosition,
+    zoomRatio
+  );
+  const topY = THREE.MathUtils.lerp(
+    COSTUME_SHOP_CAMERA.topLowerLimitPosition,
+    COSTUME_SHOP_CAMERA.topUpperLimitPosition,
+    zoomRatio
+  );
+  const y = THREE.MathUtils.lerp(
+    bottomY,
+    topY,
+    THREE.MathUtils.clamp(state.zoomMoveValue, 0, 1)
+  );
+  const z = THREE.MathUtils.lerp(
+    COSTUME_SHOP_CAMERA.nearZ,
+    COSTUME_SHOP_CAMERA.farZ,
+    zoomRatio
+  );
+  const rotationY = THREE.MathUtils.degToRad(state.rotationYDegrees);
+  const position = new THREE.Vector3(0, y, z)
+    .applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
+  return {
+    target: new THREE.Vector3(0, y, 0),
+    position,
+  };
 }
 
 function makeSeededRandom(seed: number) {
@@ -3743,7 +3789,7 @@ export class Haruki3DEngine {
 
     const width = Math.max(this.container.clientWidth, 320);
     const height = Math.max(this.container.clientHeight, 320);
-    this.camera = new THREE.PerspectiveCamera(35, width / height, 0.1, 100);
+    this.camera = new THREE.PerspectiveCamera(DEFAULT_CAMERA_FOV, width / height, 0.1, 100);
     this.camera.position.copy(getDefaultCameraPosition(light.characterHeight));
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
@@ -5752,18 +5798,19 @@ export class Haruki3DEngine {
   }
 
   applyCameraPreset(preset: PjskCameraPreset) {
-    const targetScale =
-      preset === "capture"
-        ? CAPTURE_CAMERA_TARGET_SCALE
-        : DEFAULT_CAMERA_TARGET_SCALE;
-    const offsetScale =
-      preset === "capture"
-        ? CAPTURE_CAMERA_OFFSET_SCALE
-        : DEFAULT_CAMERA_OFFSET_SCALE;
-    const target = targetScale.clone().multiplyScalar(this.characterHeight);
-    const offset = offsetScale.clone().multiplyScalar(this.characterHeight);
-    this.controls.target.copy(target);
-    this.camera.position.copy(target).add(offset);
+    if (preset === "capture") {
+      const pose = calculateCostumeShopCameraPose();
+      this.controls.target.copy(pose.target);
+      this.camera.position.copy(pose.position);
+      this.camera.fov = COSTUME_SHOP_CAMERA.fov;
+    } else {
+      const target = getDefaultCameraTarget(this.characterHeight);
+      const offset = DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(this.characterHeight);
+      this.controls.target.copy(target);
+      this.camera.position.copy(target).add(offset);
+      this.camera.fov = DEFAULT_CAMERA_FOV;
+    }
+    this.camera.updateProjectionMatrix();
     this.controls.update();
     this.cameraDebugChangeCallback?.();
   }

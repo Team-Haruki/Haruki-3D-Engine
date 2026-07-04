@@ -286,7 +286,7 @@ test("role parts capture reuses full runtime capture frame preparation", () => {
   assert.equal(prepareCaptureFrameBody.match(/seekTargetPhase\(/g)?.length, 1);
 });
 
-test("capture camera preset is generic, height-scaled, and keeps id5-debug as a legacy alias", () => {
+test("capture camera preset uses official CostumeShop camera parameters and keeps id5-debug as a legacy alias", () => {
   const runtimeOptions = parseArgs([
     "--input", "/tmp/input",
     "--out", "/tmp/out.png",
@@ -305,17 +305,27 @@ test("capture camera preset is generic, height-scaled, and keeps id5-debug as a 
   assert.equal(runtimeOptions.cameraPreset, "capture");
   assert.equal(configOptions.cameraPreset, "capture");
   assert.match(engineSource, /export type PjskCameraPreset = "default" \| "capture";/);
-  assert.match(engineSource, /const CAPTURE_CAMERA_TARGET_SCALE = new THREE\.Vector3/);
-  assert.match(engineSource, /const CAPTURE_CAMERA_OFFSET_SCALE = new THREE\.Vector3/);
-  assert.match(engineSource, /const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0\.0245;/);
+  assert.match(engineSource, /const COSTUME_SHOP_CAMERA = \{/);
+  assert.match(engineSource, /zoomDuration: 0\.35/);
+  assert.match(engineSource, /bottomLowerLimitPosition: 0\.4/);
+  assert.match(engineSource, /bottomUpperLimitPosition: 0\.85/);
+  assert.match(engineSource, /topLowerLimitPosition: 1\.25/);
+  assert.match(engineSource, /topUpperLimitPosition: 0\.85/);
+  assert.match(engineSource, /nearZ: 2\.3/);
+  assert.match(engineSource, /farZ: 4\.5/);
+  assert.match(engineSource, /fov: 25/);
+  assert.match(engineSource, /zoomMoveValue: 1/);
+  assert.match(engineSource, /calculateCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
+  assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_TARGET_SCALE/);
+  assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_OFFSET_SCALE/);
   assert.match(
     engineSource,
-    /const target = targetScale\.clone\(\)\.multiplyScalar\(this\.characterHeight\);/
+    /this\.controls\.target\.copy\(pose\.target\);\s+this\.camera\.position\.copy\(pose\.position\);\s+this\.camera\.fov = COSTUME_SHOP_CAMERA\.fov;/s
   );
   assert.match(
     engineSource,
-    /const offset = offsetScale\.clone\(\)\.multiplyScalar\(this\.characterHeight\);/
+    /this\.camera\.fov = DEFAULT_CAMERA_FOV;/
   );
   assert.match(harnessSource, /cameraPreset: "capture"/);
   assert.match(harnessSource, /return normalizeCameraPreset\(params\.get\("cameraPreset"\)\);/);

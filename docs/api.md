@@ -98,7 +98,7 @@ const result = await engine.captureRoleParts(request);
 `captureRoleParts` fixes the capture defaults used by the current pipeline:
 
 - animation: `motion_loop` at phase `0.5`
-- camera: height-scaled `capture` plus the current right-shift preset
+- camera: official CostumeShop perspective camera data (`fov=25`, default `zoomValue=0`, `zoomMoveValue=1`)
 - SpringBone: `unity-prefab`
 - output state: capture presentation mode
 
