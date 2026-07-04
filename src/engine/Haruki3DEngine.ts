@@ -2493,6 +2493,7 @@ function buildUnityRuntimeNativeGeometry(source: RuntimeNativeMeshSource) {
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(source.uv0!, 2));
   }
   if ((source.uv1?.length ?? 0) === vertexCount * 2) {
+    geometry.setAttribute("uv1", new THREE.Float32BufferAttribute(source.uv1!, 2));
     geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(source.uv1!, 2));
   }
   if ((source.colors?.length ?? 0) === vertexCount * 4) {
