@@ -314,7 +314,9 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   assert.match(engineSource, /nearZ: 2\.3/);
   assert.match(engineSource, /farZ: 4\.5/);
   assert.match(engineSource, /fov: 25/);
-  assert.match(engineSource, /zoomMoveValue: 1/);
+  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_CAPTURE_STATE = \{/);
+  assert.match(engineSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
+  assert.match(engineSource, /zoomMoveValue: 0/);
   assert.match(engineSource, /calculateCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
   assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_TARGET_SCALE/);

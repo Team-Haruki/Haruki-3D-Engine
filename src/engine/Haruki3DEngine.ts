@@ -62,10 +62,10 @@ const COSTUME_SHOP_CAMERA = {
   farZ: 4.5,
   fov: 25,
 } as const;
-const COSTUME_SHOP_CAMERA_DEFAULT_STATE = {
+const COSTUME_SHOP_CAMERA_CAPTURE_STATE = {
   rotationYDegrees: 0,
-  zoomValue: 0,
-  zoomMoveValue: 1,
+  zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
+  zoomMoveValue: 0,
 } as const;
 const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0.0245;
 const CHARACTER_EYE_STENCIL_BIT = 0x01;
@@ -1202,7 +1202,7 @@ function getDefaultCameraPosition(characterHeight: number) {
 }
 
 function calculateCostumeShopCameraPose(
-  state = COSTUME_SHOP_CAMERA_DEFAULT_STATE
+  state = COSTUME_SHOP_CAMERA_CAPTURE_STATE
 ) {
   const zoomValue = THREE.MathUtils.clamp(
     state.zoomValue,
