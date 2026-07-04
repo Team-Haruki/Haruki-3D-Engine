@@ -26,7 +26,7 @@ export type SekaiRuntimeMaterialProfile = {
   bodyPipeline: "sekai_csh_toon";
   facePipeline: "character_tint_with_weak_sdf";
   layerPipeline: "sekai_eye_layers";
-  vrmStrategy: "mtoon_fallback_with_sekai_extras";
+  vrmStrategy: "prefab_native_runtime_only";
   textureRoles: {
     main: "Sekai C";
     shadow: "Sekai S";
@@ -51,9 +51,9 @@ export type SekaiRuntimeMaterialProfile = {
 export type SekaiVrmMigrationProfile = {
   version: number;
   targetContainer: {
-    preferred: "VRM 1.0";
-    fallback: "glTF 2.0 GLB";
-    currentPhase: "vrm_with_pjsk_runtime_extension";
+    preferred: "Unity prefab native runtime";
+    fallback: "none";
+    currentPhase: "prefab_native_runtime_with_pjsk_runtime_extension";
   };
   standardVrmFallback: {
     humanoidBoneMap: Record<string, string>;
@@ -65,7 +65,7 @@ export type SekaiVrmMigrationProfile = {
       faceShadowTex: "custom extras only";
     };
     expressionSource: "PJSK morphChannelBindings";
-    springBoneSource: "raw PJSK spring metadata plus embedded VRMC_springBone";
+    springBoneSource: "raw PJSK spring metadata";
   };
   sekaiRuntimeExtras: {
     extensionName: "PJSK_sekai_runtime";
@@ -273,7 +273,7 @@ export const sekaiRuntimeMaterialProfile: SekaiRuntimeMaterialProfile = {
   bodyPipeline: "sekai_csh_toon",
   facePipeline: "character_tint_with_weak_sdf",
   layerPipeline: "sekai_eye_layers",
-  vrmStrategy: "mtoon_fallback_with_sekai_extras",
+  vrmStrategy: "prefab_native_runtime_only",
   textureRoles: {
     main: "Sekai C",
     shadow: "Sekai S",
@@ -298,9 +298,9 @@ export const sekaiRuntimeMaterialProfile: SekaiRuntimeMaterialProfile = {
 export const sekaiVrmMigrationProfile: SekaiVrmMigrationProfile = {
   version: 1,
   targetContainer: {
-    preferred: "VRM 1.0",
-    fallback: "glTF 2.0 GLB",
-    currentPhase: "vrm_with_pjsk_runtime_extension",
+    preferred: "Unity prefab native runtime",
+    fallback: "none",
+    currentPhase: "prefab_native_runtime_with_pjsk_runtime_extension",
   },
   standardVrmFallback: {
     humanoidBoneMap: {
@@ -334,7 +334,7 @@ export const sekaiVrmMigrationProfile: SekaiVrmMigrationProfile = {
       faceShadowTex: "custom extras only",
     },
     expressionSource: "PJSK morphChannelBindings",
-    springBoneSource: "raw PJSK spring metadata plus embedded VRMC_springBone",
+    springBoneSource: "raw PJSK spring metadata",
   },
   sekaiRuntimeExtras: {
     extensionName: "PJSK_sekai_runtime",
@@ -371,7 +371,7 @@ export const sekaiVrmMigrationProfile: SekaiVrmMigrationProfile = {
   ],
   unresolvedBeforeTrueParity: [
     "browser equivalent of the runtime face SDF bone-basis driver",
-    "VRM expression or VRMA export for portable face motion",
+    "portable runtime face motion outside the native prefab package",
     "exact Unity shader controller animation tracks",
   ],
 };
@@ -417,9 +417,9 @@ export const sampleCatalog: CharacterImportCatalog = {
       source: {
         bundleRoot: "/converted/char05/body/base/",
         manifestUrl: "/converted/char05/body/base/body.manifest.json",
-        meshUrl: "/converted/char05/body/base/body.glb",
-        skeletonUrl: "/converted/char05/body/base/skeleton.glb",
-        animationUrls: ["/converted/char05/body/base/idle.glb"],
+        meshUrl: "",
+        skeletonUrl: "",
+        animationUrls: ["/converted/char05/body/base/unity-motion.json"],
       },
       neckAnchor: { x: 0, y: 1.78, z: 0.16 },
       skeleton: {
@@ -457,9 +457,9 @@ export const sampleCatalog: CharacterImportCatalog = {
       source: {
         bundleRoot: "/converted/char05/body/stage/",
         manifestUrl: "/converted/char05/body/stage/body.manifest.json",
-        meshUrl: "/converted/char05/body/stage/body.glb",
-        skeletonUrl: "/converted/char05/body/stage/skeleton.glb",
-        animationUrls: ["/converted/char05/body/stage/idle.glb"],
+        meshUrl: "",
+        skeletonUrl: "",
+        animationUrls: ["/converted/char05/body/stage/unity-motion.json"],
       },
       neckAnchor: { x: 0, y: 1.82, z: 0.18 },
       skeleton: {
@@ -499,7 +499,7 @@ export const sampleCatalog: CharacterImportCatalog = {
       source: {
         bundleRoot: "/converted/head/0100/clean/",
         manifestUrl: "/converted/head/0100/clean/head.manifest.json",
-        meshUrl: "/converted/head/0100/clean/head.glb",
+        meshUrl: "",
       },
       rawImportOffset: { x: 1.1, y: 0.96, z: 0.08 },
       assembly: {
@@ -545,7 +545,7 @@ export const sampleCatalog: CharacterImportCatalog = {
       source: {
         bundleRoot: "/converted/head/0100/sdf/",
         manifestUrl: "/converted/head/0100/sdf/head.manifest.json",
-        meshUrl: "/converted/head/0100/sdf/head.glb",
+        meshUrl: "",
       },
       rawImportOffset: { x: -1.05, y: 1.16, z: -0.05 },
       assembly: {

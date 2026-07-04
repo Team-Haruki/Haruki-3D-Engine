@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import type { VRM, VRMSpringBoneManager } from "@pixiv/three-vrm";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ensureRoleRuntimePackage,
@@ -28,7 +27,6 @@ import {
   createSekaiLayerMaterial,
   type SekaiLayerAtlas,
 } from "../materials/sekaiLayerMaterial";
-import { loadGltfAnimations, loadGltfPart } from "./loadGltfPart";
 import {
   type UtjSpringBoneDebugOptions,
   type UtjSpringBoneRuntimeSnapshot,
@@ -256,7 +254,7 @@ export type RenderIsolationMode =
   | "no_face_outline";
 export type HairShadowMode = "light" | "legacy_head";
 
-export type BodyAnimationKind = "gltf" | "unity-json";
+export type BodyAnimationKind = "unity-json";
 
 export type BodyAnimationSelection = {
   motionUrl: string | null;
@@ -587,8 +585,8 @@ type LoadedPartResult = {
   skinnedMeshCount: number;
   error?: string;
   userData?: Record<string, unknown>;
-  vrm?: VRM | null;
-  springBoneManager?: VRMSpringBoneManager | null;
+  vrm?: unknown;
+  springBoneManager?: unknown;
   prefabSourceGraph?: UnityPrefabSourceGraph | null;
 };
 
@@ -2495,8 +2493,18 @@ function installUnityRuntimeNativeMeshes(
     if (skinnedMeshForBind) {
       graph.root.updateMatrixWorld(true);
       skinnedMeshForBind.updateMatrixWorld(true);
-      const skeleton = new THREE.Skeleton(skeletonBones as unknown as THREE.Bone[]);
-      skeleton.calculateInverses();
+      const inverseBindMatrices = buildUnityRuntimeBoneInverseBindMatrices(
+        source,
+        skeletonBones.length,
+        warnings
+      );
+      const skeleton = new THREE.Skeleton(
+        skeletonBones as unknown as THREE.Bone[],
+        inverseBindMatrices.length > 0 ? inverseBindMatrices : undefined
+      );
+      if (inverseBindMatrices.length === 0) {
+        skeleton.calculateInverses();
+      }
       skinnedMeshForBind.bind(skeleton, skinnedMeshForBind.matrixWorld);
     }
     meshCount += 1;
@@ -2638,7 +2646,7 @@ function buildUnityRuntimeNativeGeometry(source: RuntimeNativeMeshSource) {
 
 function isLoopClipName(name: string | undefined, url: string | null) {
   return /(?:^|[_-])loop$/i.test(name ?? "") ||
-    /(?:^|[_-])loop(?:\.glb)?$/i.test(url?.split("/").pop() ?? "");
+    /(?:^|[_-])loop(?:\.json)?$/i.test(url?.split("/").pop() ?? "");
 }
 
 function valuesClose(
@@ -2913,7 +2921,7 @@ function inferBodyAnimationKind(
   if (!url) {
     return null;
   }
-  return explicitKind ?? (isUnityMotionJsonUrl(url) ? "unity-json" : "gltf");
+  return explicitKind ?? (isUnityMotionJsonUrl(url) ? "unity-json" : null);
 }
 
 function animationClipCacheKey(url: string, kind: BodyAnimationKind | null) {
@@ -3730,7 +3738,7 @@ export class Haruki3DEngine {
   private currentFaceMotionError: string | null = null;
   private readonly currentHeadMorphRuntimes: HeadMorphRuntime[] = [];
   private currentRuntimeExtension: unknown = null;
-  private currentVrmSpringBoneManager: VRMSpringBoneManager | null = null;
+  private currentVrmSpringBoneManager: unknown = null;
   private currentSpringRuntime: SpringRuntimeController | null = null;
   private currentExtraBoneRuntime: SekaiExtraBoneRuntime | null = null;
   private currentPrefabSourceGraph: UnityPrefabSourceGraph | null = null;
@@ -5011,9 +5019,7 @@ export class Haruki3DEngine {
     }
     await this.importCombinedCharacter(loaded.combinedCharacter);
     const animationUrl = loaded.combinedCharacter.bodyAsset.source.animationUrls?.[0];
-    const defaultAnimationKind: BodyAnimationKind | null = animationUrl
-      ? animationUrl.endsWith(".json") ? "unity-json" : "gltf"
-      : null;
+    const defaultAnimationKind = inferBodyAnimationKind(animationUrl ?? null);
     const defaultLoopUrl = animationUrl && (
       defaultAnimationKind === "unity-json" ||
       /body[_-]?motion/i.test(animationUrl.split(/[/?#]/)[0] ?? "")
@@ -5247,9 +5253,7 @@ export class Haruki3DEngine {
     force: boolean
   ): Promise<void> {
     const animationUrl = combined.bodyAsset.source.animationUrls?.[0];
-    const defaultAnimationKind: BodyAnimationKind | null = animationUrl
-      ? animationUrl.endsWith(".json") ? "unity-json" : "gltf"
-      : null;
+    const defaultAnimationKind = inferBodyAnimationKind(animationUrl ?? null);
     const defaultLoopUrl = animationUrl && (
       defaultAnimationKind === "unity-json" ||
       /body[_-]?motion/i.test(animationUrl.split(/[/?#]/)[0] ?? "")
@@ -6106,99 +6110,59 @@ export class Haruki3DEngine {
   private async loadBodyAsset(
     bodyAsset: BodyAssetManifest
   ): Promise<LoadedPartResult> {
-    try {
-      const loaded = await loadGltfPart(bodyAsset.source.meshUrl, bodyAsset.id);
-      if (this.materialBindingMode === "manifest") {
-        await this.overrideBodyMaterials(loaded.root, bodyAsset);
-      } else {
-        this.runtimeDebug.body = [];
-      }
-      this.installSekaiOutlineShells(loaded.root);
-      return {
-        root: loaded.root,
-        sourceMode: "glb",
-        requestedUrl: bodyAsset.source.meshUrl,
-        meshCount: loaded.meshCount,
-        boneCount: loaded.boneCount,
-        skinnedMeshCount: loaded.skinnedMeshCount,
-        userData: loaded.userData,
-        vrm: loaded.vrm,
-        springBoneManager: loaded.springBoneManager,
-      };
-    } catch (error) {
-      this.runtimeDebug.body = [
-        {
-          meshName: "<body-load-failed>",
-          sourceMaterialName: bodyAsset.displayName,
-          resolvedKey: "load_error",
-          resolvedKind: "body",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: getErrorMessage(error),
-        },
-      ];
-      return {
-        root: null,
-        sourceMode: "proxy",
-        requestedUrl: bodyAsset.source.meshUrl,
-        meshCount: 0,
-        boneCount: 0,
-        skinnedMeshCount: 0,
-        error: getErrorMessage(error),
-      };
-    }
+    const message = "Legacy body GLB import is disabled; export a prefab native runtime package with container.unityRuntimeJson.";
+    this.runtimeDebug.body = [
+      {
+        meshName: "<body-load-failed>",
+        sourceMaterialName: bodyAsset.displayName,
+        resolvedKey: "glb_disabled",
+        resolvedKind: "body",
+        usedOriginalMap: false,
+        boundMainTex: null,
+        boundShadowTex: null,
+        boundValueTex: null,
+        boundFaceShadowTex: null,
+        finalMaterialType: message,
+      },
+    ];
+    return {
+      root: null,
+      sourceMode: "proxy",
+      requestedUrl: bodyAsset.source.meshUrl,
+      meshCount: 0,
+      boneCount: 0,
+      skinnedMeshCount: 0,
+      error: message,
+    };
   }
 
   private async loadHeadAsset(
     headAsset: HeadAssetManifest
   ): Promise<LoadedPartResult> {
-    try {
-      const loaded = await loadGltfPart(headAsset.source.meshUrl, headAsset.id);
-      if (this.materialBindingMode === "manifest") {
-        await this.overrideHeadMaterials(loaded.root, headAsset);
-      } else {
-        this.runtimeDebug.head = [];
-      }
-      this.installSekaiOutlineShells(loaded.root);
-      return {
-        root: loaded.root,
-        sourceMode: "glb",
-        requestedUrl: headAsset.source.meshUrl,
-        meshCount: loaded.meshCount,
-        boneCount: loaded.boneCount,
-        skinnedMeshCount: loaded.skinnedMeshCount,
-        userData: loaded.userData,
-        vrm: loaded.vrm,
-        springBoneManager: loaded.springBoneManager,
-      };
-    } catch (error) {
-      this.runtimeDebug.head = [
-        {
-          meshName: "<head-load-failed>",
-          sourceMaterialName: headAsset.displayName,
-          resolvedKey: "load_error",
-          resolvedKind: "head",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: getErrorMessage(error),
-        },
-      ];
-      return {
-        root: null,
-        sourceMode: "proxy",
-        requestedUrl: headAsset.source.meshUrl,
-        meshCount: 0,
-        boneCount: 0,
-        skinnedMeshCount: 0,
-        error: getErrorMessage(error),
-      };
-    }
+    const message = "Legacy head GLB import is disabled; export a prefab native runtime package with container.unityRuntimeJson.";
+    this.runtimeDebug.head = [
+      {
+        meshName: "<head-load-failed>",
+        sourceMaterialName: headAsset.displayName,
+        resolvedKey: "glb_disabled",
+        resolvedKind: "head",
+        usedOriginalMap: false,
+        boundMainTex: null,
+        boundShadowTex: null,
+        boundValueTex: null,
+        boundFaceShadowTex: null,
+        finalMaterialType: message,
+      },
+    ];
+    return {
+      root: null,
+      sourceMode: "proxy",
+      requestedUrl: headAsset.source.meshUrl,
+      meshCount: 0,
+      boneCount: 0,
+      skinnedMeshCount: 0,
+      error: message,
+    };
   }
 
   private async loadCombinedCharacterAsset(
@@ -6326,118 +6290,44 @@ export class Haruki3DEngine {
       };
     }
 
-    const meshUrl = characterAsset.meshUrl;
-    if (!meshUrl) {
-      const message = "Pure Unity runtime requires container.unityRuntimeJson.";
-      this.runtimeDebug.body = [
-        {
-          meshName: "<combined-load-failed>",
-          sourceMaterialName: characterAsset.displayName,
-          resolvedKey: "missing_unity_runtime_json",
-          resolvedKind: "body",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: message,
-        },
-      ];
-      this.runtimeDebug.head = [
-        {
-          meshName: "<combined-load-failed>",
-          sourceMaterialName: characterAsset.displayName,
-          resolvedKey: "missing_unity_runtime_json",
-          resolvedKind: "head",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: message,
-        },
-      ];
-      return {
-        root: null,
-        sourceMode: "proxy",
-        requestedUrl: "",
-        meshCount: 0,
-        boneCount: 0,
-        skinnedMeshCount: 0,
-        error: message,
-      };
-    }
-
-    try {
-      const loaded = await loadGltfPart(
-        meshUrl,
-        characterAsset.id
-      );
-      if (this.materialBindingMode === "manifest") {
-        await this.overrideBodyMaterials(loaded.root, characterAsset.bodyAsset, {
-          exactMaterialNameOnly: true,
-        });
-        await this.overrideHeadMaterials(loaded.root, characterAsset.headAsset, {
-          exactMaterialNameOnly: true,
-          eyeController: readCharacterEyeMaterialController(characterAsset.runtimeExtension),
-          hairController: readCharacterHairMaterialController(characterAsset.runtimeExtension),
-        });
-      } else {
-        this.runtimeDebug.body = [];
-        this.runtimeDebug.head = [];
-      }
-      this.installSekaiOutlineShells(loaded.root);
-      return {
-        root: loaded.root,
-        sourceMode: "glb",
-        requestedUrl: meshUrl,
-        meshCount: loaded.meshCount,
-        boneCount: loaded.boneCount,
-        skinnedMeshCount: loaded.skinnedMeshCount,
-        userData: loaded.userData,
-        vrm: loaded.vrm,
-        springBoneManager: loaded.springBoneManager,
-      };
-    } catch (error) {
-      const message = getErrorMessage(error);
-      this.runtimeDebug.body = [
-        {
-          meshName: "<combined-load-failed>",
-          sourceMaterialName: characterAsset.displayName,
-          resolvedKey: "load_error",
-          resolvedKind: "body",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: message,
-        },
-      ];
-      this.runtimeDebug.head = [
-        {
-          meshName: "<combined-load-failed>",
-          sourceMaterialName: characterAsset.displayName,
-          resolvedKey: "load_error",
-          resolvedKind: "head",
-          usedOriginalMap: false,
-          boundMainTex: null,
-          boundShadowTex: null,
-          boundValueTex: null,
-          boundFaceShadowTex: null,
-          finalMaterialType: message,
-        },
-      ];
-      return {
-        root: null,
-        sourceMode: "proxy",
-        requestedUrl: meshUrl,
-        meshCount: 0,
-        boneCount: 0,
-        skinnedMeshCount: 0,
-        error: message,
-      };
-    }
+    const message = "Pure Unity runtime requires container.unityRuntimeJson; combined GLB fallback is disabled.";
+    this.runtimeDebug.body = [
+      {
+        meshName: "<combined-load-failed>",
+        sourceMaterialName: characterAsset.displayName,
+        resolvedKey: "missing_unity_runtime_json",
+        resolvedKind: "body",
+        usedOriginalMap: false,
+        boundMainTex: null,
+        boundShadowTex: null,
+        boundValueTex: null,
+        boundFaceShadowTex: null,
+        finalMaterialType: message,
+      },
+    ];
+    this.runtimeDebug.head = [
+      {
+        meshName: "<combined-load-failed>",
+        sourceMaterialName: characterAsset.displayName,
+        resolvedKey: "missing_unity_runtime_json",
+        resolvedKind: "head",
+        usedOriginalMap: false,
+        boundMainTex: null,
+        boundShadowTex: null,
+        boundValueTex: null,
+        boundFaceShadowTex: null,
+        finalMaterialType: message,
+      },
+    ];
+    return {
+      root: null,
+      sourceMode: "proxy",
+      requestedUrl: characterAsset.meshUrl ?? "",
+      meshCount: 0,
+      boneCount: 0,
+      skinnedMeshCount: 0,
+      error: message,
+    };
   }
 
   private installSekaiOutlineShells(root: THREE.Object3D) {
@@ -8199,13 +8089,12 @@ export class Haruki3DEngine {
     );
     let clips = this.animationClipCache.get(clipCacheKey);
     if (!clips) {
+      if (this.currentAnimationKind !== "unity-json") {
+        this.currentAnimationError = `Unity motion JSON is required; GLTF animation fallback is disabled for ${this.currentAnimationUrl}.`;
+        return;
+      }
       try {
-        clips = this.currentAnimationKind === "unity-json"
-          ? await loadUnityMotionClips(this.currentAnimationUrl)
-          : (await loadGltfAnimations(
-            this.currentAnimationUrl,
-            this.currentAnimationUrl
-          )).clips;
+        clips = await loadUnityMotionClips(this.currentAnimationUrl);
         this.animationClipCache.set(clipCacheKey, clips);
       } catch (error) {
         if (revision !== this.animationRevision) {
@@ -8270,13 +8159,13 @@ export class Haruki3DEngine {
       );
       let loopClips = this.animationClipCache.get(loopClipCacheKey);
       if (!loopClips) {
-        try {
-          loopClips = this.currentAnimationLoopKind === "unity-json"
-            ? await loadUnityMotionClips(loopUrl)
-            : (await loadGltfAnimations(loopUrl, loopUrl)).clips;
-          this.animationClipCache.set(loopClipCacheKey, loopClips);
-        } catch {
-          loopClips = undefined;
+        if (this.currentAnimationLoopKind === "unity-json") {
+          try {
+            loopClips = await loadUnityMotionClips(loopUrl);
+            this.animationClipCache.set(loopClipCacheKey, loopClips);
+          } catch {
+            loopClips = undefined;
+          }
         }
       }
       const sourceLoopClip = loopClips?.[0] ?? null;

@@ -425,6 +425,60 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
   assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
 });
 
+test("native prefab meshes bind with exported Unity inverse bind matrices before fallback", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /buildUnityRuntimeBoneInverseBindMatrices/);
+  assert.match(
+    engineSource,
+    /const inverseBindMatrices = buildUnityRuntimeBoneInverseBindMatrices\(\s+source,\s+skeletonBones\.length,\s+warnings\s+\);/s
+  );
+  assert.match(
+    engineSource,
+    /new THREE\.Skeleton\(\s+skeletonBones as unknown as THREE\.Bone\[\],\s+inverseBindMatrices\.length > 0 \? inverseBindMatrices : undefined\s+\)/s
+  );
+  assert.match(
+    engineSource,
+    /if \(inverseBindMatrices\.length === 0\) \{\s+skeleton\.calculateInverses\(\);\s+\}/s
+  );
+});
+
+test("engine rejects GLB model fallbacks for prefab-native runtime packages", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /Legacy body GLB import is disabled/);
+  assert.match(engineSource, /Legacy head GLB import is disabled/);
+  assert.match(engineSource, /combined GLB fallback is disabled/);
+  assert.match(engineSource, /export type BodyAnimationKind = "unity-json";/);
+  assert.match(engineSource, /GLTF animation fallback is disabled/);
+  assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(bodyAsset\.source\.meshUrl/);
+  assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(headAsset\.source\.meshUrl/);
+  assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(\s+meshUrl,\s+characterAsset\.id\s+\)/s);
+  assert.doesNotMatch(engineSource, /loadGltfAnimations/);
+  assert.doesNotMatch(engineSource, /"gltf"/);
+});
+
+test("character shader keeps sssekai-verified C/S/H and vertex color channel semantics", () => {
+  const shaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
+    "utf8"
+  );
+
+  assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
+  assert.match(shaderSource, /float skinMask = \(uSkinTintEnabled > 0\.5 && uUseValueTex > 0\.5\) \? step\(0\.5, valueSample\.r\) : 0\.0;/);
+  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /vertexOutlineIntensity = clamp\(vColor\.r, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /vertexRimIntensity = clamp\(vColor\.g, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /vFaceShadowUv = uv1;/);
+  assert.match(shaderSource, /texture2D\(uFaceShadowTex, sdfUv\)/);
+});
+
 test("projected character shadows are separate scene objects", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
