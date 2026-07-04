@@ -22,6 +22,8 @@ type CaptureWindow = Window & {
   ) => Promise<HarukiCaptureRolePartsResult>;
 };
 
+type CaptureCharacterYawMode = CharacterYawMode | "face-camera";
+
 type CaptureConfig = {
   baseUrl: string;
   fullRuntimeOnly: boolean;
@@ -34,7 +36,7 @@ type CaptureConfig = {
   renderIsolation: RenderIsolationMode;
   springRuntimeMode: SpringRuntimeMode;
   cameraPreset: PjskCameraPreset;
-  characterYawMode: CharacterYawMode | null;
+  characterYawMode: CaptureCharacterYawMode | null;
   utjTraceBones: string[];
   utjTraceMaxEvents: number;
 };
@@ -86,7 +88,7 @@ function readCaptureConfig(): CaptureConfig | null {
     renderIsolation: readRenderIsolationMode(params),
     springRuntimeMode: readSpringRuntimeMode(params),
     cameraPreset: readCameraPreset(params),
-    characterYawMode: isCharacterYawMode(yawMode) ? yawMode : null,
+    characterYawMode: isCaptureCharacterYawMode(yawMode) ? yawMode : null,
     utjTraceBones: params
       .getAll("utjTraceBone")
       .flatMap((value) => value.split(","))
@@ -192,6 +194,10 @@ function isCharacterYawMode(value: string | null): value is CharacterYawMode {
     value === "180";
 }
 
+function isCaptureCharacterYawMode(value: string | null): value is CaptureCharacterYawMode {
+  return value === "face-camera" || isCharacterYawMode(value);
+}
+
 function setCaptureError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   document.body.dataset.captureError = message;
@@ -241,6 +247,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       warmupFrames: request.warmupFrames ?? config.warmupFrames,
       warmupMode: request.warmupMode ?? config.warmupMode,
       cameraPreset: request.cameraPreset ?? config.cameraPreset,
+      characterYawMode: request.characterYawMode ?? config.characterYawMode ?? undefined,
     });
     const snapshots = {
       ...result.snapshots,
@@ -282,6 +289,7 @@ async function prepareCaptureFrame(config: CaptureConfig) {
     warmupFrames: config.warmupFrames,
     warmupMode: config.warmupMode,
     cameraPreset: config.cameraPreset,
+    characterYawMode: config.characterYawMode ?? undefined,
     traceUtjBones: config.utjTraceBones,
     traceUtjMaxEvents: config.utjTraceMaxEvents,
   });
@@ -317,7 +325,7 @@ async function bootstrapCapture() {
     engine.setBodyDebugMode(config.bodyDebugMode);
     engine.setRenderIsolationMode(config.renderIsolation);
     engine.applyCameraPreset(config.cameraPreset);
-    if (config.characterYawMode) {
+    if (config.characterYawMode && config.characterYawMode !== "face-camera") {
       engine.setCharacterYawDegrees(characterYawDegreesByMode[config.characterYawMode]);
     }
     await ensureCaptureRuntimePackage(config);

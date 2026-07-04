@@ -211,6 +211,7 @@ function validateCaptureRequest(input) {
         : readId("headOptionalCostume3dId"),
     phase: Number(input.phase) || defaultPhase,
     cameraPreset: normalizeCameraPreset(input.cameraPreset, defaultCameraPreset),
+    characterYawMode: normalizeCharacterYawMode(input.characterYawMode, null),
     warmupMs: Math.max(Math.trunc(Number(input.warmupMs) || defaultWarmupMs), 0),
     warmupFrames: Math.max(Math.trunc(Number(input.warmupFrames) || defaultWarmupFrames), 0),
     warmupMode: input.warmupMode === "runtime" ? "runtime" : defaultWarmupMode === "runtime" ? "runtime" : "animation",
@@ -233,6 +234,16 @@ function normalizeCameraPreset(value, fallback) {
     return fallback;
   }
   return value === "default" ? "default" : "capture";
+}
+
+function normalizeCharacterYawMode(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  const normalized = String(value);
+  return ["0", "45", "-45", "90", "-90", "180", "face-camera"].includes(normalized)
+    ? normalized
+    : fallback;
 }
 
 function makeTempDir() {

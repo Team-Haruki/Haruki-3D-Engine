@@ -118,6 +118,7 @@ export type HarukiCaptureRolePartsRequest = {
   warmupFrames?: number;
   warmupMode?: "animation" | "runtime";
   cameraPreset?: PjskCameraPreset;
+  characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
   traceUtjBones?: string[];
   traceUtjMaxEvents?: number;
   springDebugBones?: string[];
@@ -131,6 +132,7 @@ export type HarukiPrepareCaptureFrameRequest = {
   warmupFrames?: number;
   warmupMode?: "animation" | "runtime";
   cameraPreset?: PjskCameraPreset;
+  characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
   traceUtjBones?: string[];
   traceUtjMaxEvents?: number;
   springDebugBones?: string[];
@@ -3985,6 +3987,68 @@ export class Haruki3DEngine {
     this.updateShaderFaceBasis();
   }
 
+  private applyCaptureCharacterYawMode(
+    mode: HarukiPrepareCaptureFrameRequest["characterYawMode"]
+  ) {
+    switch (mode) {
+      case "45":
+      case "-45":
+      case "90":
+      case "-90":
+      case "180":
+      case "0":
+        this.setCharacterYawDegrees(Number(mode));
+        return;
+      case "face-camera":
+        this.faceCharacterTowardCamera();
+        return;
+      case undefined:
+      default:
+        return;
+    }
+  }
+
+  private faceCharacterTowardCamera() {
+    this.characterRoot.updateMatrixWorld(true);
+    const root = this.currentBodyAnimationRoot ?? this.characterRoot;
+    root.updateMatrixWorld(true);
+    const nodeByPath = buildPrefabNodePathLookup(root);
+    const facingNode = resolvePrefabNodeCandidate(nodeByPath, [
+      "body/Position",
+      "body/Position/PositionOffset",
+      "body/Position/PositionOffset/Hip",
+      "body/Position/Hip",
+      "face/Position",
+    ])?.node ?? root;
+
+    facingNode.updateMatrixWorld(true);
+    facingNode.getWorldQuaternion(this.tempQuaternion);
+    this.tempVector.set(0, 0, 1).applyQuaternion(this.tempQuaternion);
+    this.tempVector.y = 0;
+    if (this.tempVector.lengthSq() < 0.000001) {
+      this.setCharacterYawDegrees(0);
+      return;
+    }
+    this.tempVector.normalize();
+
+    facingNode.getWorldPosition(this.tempVectorB);
+    const cameraDirection = this.camera.position.clone().sub(this.tempVectorB);
+    cameraDirection.y = 0;
+    if (cameraDirection.lengthSq() < 0.000001) {
+      this.setCharacterYawDegrees(0);
+      return;
+    }
+    cameraDirection.normalize();
+
+    const currentYaw = Math.atan2(this.tempVector.x, this.tempVector.z);
+    const targetYaw = Math.atan2(cameraDirection.x, cameraDirection.z);
+    this.characterRoot.rotation.y += targetYaw - currentYaw;
+    this.characterRoot.updateMatrixWorld(true);
+    this.syncLinkedHeadBones();
+    this.characterRoot.updateMatrixWorld(true);
+    this.updateShaderFaceBasis();
+  }
+
   private applyRenderIsolationMode() {
     const faceSdfEnabled = this.renderIsolationMode === "face_sdf";
     const eyelightOnly = this.renderIsolationMode === "eyelight_only";
@@ -4849,6 +4913,7 @@ export class Haruki3DEngine {
       warmupFrames: request.warmupFrames,
       warmupMode: request.warmupMode,
       cameraPreset: request.cameraPreset,
+      characterYawMode: request.characterYawMode,
       traceUtjBones: request.traceUtjBones,
       traceUtjMaxEvents: request.traceUtjMaxEvents,
       springDebugBones: request.springDebugBones,
@@ -4911,6 +4976,7 @@ export class Haruki3DEngine {
     }
 
     this.applyCameraPreset(request.cameraPreset ?? "capture");
+    this.applyCaptureCharacterYawMode(request.characterYawMode);
     this.stepCaptureFrame(0, false);
     this.renderFrame();
   }

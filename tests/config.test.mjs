@@ -180,11 +180,16 @@ test("persistent capture server propagates config defaults into role parts captu
   assert.match(serverSource, /defaultPhase/);
   assert.match(serverSource, /defaultCameraPreset/);
   assert.match(serverSource, /new URLSearchParams\(\{/);
+  assert.match(serverSource, /normalizeCharacterYawMode\(input\.characterYawMode, null\)/);
+  assert.doesNotMatch(serverSource, /characterYawMode: "face-camera"/);
   assert.doesNotMatch(serverSource, /capturePhase=0\.5&captureClip=motion_loop&springRuntimeMode=unity-prefab&cameraPreset=id5-debug/);
   assert.match(harnessSource, /phase: request\.phase \?\? config\.phase/);
   assert.match(harnessSource, /cameraPreset: request\.cameraPreset \?\? config\.cameraPreset/);
+  assert.match(harnessSource, /characterYawMode: request\.characterYawMode \?\? config\.characterYawMode \?\? undefined/);
   assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
+  assert.match(engineSource, /characterYawMode\?: "0" \| "45" \| "-45" \| "90" \| "-90" \| "180" \| "face-camera"/);
   assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture"\)/);
+  assert.match(engineSource, /this\.applyCaptureCharacterYawMode\(request\.characterYawMode\)/);
 });
 
 test("docker runtime image includes capture server support modules", () => {
