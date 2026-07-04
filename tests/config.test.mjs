@@ -380,11 +380,11 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.match(shaderSource, /uUseFaceShadowTex:\s*\{\s*value: initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
   assert.match(shaderSource, /uFaceSdfEnabled:\s*\{\s*value: initial\.faceSdfEnabled && initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
   assert.match(shaderSource, /material\.uniforms\.uFaceSdfEnabled\.value = next\.faceSdfEnabled && next\.faceShadowTex \? 1\.0 : 0\.0/);
-  assert.doesNotMatch(
+  assert.match(
     shaderSource,
-    /if \(\(uFaceSdfEnabled > 0\.5 \|\| uFaceDebugMode > 0\.5\) && uUseShadowTex > 0\.5 && uUseFaceShadowTex > 0\.5\)/,
-    "ordinary face shadow texture must not be gated by the FaceSDF enable switch"
+    /if \(\(uFaceSdfEnabled > 0\.5 \|\| uFaceDebugMode > 0\.5\) && uUseShadowTex > 0\.5 && uUseFaceShadowTex > 0\.5\)/
   );
+  assert.doesNotMatch(shaderSource, /staticShadowMask/);
 });
 
 test("head material binding normalizes old runtime hair and accessory kinds before FaceSDF fallback", () => {

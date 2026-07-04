@@ -669,16 +669,9 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
         vec3 faceSkinLit = mix(uSkinColor1, uSkinColorDefault, faceSkinRamp);
         vec3 faceSkinShadow = mix(uSkinColor2, uSkinColor1, faceSkinRamp);
         color = mix(color, faceSkinLit, faceSkinMask * 0.58);
-        vec3 shadowColor = color;
-        if (uUseShadowTex > 0.5) {
-          shadowColor = texture2D(uShadowTex, vUv).rgb;
+        if ((uFaceSdfEnabled > 0.5 || uFaceDebugMode > 0.5) && uUseShadowTex > 0.5 && uUseFaceShadowTex > 0.5) {
+          vec3 shadowColor = texture2D(uShadowTex, vUv).rgb;
           shadowColor = mix(shadowColor, faceSkinShadow, faceSkinMask * 0.75);
-          float faceMainLuma = dot(color, vec3(0.299, 0.587, 0.114));
-          float faceShadowLuma = dot(shadowColor, vec3(0.299, 0.587, 0.114));
-          float staticShadowMask = smoothstep(0.012, 0.16, faceMainLuma - faceShadowLuma);
-          color = mix(color, shadowColor, staticShadowMask);
-        }
-        if ((uFaceSdfEnabled > 0.5 || uFaceDebugMode > 0.5) && uUseFaceShadowTex > 0.5) {
           vec3 faceForward = normalize(uFaceForward);
           vec3 faceRight = normalize(uFaceRight - faceForward * dot(uFaceRight, faceForward));
           vec3 faceUp = normalize(uFaceUp - faceForward * dot(uFaceUp, faceForward) - faceRight * dot(uFaceUp, faceRight));
