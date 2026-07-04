@@ -215,6 +215,10 @@ function validateCaptureRequest(input) {
     warmupMs: Math.max(Math.trunc(Number(input.warmupMs) || defaultWarmupMs), 0),
     warmupFrames: Math.max(Math.trunc(Number(input.warmupFrames) || defaultWarmupFrames), 0),
     warmupMode: input.warmupMode === "runtime" ? "runtime" : defaultWarmupMode === "runtime" ? "runtime" : "animation",
+    bodyDebugMode: normalizeBodyDebugMode(input.bodyDebugMode),
+    faceSdfEnabled: readBoolean(input.faceSdfEnabled),
+    faceSdfDebugMode: normalizeFaceSdfDebugMode(input.faceSdfDebugMode),
+    faceSdfDebugLightMode: normalizeFaceSdfDebugLightMode(input.faceSdfDebugLightMode),
     width: Math.max(Math.trunc(Number(input.width) || defaultWidth), 320),
     height: Math.max(Math.trunc(Number(input.height) || defaultHeight), 320),
     scale: Math.min(Math.max(Number(input.scale) || defaultScale, 1), 2),
@@ -227,6 +231,59 @@ function validateCaptureRequest(input) {
     springDebugBones: readStringList(input.springDebugBones, input.springDebugBone),
     springDebugAllOffsets: readBoolean(input.springDebugAllOffsets),
   };
+}
+
+function normalizeBodyDebugMode(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const normalized = String(value);
+  return [
+    "skin",
+    "h_r",
+    "h_g",
+    "h_b",
+    "h_a",
+    "vertex_r",
+    "vertex_g",
+    "base_shadow",
+    "ndotl_raw",
+    "h_b_adjusted_shadow",
+    "ambient_target",
+    "ambient_weight",
+    "ambient_tint",
+    "specular",
+    "specular_mask",
+    "specular_add",
+    "rim_raw",
+    "rim_add",
+    "rim_gate",
+    "rim_color",
+    "rim_scalar",
+    "toon_luma",
+    "shadow_mask",
+    "shadow_target",
+  ].includes(normalized) ? normalized : undefined;
+}
+
+function normalizeFaceSdfDebugMode(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const normalized = String(value);
+  return ["sdf", "mask", "limit", "basis"].includes(normalized)
+    ? normalized
+    : undefined;
+}
+
+function normalizeFaceSdfDebugLightMode(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const normalized = String(value);
+  return ["scene", "front", "left", "right", "back"].includes(normalized)
+    ? normalized
+    : undefined;
 }
 
 function normalizeCameraPreset(value, fallback) {

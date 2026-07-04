@@ -569,10 +569,10 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uSkinColor2: { value: new THREE.Color(initial.skinColor2 ?? initial.warmColor) },
       uMainTex: { value: initial.mainTex ?? null },
       uShadowTex: { value: initial.shadowTex ?? null },
-      uFaceShadowTex: { value: null },
+      uFaceShadowTex: { value: initial.faceShadowTex ?? null },
       uUseMainTex: { value: initial.mainTex ? 1.0 : 0.0 },
       uUseShadowTex: { value: initial.shadowTex ? 1.0 : 0.0 },
-      uUseFaceShadowTex: { value: 0.0 },
+      uUseFaceShadowTex: { value: initial.faceShadowTex ? 1.0 : 0.0 },
       uLightDirection: { value: initial.lightDirection.clone().normalize() },
       uFaceRight: { value: new THREE.Vector3(1, 0, 0) },
       uFaceUp: { value: new THREE.Vector3(0, 1, 0) },
@@ -583,7 +583,7 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uFaceSdfUseLightDirection: { value: initial.faceSdfUseLightDirection ?? 0.5 },
       uFaceDebugMode: { value: initial.faceDebugMode ?? 0 },
       uFaceDebugLightMode: { value: initial.faceDebugLightMode ?? 0 },
-      uFaceSdfEnabled: { value: 0.0 },
+      uFaceSdfEnabled: { value: initial.faceSdfEnabled && initial.faceShadowTex ? 1.0 : 0.0 },
     },
     vertexShader: `
       #include <common>
@@ -665,11 +665,13 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
         vec3 color = mainColor;
         float faceSkinLuma = dot(mainColor, vec3(0.299, 0.587, 0.114));
         float faceSkinMask = smoothstep(0.46, 0.82, faceSkinLuma) * (1.0 - smoothstep(0.92, 0.99, faceSkinLuma));
-        vec3 faceSkinTint = color * vec3(1.035, 0.970, 0.945);
-        color = mix(color, faceSkinTint, faceSkinMask * 0.58);
+        float faceSkinRamp = smoothstep(0.36, 0.92, mainSample.r);
+        vec3 faceSkinLit = mix(uSkinColor1, uSkinColorDefault, faceSkinRamp);
+        vec3 faceSkinShadow = mix(uSkinColor2, uSkinColor1, faceSkinRamp);
+        color = mix(color, faceSkinLit, faceSkinMask * 0.58);
         if ((uFaceSdfEnabled > 0.5 || uFaceDebugMode > 0.5) && uUseShadowTex > 0.5 && uUseFaceShadowTex > 0.5) {
           vec3 shadowColor = texture2D(uShadowTex, vUv).rgb;
-          shadowColor = mix(shadowColor, shadowColor * vec3(1.075, 0.930, 1.015), faceSkinMask * 0.75);
+          shadowColor = mix(shadowColor, faceSkinShadow, faceSkinMask * 0.75);
           vec3 faceForward = normalize(uFaceForward);
           vec3 faceRight = normalize(uFaceRight - faceForward * dot(uFaceRight, faceForward));
           vec3 faceUp = normalize(uFaceUp - faceForward * dot(uFaceUp, faceForward) - faceRight * dot(uFaceUp, faceRight));
@@ -746,10 +748,10 @@ export function updateSekaiFaceMaterial(
   material.uniforms.uSkinColor2.value.set(next.skinColor2 ?? next.warmColor);
   material.uniforms.uMainTex.value = next.mainTex ?? null;
   material.uniforms.uShadowTex.value = next.shadowTex ?? null;
-  material.uniforms.uFaceShadowTex.value = null;
+  material.uniforms.uFaceShadowTex.value = next.faceShadowTex ?? null;
   material.uniforms.uUseMainTex.value = next.mainTex ? 1.0 : 0.0;
   material.uniforms.uUseShadowTex.value = next.shadowTex ? 1.0 : 0.0;
-  material.uniforms.uUseFaceShadowTex.value = 0.0;
+  material.uniforms.uUseFaceShadowTex.value = next.faceShadowTex ? 1.0 : 0.0;
   material.uniforms.uLightDirection.value.copy(
     next.lightDirection.clone().normalize()
   );
@@ -766,7 +768,7 @@ export function updateSekaiFaceMaterial(
     material.uniforms.uFaceDebugLightMode.value = next.faceDebugLightMode;
   }
   if (material.uniforms.uFaceSdfEnabled) {
-    material.uniforms.uFaceSdfEnabled.value = 0.0;
+    material.uniforms.uFaceSdfEnabled.value = next.faceSdfEnabled && next.faceShadowTex ? 1.0 : 0.0;
   }
 }
 

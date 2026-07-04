@@ -186,7 +186,13 @@ test("persistent capture server propagates config defaults into role parts captu
   assert.match(harnessSource, /phase: request\.phase \?\? config\.phase/);
   assert.match(harnessSource, /cameraPreset: request\.cameraPreset \?\? config\.cameraPreset/);
   assert.match(harnessSource, /characterYawMode: request\.characterYawMode \?\? config\.characterYawMode \?\? undefined/);
+  assert.match(harnessSource, /faceSdfEnabled: request\.faceSdfEnabled \?\? config\.faceSdfEnabled/);
+  assert.match(harnessSource, /faceSdfDebugMode: request\.faceSdfDebugMode \?\? config\.faceSdfDebugMode/);
+  assert.match(serverSource, /faceSdfEnabled: readBoolean\(input\.faceSdfEnabled\)/);
+  assert.match(serverSource, /faceSdfDebugMode: normalizeFaceSdfDebugMode\(input\.faceSdfDebugMode\)/);
   assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
+  assert.match(engineSource, /faceSdfEnabled\?: boolean/);
+  assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
   assert.match(engineSource, /characterYawMode\?: "0" \| "45" \| "-45" \| "90" \| "-90" \| "180" \| "face-camera"/);
   assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture"\)/);
   assert.match(engineSource, /this\.applyCaptureCharacterYawMode\(request\.characterYawMode\)/);
@@ -341,7 +347,7 @@ test("body shader does not carry pseudo neck contact shadow projection", () => {
   assert.doesNotMatch(shaderSource, /uNeckContact|neckContact|staticSkinContactShadow/);
 });
 
-test("face sdf is currently disabled in runtime material path", () => {
+test("face sdf is default-off and only enabled for explicit capable face materials", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -351,10 +357,39 @@ test("face sdf is currently disabled in runtime material path", () => {
     "utf8"
   );
 
-  assert.match(engineSource, /const faceSdfEnabled = false;/);
-  assert.match(engineSource, /const faceShadowTex = null;/);
-  assert.match(shaderSource, /uFaceSdfEnabled:\s*\{\s*value: 0\.0\s*\}/);
-  assert.match(shaderSource, /uUseFaceShadowTex:\s*\{\s*value: 0\.0\s*\}/);
+  assert.match(engineSource, /private faceSdfEnabled = false;/);
+  assert.match(engineSource, /setFaceSdfEnabled\(enabled: boolean\)/);
+  assert.match(engineSource, /shouldEnableFaceSdfForCurrentView\(\)/);
+  assert.match(engineSource, /hasFaceSdfUv1Attribute\(mesh: THREE\.Mesh\)/);
+  assert.doesNotMatch(engineSource, /ensureFaceSdfUv1Attribute/);
+  assert.match(engineSource, /resolvedEntry\.materialKind === "face_sdf" &&\s+Boolean\(resolvedEntry\.faceShadowTex\) &&\s+faceSdfUv1Available/s);
+  assert.match(engineSource, /shaderUniforms\.uFaceSdfEnabled\.value =\s+this\.shouldEnableFaceSdfForCurrentView\(\) && faceSdfCapable \? 1\.0 : 0\.0/s);
+  assert.match(engineSource, /faceSdfCapable/);
+  assert.match(engineSource, /faceSdfUv1Available/);
+  assert.match(shaderSource, /uFaceShadowTex:\s*\{\s*value: initial\.faceShadowTex \?\? null\s*\}/);
+  assert.match(shaderSource, /uUseFaceShadowTex:\s*\{\s*value: initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
+  assert.match(shaderSource, /uFaceSdfEnabled:\s*\{\s*value: initial\.faceSdfEnabled && initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
+  assert.match(shaderSource, /material\.uniforms\.uFaceSdfEnabled\.value = next\.faceSdfEnabled && next\.faceShadowTex \? 1\.0 : 0\.0/);
+});
+
+test("skin colors drive face skin tint while body and face shadow controls stay separate", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+  const shaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
+    "utf8"
+  );
+
+  assert.match(shaderSource, /faceSkinLit = mix\(uSkinColor1, uSkinColorDefault, faceSkinRamp\)/);
+  assert.match(shaderSource, /faceSkinShadow = mix\(uSkinColor2, uSkinColor1, faceSkinRamp\)/);
+  assert.match(shaderSource, /color = mix\(color, faceSkinLit, faceSkinMask \* 0\.58\)/);
+  assert.match(engineSource, /shaderSkinColorDefault/);
+  assert.match(engineSource, /shaderSkinColor1/);
+  assert.match(engineSource, /shaderSkinColor2/);
+  assert.match(engineSource, /bodyDebugMode\?: BodyDebugMode/);
+  assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
 });
 
 test("projected character shadows are separate scene objects", () => {

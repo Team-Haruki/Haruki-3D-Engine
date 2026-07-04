@@ -130,6 +130,10 @@ export type HarukiCaptureRolePartsRequest = {
   traceUtjMaxEvents?: number;
   springDebugBones?: string[];
   springDebugAllOffsets?: boolean;
+  bodyDebugMode?: BodyDebugMode;
+  faceSdfEnabled?: boolean;
+  faceSdfDebugMode?: FaceSdfDebugMode;
+  faceSdfDebugLightMode?: FaceSdfDebugLightMode;
 };
 
 export type HarukiPrepareCaptureFrameRequest = {
@@ -144,6 +148,10 @@ export type HarukiPrepareCaptureFrameRequest = {
   traceUtjMaxEvents?: number;
   springDebugBones?: string[];
   springDebugAllOffsets?: boolean;
+  bodyDebugMode?: BodyDebugMode;
+  faceSdfEnabled?: boolean;
+  faceSdfDebugMode?: FaceSdfDebugMode;
+  faceSdfDebugLightMode?: FaceSdfDebugLightMode;
 };
 
 export type HarukiCaptureRolePartsResult = {
@@ -302,12 +310,15 @@ export type RuntimeMaterialDebug = {
   shaderSkinTintEnabled?: number | null;
   shaderSkinColorDefault?: string | null;
   shaderSkinColor1?: string | null;
+  shaderSkinColor2?: string | null;
   shaderBodyDebugMode?: number | null;
   shaderFaceSoftness?: number | null;
   shaderFaceSdfUseLightDirection?: number | null;
   shaderFaceDebugMode?: number | null;
   shaderFaceDebugLightMode?: number | null;
   shaderFaceSdfEnabled?: number | null;
+  faceSdfCapable?: boolean | null;
+  faceSdfUv1Available?: boolean | null;
   shaderAtlasTileX?: number | null;
   shaderAtlasTileY?: number | null;
   shaderAtlasSample?: number | null;
@@ -1501,7 +1512,7 @@ function cloneFaceShaderMaterial(
       `#${source.uniforms.uSkinColor2.value.getHexString()}`,
     mainTex: params.mainTex ?? null,
     shadowTex: params.shadowTex ?? null,
-    faceShadowTex: null,
+    faceShadowTex: params.faceShadowTex ?? null,
     lightDirection: source.uniforms.uLightDirection.value.clone(),
     lightIntensity: source.uniforms.uLightIntensity.value,
     ambientIntensity: source.uniforms.uAmbientIntensity.value,
@@ -1509,7 +1520,7 @@ function cloneFaceShaderMaterial(
     faceSdfUseLightDirection: source.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
     faceDebugMode: source.uniforms.uFaceDebugMode?.value ?? 0,
     faceDebugLightMode: source.uniforms.uFaceDebugLightMode?.value ?? 0,
-    faceSdfEnabled: false,
+    faceSdfEnabled: params.faceSdfEnabled ?? false,
   });
   updateSekaiFaceBasis(
     material,
@@ -1520,21 +1531,8 @@ function cloneFaceShaderMaterial(
   return material;
 }
 
-function ensureFaceSdfUv1Attribute(mesh: THREE.Mesh) {
-  const geometry = mesh.geometry;
-  if (!geometry || geometry.getAttribute("uv1")) {
-    return;
-  }
-  const uv = geometry.getAttribute("uv");
-  if (!uv) {
-    return;
-  }
-  const uv1 = new Float32Array(uv.count * 2);
-  for (let i = 0; i < uv.count; i += 1) {
-    uv1[i * 2] = uv.getX(i);
-    uv1[i * 2 + 1] = uv.getY(i);
-  }
-  geometry.setAttribute("uv1", new THREE.BufferAttribute(uv1, 2));
+function hasFaceSdfUv1Attribute(mesh: THREE.Mesh) {
+  return Boolean(mesh.geometry?.getAttribute("uv1"));
 }
 
 function isMorphMesh(node: THREE.Object3D): node is THREE.Mesh {
@@ -3683,6 +3681,7 @@ export class Haruki3DEngine {
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
   private toonValueShadowInfluence = 0;
+  private faceSdfEnabled = false;
   private faceSdfDebugMode: FaceSdfDebugMode = "off";
   private faceSdfDebugLightMode: FaceSdfDebugLightMode = "scene";
   private renderIsolationMode: RenderIsolationMode = "normal";
@@ -4038,6 +4037,11 @@ export class Haruki3DEngine {
     this.applyFaceSdfDebugUniforms();
   }
 
+  setFaceSdfEnabled(enabled: boolean) {
+    this.faceSdfEnabled = enabled;
+    this.applyFaceSdfRuntimeUniforms();
+  }
+
   setBodyDebugMode(mode: BodyDebugMode) {
     this.bodyDebugMode = mode;
     this.applyBodyDebugUniforms();
@@ -4132,7 +4136,7 @@ export class Haruki3DEngine {
   }
 
   private applyRenderIsolationMode() {
-    const faceSdfEnabled = false;
+    const faceSdfEnabled = this.shouldEnableFaceSdfForCurrentView();
     const eyelightOnly = this.renderIsolationMode === "eyelight_only";
     const noEyelight = this.renderIsolationMode === "no_eyelight";
     const faceLayersVisible = this.renderIsolationMode !== "no_face_layers";
@@ -4202,7 +4206,8 @@ export class Haruki3DEngine {
         if (material instanceof THREE.ShaderMaterial) {
           const materialDraws = material.visible !== false && material.colorWrite !== false;
           if (material.uniforms.uFaceSdfEnabled) {
-            material.uniforms.uFaceSdfEnabled.value = faceSdfEnabled ? 1.0 : 0.0;
+            material.uniforms.uFaceSdfEnabled.value =
+              faceSdfEnabled && this.isFaceSdfCapableMaterial(material) ? 1.0 : 0.0;
             isFaceLayer = true;
           }
           if (material.uniforms.uMode && !material.uniforms.uFaceSdfEnabled) {
@@ -4237,7 +4242,45 @@ export class Haruki3DEngine {
     for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
       for (const entry of entries) {
         if (entry.shaderFaceSdfEnabled !== undefined || entry.resolvedKind === "face_sdf") {
-          entry.shaderFaceSdfEnabled = faceSdfEnabled ? 1.0 : 0.0;
+          const capable = entry.faceSdfCapable === true;
+          entry.shaderFaceSdfEnabled = faceSdfEnabled && capable ? 1.0 : 0.0;
+        }
+      }
+    }
+  }
+
+  private shouldEnableFaceSdfForCurrentView() {
+    if (this.renderIsolationMode === "no_face_sdf") {
+      return false;
+    }
+    return this.faceSdfEnabled || this.renderIsolationMode === "face_sdf";
+  }
+
+  private isFaceSdfCapableMaterial(material: THREE.ShaderMaterial) {
+    return material.userData.pjskFaceSdfCapable === true;
+  }
+
+  private applyFaceSdfRuntimeUniforms() {
+    const enabled = this.shouldEnableFaceSdfForCurrentView();
+    for (const slot of [this.bodySlot, this.headSlot]) {
+      slot.traverse((node) => {
+        const mesh = node as THREE.Mesh;
+        if (!mesh.isMesh) {
+          return;
+        }
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        for (const material of materials) {
+          if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceSdfEnabled) {
+            material.uniforms.uFaceSdfEnabled.value =
+              enabled && this.isFaceSdfCapableMaterial(material) ? 1.0 : 0.0;
+          }
+        }
+      });
+    }
+    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
+      for (const entry of entries) {
+        if (entry.shaderFaceSdfEnabled !== undefined || entry.resolvedKind === "face_sdf") {
+          entry.shaderFaceSdfEnabled = enabled && entry.faceSdfCapable === true ? 1.0 : 0.0;
         }
       }
     }
@@ -5027,6 +5070,10 @@ export class Haruki3DEngine {
       warmupMode: request.warmupMode,
       cameraPreset: request.cameraPreset,
       characterYawMode: request.characterYawMode,
+      bodyDebugMode: request.bodyDebugMode,
+      faceSdfEnabled: request.faceSdfEnabled,
+      faceSdfDebugMode: request.faceSdfDebugMode,
+      faceSdfDebugLightMode: request.faceSdfDebugLightMode,
       traceUtjBones: request.traceUtjBones,
       traceUtjMaxEvents: request.traceUtjMaxEvents,
       springDebugBones: request.springDebugBones,
@@ -5045,6 +5092,18 @@ export class Haruki3DEngine {
   async prepareCaptureFrame(request: HarukiPrepareCaptureFrameRequest = {}) {
     this.setPresentationMode("capture");
     this.setSpringRuntimeMode("unity-prefab");
+    if (request.bodyDebugMode !== undefined) {
+      this.setBodyDebugMode(request.bodyDebugMode);
+    }
+    if (request.faceSdfEnabled !== undefined) {
+      this.setFaceSdfEnabled(request.faceSdfEnabled);
+    }
+    if (request.faceSdfDebugMode !== undefined) {
+      this.setFaceSdfDebugMode(request.faceSdfDebugMode);
+    }
+    if (request.faceSdfDebugLightMode !== undefined) {
+      this.setFaceSdfDebugLightMode(request.faceSdfDebugLightMode);
+    }
     this.setUtjSpringBoneTraceFilters(
       request.traceUtjBones ?? [],
       request.traceUtjMaxEvents
@@ -6592,6 +6651,9 @@ export class Haruki3DEngine {
             shaderSkinColor1: shaderUniforms?.uSkinColor1?.value
               ? `#${shaderUniforms.uSkinColor1.value.getHexString()}`
               : null,
+            shaderSkinColor2: shaderUniforms?.uSkinColor2?.value
+              ? `#${shaderUniforms.uSkinColor2.value.getHexString()}`
+              : null,
             shaderBodyDebugMode:
               shaderUniforms?.uBodyDebugMode?.value ?? null,
           });
@@ -6648,7 +6710,7 @@ export class Haruki3DEngine {
       const mainTex = await this.loadTexture(slot.mainTex);
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      const faceShadowTex = null;
+      const faceShadowTex = await this.loadTexture(slot.faceShadowTex);
       const kind = slot.materialKind ?? "face";
       const lighting = tuneLightingForPreview(kind, slot.lighting);
       let material: THREE.Material;
@@ -6872,11 +6934,11 @@ export class Haruki3DEngine {
           skinColorDefault: headAsset.proxy.skinColorDefault ?? headAsset.proxy.faceColor,
           skinColor1: headAsset.proxy.skinColor1 ?? headAsset.proxy.faceShadeColor,
           skinColor2: headAsset.proxy.skinColor2 ?? headAsset.proxy.faceShadeColor,
+          faceSdfEnabled: false,
         });
         if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceDebugMode) {
           material.uniforms.uFaceDebugMode.value = faceSdfDebugModeToUniform(this.faceSdfDebugMode);
           material.uniforms.uFaceDebugLightMode.value = faceSdfDebugLightModeToUniform(this.faceSdfDebugLightMode);
-          material.uniforms.uFaceSdfEnabled.value = 0.0;
         }
         material.side = THREE.FrontSide;
         configureBaseStencilClear(material);
@@ -6992,8 +7054,16 @@ export class Haruki3DEngine {
             resolvedEntry.material instanceof THREE.ShaderMaterial
               ? resolvedEntry.material.uniforms
               : null;
-          if (shaderUniforms?.uFaceShadowTex) {
-            ensureFaceSdfUv1Attribute(mesh);
+          const faceSdfUv1Available = hasFaceSdfUv1Attribute(mesh);
+          const faceSdfCapable =
+            resolvedEntry.materialKind === "face_sdf" &&
+            Boolean(resolvedEntry.faceShadowTex) &&
+            faceSdfUv1Available;
+          if (resolvedEntry.material instanceof THREE.ShaderMaterial && shaderUniforms?.uFaceShadowTex) {
+            resolvedEntry.material.userData.pjskFaceSdfCapable = faceSdfCapable;
+            resolvedEntry.material.userData.pjskFaceSdfUv1Available = faceSdfUv1Available;
+            shaderUniforms.uFaceSdfEnabled.value =
+              this.shouldEnableFaceSdfForCurrentView() && faceSdfCapable ? 1.0 : 0.0;
           }
           resolvedEntriesByIndex[index] = resolvedEntry;
           this.runtimeDebug.head.push({
@@ -7047,12 +7117,23 @@ export class Haruki3DEngine {
             shaderShadowTexWeight: shaderUniforms?.uShadowTexWeight?.value ?? null,
             shaderSaturation: shaderUniforms?.uSaturation?.value ?? null,
             shaderSkinTintEnabled: shaderUniforms?.uSkinTintEnabled?.value ?? null,
+            shaderSkinColorDefault: shaderUniforms?.uSkinColorDefault?.value
+              ? `#${shaderUniforms.uSkinColorDefault.value.getHexString()}`
+              : null,
+            shaderSkinColor1: shaderUniforms?.uSkinColor1?.value
+              ? `#${shaderUniforms.uSkinColor1.value.getHexString()}`
+              : null,
+            shaderSkinColor2: shaderUniforms?.uSkinColor2?.value
+              ? `#${shaderUniforms.uSkinColor2.value.getHexString()}`
+              : null,
             shaderFaceSoftness: shaderUniforms?.uFaceSoftness?.value ?? null,
             shaderFaceSdfUseLightDirection:
               shaderUniforms?.uFaceSdfUseLightDirection?.value ?? null,
             shaderFaceDebugMode: shaderUniforms?.uFaceDebugMode?.value ?? null,
             shaderFaceDebugLightMode: shaderUniforms?.uFaceDebugLightMode?.value ?? null,
             shaderFaceSdfEnabled: shaderUniforms?.uFaceSdfEnabled?.value ?? null,
+            faceSdfCapable,
+            faceSdfUv1Available,
             shaderAtlasTileX: shaderUniforms?.uAtlasTile?.value?.x ?? null,
             shaderAtlasTileY: shaderUniforms?.uAtlasTile?.value?.y ?? null,
             shaderAtlasSample: shaderUniforms?.uAtlasSample?.value ?? null,

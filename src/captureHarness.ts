@@ -8,6 +8,10 @@ import {
   type RenderIsolationMode,
 } from "./index";
 import {
+  type FaceSdfDebugLightMode,
+  type FaceSdfDebugMode,
+} from "./engine/Haruki3DEngine";
+import {
   characterYawDegreesByMode,
   type CharacterYawMode,
   type SpringRuntimeMode,
@@ -33,6 +37,9 @@ type CaptureConfig = {
   warmupFrames: number;
   warmupMode: "animation" | "runtime";
   bodyDebugMode: BodyDebugMode;
+  faceSdfEnabled: boolean;
+  faceSdfDebugMode: FaceSdfDebugMode;
+  faceSdfDebugLightMode: FaceSdfDebugLightMode;
   renderIsolation: RenderIsolationMode;
   springRuntimeMode: SpringRuntimeMode;
   cameraPreset: PjskCameraPreset;
@@ -85,6 +92,9 @@ function readCaptureConfig(): CaptureConfig | null {
     warmupFrames: Math.max(Math.trunc(Number.isFinite(warmupFrames) ? warmupFrames : 0), 0),
     warmupMode: warmupModeParam === "runtime" ? "runtime" : "animation",
     bodyDebugMode: readBodyDebugMode(params),
+    faceSdfEnabled: readBoolean(params.get("faceSdfEnabled")),
+    faceSdfDebugMode: readFaceSdfDebugMode(params),
+    faceSdfDebugLightMode: readFaceSdfDebugLightMode(params),
     renderIsolation: readRenderIsolationMode(params),
     springRuntimeMode: readSpringRuntimeMode(params),
     cameraPreset: readCameraPreset(params),
@@ -132,6 +142,36 @@ function readBodyDebugMode(params: URLSearchParams): BodyDebugMode {
       return mode;
     default:
       return "off";
+  }
+}
+
+function readBoolean(value: string | null) {
+  return value === "true" || value === "1";
+}
+
+function readFaceSdfDebugMode(params: URLSearchParams): FaceSdfDebugMode {
+  const mode = params.get("faceSdfDebugMode");
+  switch (mode) {
+    case "sdf":
+    case "mask":
+    case "limit":
+    case "basis":
+      return mode;
+    default:
+      return "off";
+  }
+}
+
+function readFaceSdfDebugLightMode(params: URLSearchParams): FaceSdfDebugLightMode {
+  const mode = params.get("faceSdfDebugLightMode");
+  switch (mode) {
+    case "front":
+    case "left":
+    case "right":
+    case "back":
+      return mode;
+    default:
+      return "scene";
   }
 }
 
@@ -246,6 +286,10 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       warmupMode: request.warmupMode ?? config.warmupMode,
       cameraPreset: request.cameraPreset ?? config.cameraPreset,
       characterYawMode: request.characterYawMode ?? config.characterYawMode ?? undefined,
+      bodyDebugMode: request.bodyDebugMode ?? config.bodyDebugMode,
+      faceSdfEnabled: request.faceSdfEnabled ?? config.faceSdfEnabled,
+      faceSdfDebugMode: request.faceSdfDebugMode ?? config.faceSdfDebugMode,
+      faceSdfDebugLightMode: request.faceSdfDebugLightMode ?? config.faceSdfDebugLightMode,
     });
     const snapshots = {
       ...result.snapshots,
@@ -298,6 +342,9 @@ async function prepareCaptureFrame(config: CaptureConfig) {
     requestedClip: config.clip,
     springRuntimeMode: config.springRuntimeMode,
     bodyDebugMode: config.bodyDebugMode,
+    faceSdfEnabled: config.faceSdfEnabled,
+    faceSdfDebugMode: config.faceSdfDebugMode,
+    faceSdfDebugLightMode: config.faceSdfDebugLightMode,
     renderIsolation: config.renderIsolation,
     cameraPreset: config.cameraPreset,
     animation: snapshots.animation,
@@ -321,6 +368,9 @@ async function bootstrapCapture() {
     engine.setPresentationMode("capture");
     engine.setSpringRuntimeMode(config.springRuntimeMode);
     engine.setBodyDebugMode(config.bodyDebugMode);
+    engine.setFaceSdfEnabled(config.faceSdfEnabled);
+    engine.setFaceSdfDebugMode(config.faceSdfDebugMode);
+    engine.setFaceSdfDebugLightMode(config.faceSdfDebugLightMode);
     engine.setRenderIsolationMode(config.renderIsolation);
     engine.applyCameraPreset(config.cameraPreset);
     if (config.characterYawMode && config.characterYawMode !== "face-camera") {
