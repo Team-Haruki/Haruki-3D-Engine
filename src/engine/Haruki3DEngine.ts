@@ -942,6 +942,29 @@ function isFaceOrFaceLayerMaterialKind(kind: unknown) {
     isFaceLayerMaterialKind(kind);
 }
 
+function normalizeHeadRuntimeMaterialKind(
+  materialKind: string,
+  meshName: string | null | undefined,
+  materialName: string | null | undefined
+) {
+  const meshNameLower = (meshName ?? "").toLowerCase();
+  const materialNameLower = (materialName ?? "").toLowerCase();
+  if (
+    materialNameLower.includes("_hair_") ||
+    meshNameLower.includes("hair")
+  ) {
+    return "hair";
+  }
+  if (
+    materialNameLower.includes("_acc_") ||
+    meshNameLower === "acc" ||
+    meshNameLower.endsWith("/acc")
+  ) {
+    return "accessory";
+  }
+  return materialKind;
+}
+
 function getEyeThroughHairSourceKind(kind: unknown) {
   switch (kind) {
     case "eye_through_hair":
@@ -6712,7 +6735,7 @@ export class Haruki3DEngine {
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
       const faceShadowTex = await this.loadTexture(slot.faceShadowTex);
-      const kind = slot.materialKind ?? "face";
+      const kind = normalizeHeadRuntimeMaterialKind(slot.materialKind ?? "face", slot.meshName, slot.materialName);
       const lighting = tuneLightingForPreview(kind, slot.lighting);
       let material: THREE.Material;
       let topLayerMaterial: THREE.Material | null = null;

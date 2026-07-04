@@ -370,6 +370,27 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.match(shaderSource, /uUseFaceShadowTex:\s*\{\s*value: initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
   assert.match(shaderSource, /uFaceSdfEnabled:\s*\{\s*value: initial\.faceSdfEnabled && initial\.faceShadowTex \? 1\.0 : 0\.0\s*\}/);
   assert.match(shaderSource, /material\.uniforms\.uFaceSdfEnabled\.value = next\.faceSdfEnabled && next\.faceShadowTex \? 1\.0 : 0\.0/);
+  assert.doesNotMatch(
+    shaderSource,
+    /if \(\(uFaceSdfEnabled > 0\.5 \|\| uFaceDebugMode > 0\.5\) && uUseShadowTex > 0\.5 && uUseFaceShadowTex > 0\.5\)/,
+    "ordinary face shadow texture must not be gated by the FaceSDF enable switch"
+  );
+});
+
+test("head material binding normalizes old runtime hair and accessory kinds before FaceSDF fallback", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /normalizeHeadRuntimeMaterialKind/);
+  assert.match(engineSource, /materialNameLower\.includes\("_hair_"\)/);
+  assert.match(engineSource, /meshNameLower\.includes\("hair"\)/);
+  assert.match(engineSource, /return "hair";/);
+  assert.match(engineSource, /materialNameLower\.includes\("_acc_"\)/);
+  assert.match(engineSource, /meshNameLower === "acc"/);
+  assert.match(engineSource, /return "accessory";/);
+  assert.match(engineSource, /const kind = normalizeHeadRuntimeMaterialKind\(slot\.materialKind \?\? "face", slot\.meshName, slot\.materialName\);/);
 });
 
 test("skin colors drive face skin tint while body and face shadow controls stay separate", () => {
