@@ -389,6 +389,25 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.doesNotMatch(shaderSource, /staticShadowMask/);
 });
 
+test("body shader does not consume face sdf range controls for neck or collar shading", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+  const shaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
+    "utf8"
+  );
+
+  assert.doesNotMatch(shaderSource, /uFaceShadowRangeLimit/);
+  assert.doesNotMatch(shaderSource, /uHeadDotDirectionalLight/);
+  assert.doesNotMatch(shaderSource, /headDotShadow|headYawShadow|rangeLimit \* uShadowWeight/);
+  assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
+  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(engineSource, /if \(material\.uniforms\.uHeadPosition\) \{\s+material\.uniforms\.uHeadPosition\.value\.copy\(this\.hairHeadPosition\);\s+\}/s);
+  assert.doesNotMatch(engineSource, /uniforms\.uHeadDotDirectionalLight\.value\.copy\(this\.headDotDirectionalLight\)/);
+});
+
 test("head material binding normalizes old runtime hair and accessory kinds before FaceSDF fallback", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),

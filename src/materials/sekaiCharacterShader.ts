@@ -29,9 +29,6 @@ export type BodyMaterialUniforms = {
   hairShadowEnabled?: boolean;
   lambertEnabled?: boolean;
   headPosition?: THREE.Vector3;
-  faceShadowRangeLimitEnabled?: boolean;
-  faceShadowRangeLimit?: number;
-  headDotDirectionalLight?: THREE.Vector2;
   saturation?: number;
   partsAmbientColor?: THREE.ColorRepresentation;
   reflectionBlendColor?: THREE.ColorRepresentation;
@@ -105,11 +102,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uLambertEnabled: { value: initial.lambertEnabled ? 1.0 : 0.0 },
       uHeadPosition: {
         value: (initial.headPosition ?? new THREE.Vector3()).clone(),
-      },
-      uFaceShadowRangeLimitEnabled: { value: initial.faceShadowRangeLimitEnabled ? 1.0 : 0.0 },
-      uFaceShadowRangeLimit: { value: initial.faceShadowRangeLimit ?? 0.0 },
-      uHeadDotDirectionalLight: {
-        value: (initial.headDotDirectionalLight ?? new THREE.Vector2(0, 0)).clone(),
       },
       uSaturation: { value: initial.saturation ?? 0.5 },
       uSkinTintEnabled: { value: initial.skinTintEnabled === false ? 0.0 : 1.0 },
@@ -194,9 +186,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uniform float uHairShadowEnabled;
       uniform float uLambertEnabled;
       uniform vec3 uHeadPosition;
-      uniform float uFaceShadowRangeLimitEnabled;
-      uniform float uFaceShadowRangeLimit;
-      uniform vec2 uHeadDotDirectionalLight;
       uniform float uSaturation;
       uniform float uSkinTintEnabled;
       uniform float uAlphaCutoff;
@@ -294,12 +283,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
           float behindHead = smoothstep(0.1, 0.92, dot(headDirection, -lightDir));
           float headProximity = 1.0 - smoothstep(0.18, 0.78, headDistance);
           shadowBand = max(shadowBand, behindHead * headProximity * 0.42 * uShadowWeight);
-        }
-        if (uFaceShadowRangeLimitEnabled > 0.5) {
-          float headDotShadow = clamp(1.0 - uHeadDotDirectionalLight.x, 0.0, 1.0);
-          float headYawShadow = clamp(uHeadDotDirectionalLight.y, 0.0, 1.0);
-          float rangeLimit = clamp(uFaceShadowRangeLimit, 0.0, 1.0);
-          shadowBand = max(shadowBand, headDotShadow * headYawShadow * rangeLimit * uShadowWeight);
         }
         litBand = clamp(1.0 - shadowBand, 0.0, 1.0);
 
@@ -504,15 +487,6 @@ export function updateSekaiBodyMaterial(
   }
   if (next.headPosition && material.uniforms.uHeadPosition) {
     material.uniforms.uHeadPosition.value.copy(next.headPosition);
-  }
-  if (next.faceShadowRangeLimitEnabled !== undefined && material.uniforms.uFaceShadowRangeLimitEnabled) {
-    material.uniforms.uFaceShadowRangeLimitEnabled.value = next.faceShadowRangeLimitEnabled ? 1.0 : 0.0;
-  }
-  if (next.faceShadowRangeLimit !== undefined && material.uniforms.uFaceShadowRangeLimit) {
-    material.uniforms.uFaceShadowRangeLimit.value = next.faceShadowRangeLimit;
-  }
-  if (next.headDotDirectionalLight && material.uniforms.uHeadDotDirectionalLight) {
-    material.uniforms.uHeadDotDirectionalLight.value.copy(next.headDotDirectionalLight);
   }
   material.uniforms.uCharacterAmbientIntensity.value = next.characterAmbientIntensity ?? 0.3;
   material.uniforms.uRimIntensity.value = next.rimIntensity ?? 0.35;

@@ -299,10 +299,6 @@ export type RuntimeMaterialDebug = {
   shaderValueShadowInfluence?: number | null;
   shaderHairShadowEnabled?: number | null;
   shaderLambertEnabled?: number | null;
-  shaderFaceShadowRangeLimitEnabled?: number | null;
-  shaderFaceShadowRangeLimit?: number | null;
-  shaderHeadDotDirectionalLightX?: number | null;
-  shaderHeadDotDirectionalLightY?: number | null;
   shaderSpecularPower?: number | null;
   shaderRimThreshold?: number | null;
   shaderControllerRimThreshold?: number | null;
@@ -1432,9 +1428,6 @@ function cloneBodyShaderMaterial(
     hairShadowEnabled?: boolean;
     lambertEnabled?: boolean;
     headPosition?: THREE.Vector3;
-    faceShadowRangeLimitEnabled?: boolean;
-    faceShadowRangeLimit?: number;
-    headDotDirectionalLight?: THREE.Vector2;
     alphaCutoff?: number;
   }
 ) {
@@ -1493,16 +1486,6 @@ function cloneBodyShaderMaterial(
     headPosition:
       params.headPosition ??
       source.uniforms.uHeadPosition?.value.clone(),
-    faceShadowRangeLimitEnabled:
-      params.faceShadowRangeLimitEnabled ??
-      ((source.uniforms.uFaceShadowRangeLimitEnabled?.value ?? 0.0) > 0.5),
-    faceShadowRangeLimit:
-      params.faceShadowRangeLimit ??
-      source.uniforms.uFaceShadowRangeLimit?.value ??
-      0.0,
-    headDotDirectionalLight:
-      params.headDotDirectionalLight ??
-      source.uniforms.uHeadDotDirectionalLight?.value.clone(),
     saturation: params.lighting?.saturation ?? source.uniforms.uSaturation.value,
     partsAmbientColor:
       params.lighting?.partsAmbientColor ??
@@ -6605,14 +6588,6 @@ export class Haruki3DEngine {
             shaderValueShadowInfluence:
               shaderUniforms?.uValueShadowInfluence?.value ?? null,
             shaderLambertEnabled: shaderUniforms?.uLambertEnabled?.value ?? null,
-            shaderFaceShadowRangeLimitEnabled:
-              shaderUniforms?.uFaceShadowRangeLimitEnabled?.value ?? null,
-            shaderFaceShadowRangeLimit:
-              shaderUniforms?.uFaceShadowRangeLimit?.value ?? null,
-            shaderHeadDotDirectionalLightX:
-              shaderUniforms?.uHeadDotDirectionalLight?.value?.x ?? null,
-            shaderHeadDotDirectionalLightY:
-              shaderUniforms?.uHeadDotDirectionalLight?.value?.y ?? null,
             shaderSpecularPower: shaderUniforms?.uSpecularPower?.value ?? null,
             shaderRimThreshold: shaderUniforms?.uRimThreshold?.value ?? null,
             shaderControllerRimThreshold:
@@ -7075,16 +7050,8 @@ export class Haruki3DEngine {
                 ? shaderUniforms?.uHairShadowEnabled?.value ?? null
                 : null,
             shaderLambertEnabled: shaderUniforms?.uLambertEnabled?.value ?? null,
-            shaderFaceShadowRangeLimitEnabled:
-              shaderUniforms?.uFaceShadowRangeLimitEnabled?.value ?? null,
-            shaderFaceShadowRangeLimit:
-              shaderUniforms?.uFaceShadowRangeLimit?.value ?? null,
             shaderBodyDebugMode:
               shaderUniforms?.uBodyDebugMode?.value ?? null,
-            shaderHeadDotDirectionalLightX:
-              shaderUniforms?.uHeadDotDirectionalLight?.value?.x ?? null,
-            shaderHeadDotDirectionalLightY:
-              shaderUniforms?.uHeadDotDirectionalLight?.value?.y ?? null,
             shaderSpecularPower: shaderUniforms?.uSpecularPower?.value ?? null,
             shaderRimThreshold: shaderUniforms?.uRimThreshold?.value ?? null,
             shaderControllerRimThreshold:
@@ -7859,37 +7826,11 @@ export class Haruki3DEngine {
               this.faceForwardWorld
             );
           }
-          const uniforms = material.uniforms;
-          if (uniforms.uHeadDotDirectionalLight) {
-            uniforms.uHeadDotDirectionalLight.value.copy(this.headDotDirectionalLight);
-          }
-          if (uniforms.uHeadPosition) {
-            uniforms.uHeadPosition.value.copy(this.hairHeadPosition);
-          }
-          if (
-            uniforms.uFaceShadowRangeLimitEnabled &&
-            uniforms.uFaceShadowRangeLimitEnabled.value > 0.5 &&
-            uniforms.uFaceShadowRangeLimit
-          ) {
-            uniforms.uFaceShadowRangeLimit.value = 1.0;
+          if (material.uniforms.uHeadPosition) {
+            material.uniforms.uHeadPosition.value.copy(this.hairHeadPosition);
           }
         }
       });
-    }
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        if (entry.shaderHeadDotDirectionalLightX !== undefined) {
-          entry.shaderHeadDotDirectionalLightX = this.headDotDirectionalLight.x;
-          entry.shaderHeadDotDirectionalLightY = this.headDotDirectionalLight.y;
-        }
-        if (
-          entry.shaderFaceShadowRangeLimitEnabled !== undefined &&
-          entry.shaderFaceShadowRangeLimitEnabled !== null &&
-          entry.shaderFaceShadowRangeLimitEnabled > 0.5
-        ) {
-          entry.shaderFaceShadowRangeLimit = 1.0;
-        }
-      }
     }
   }
 
