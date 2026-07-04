@@ -106,8 +106,6 @@ function readBodyDebugMode(params: URLSearchParams): BodyDebugMode {
   const mode = params.get("bodyDebugMode");
   switch (mode) {
     case "skin":
-    case "neck":
-    case "contact":
     case "h_r":
     case "h_g":
     case "h_b":

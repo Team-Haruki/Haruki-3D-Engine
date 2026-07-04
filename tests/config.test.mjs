@@ -327,7 +327,7 @@ test("combined runtime imports apply character height before capture camera fram
   );
 });
 
-test("experimental neck contact shadow cannot be enabled in production shading", () => {
+test("body shader does not carry pseudo neck contact shadow projection", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -337,23 +337,37 @@ test("experimental neck contact shadow cannot be enabled in production shading",
     "utf8"
   );
 
-  assert.match(engineSource, /const NECK_CONTACT_SHADOW_STRENGTH = 0\.0;/);
-  assert.match(
-    engineSource,
-    /if \(this\.bodyDebugMode === "off" && NECK_CONTACT_SHADOW_STRENGTH <= 0\.0\) \{\s+return;\s+\}/
+  assert.doesNotMatch(engineSource, /NECK_CONTACT|neckContact|BodyNeckContact|shaderNeckContact/);
+  assert.doesNotMatch(shaderSource, /uNeckContact|neckContact|staticSkinContactShadow/);
+});
+
+test("face sdf is currently disabled in runtime material path", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
   );
-  assert.match(
-    shaderSource,
-    /Experimental neck\/contact shadow is kept debuggable but disabled until its data path is complete\./
+  const shaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
+    "utf8"
   );
-  assert.doesNotMatch(
-    shaderSource,
-    /shadowBand\s*=\s*(?:max|mix)\([^;]*uNeckContactStrength/s
+
+  assert.match(engineSource, /const faceSdfEnabled = false;/);
+  assert.match(engineSource, /const faceShadowTex = null;/);
+  assert.match(shaderSource, /uFaceSdfEnabled:\s*\{\s*value: 0\.0\s*\}/);
+  assert.match(shaderSource, /uUseFaceShadowTex:\s*\{\s*value: 0\.0\s*\}/);
+});
+
+test("projected character shadows are separate scene objects", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
   );
-  assert.match(
-    shaderSource,
-    /material\.uniforms\.uNeckContactStrength\.value = 0\.0;/
-  );
+
+  assert.match(engineSource, /class CharacterProjectedShadowController/);
+  assert.match(engineSource, /CharacterDirectionalShadow/);
+  assert.match(engineSource, /CharacterCrossShadow/);
+  assert.match(engineSource, /this\.scene\.add\(this\.projectedShadow\.group\)/);
+  assert.match(engineSource, /distanceToFloor = DIRECTIONAL_SHADOW_HEIGHT \* heightRatio/);
 });
 
 test("capture runtime parser allows config to replace built-in defaults", () => {

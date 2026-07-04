@@ -43,12 +43,6 @@ export type BodyMaterialUniforms = {
   controllerShadowRimColorWeight?: number;
   controllerRimEdgeSmoothness?: number;
   controllerRimShadowSharpness?: number;
-  neckContactCenter?: THREE.Vector3;
-  neckContactSize?: THREE.Vector3;
-  neckContactBasisX?: THREE.Vector3;
-  neckContactBasisY?: THREE.Vector3;
-  neckContactBasisZ?: THREE.Vector3;
-  neckContactStrength?: number;
   bodyDebugMode?: number;
   skinTintEnabled?: boolean;
   alphaCutoff?: number;
@@ -80,22 +74,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       },
       uControllerRimEdgeSmoothness: { value: initial.controllerRimEdgeSmoothness ?? 0.38 },
       uControllerRimShadowSharpness: { value: initial.controllerRimShadowSharpness ?? 0.0 },
-      uNeckContactCenter: {
-        value: (initial.neckContactCenter ?? new THREE.Vector3(0, 1.62, 0.16)).clone(),
-      },
-      uNeckContactSize: {
-        value: (initial.neckContactSize ?? new THREE.Vector3(0.16, 0.08, 0.16)).clone(),
-      },
-      uNeckContactBasisX: {
-        value: (initial.neckContactBasisX ?? new THREE.Vector3(1, 0, 0)).clone().normalize(),
-      },
-      uNeckContactBasisY: {
-        value: (initial.neckContactBasisY ?? new THREE.Vector3(0, 1, 0)).clone().normalize(),
-      },
-      uNeckContactBasisZ: {
-        value: (initial.neckContactBasisZ ?? new THREE.Vector3(0, 0, 1)).clone().normalize(),
-      },
-      uNeckContactStrength: { value: 0.0 },
       uBodyDebugMode: { value: initial.bodyDebugMode ?? 0 },
       uMainTex: { value: initial.mainTex ?? null },
       uShadowTex: { value: initial.shadowTex ?? null },
@@ -188,12 +166,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uniform float uControllerShadowRimColorWeight;
       uniform float uControllerRimEdgeSmoothness;
       uniform float uControllerRimShadowSharpness;
-      uniform vec3 uNeckContactCenter;
-      uniform vec3 uNeckContactSize;
-      uniform vec3 uNeckContactBasisX;
-      uniform vec3 uNeckContactBasisY;
-      uniform vec3 uNeckContactBasisZ;
-      uniform float uNeckContactStrength;
       uniform float uBodyDebugMode;
       uniform sampler2D uMainTex;
       uniform sampler2D uShadowTex;
@@ -334,28 +306,9 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         // PJSK character shader semantics: C is the lit color; S already owns the toon-shadow target color.
         vec3 fallbackShadowColor = mainColor * uShadowColor * uGlobalShadowColor;
         vec3 shadowColor = (uUseShadowTex > 0.5) ? shadowValue * uGlobalShadowColor : fallbackShadowColor;
-        float staticShadowDelta = max(0.0, dot(rawMainColor - rawShadowValue, vec3(0.299, 0.587, 0.114)));
-        float hShadowPushMask = (uUseValueTex > 0.5) ? clamp((1.0 - valueSample.b) * 1.35, 0.0, 1.0) : 0.0;
-        vec3 neckContactSize = max(uNeckContactSize, vec3(0.001));
-        vec3 neckContactOffset = vModelPosition - uNeckContactCenter;
-        vec3 neckContactDelta = vec3(
-          dot(neckContactOffset, normalize(uNeckContactBasisX)),
-          dot(neckContactOffset, normalize(uNeckContactBasisY)),
-          dot(neckContactOffset, normalize(uNeckContactBasisZ))
-        ) / neckContactSize;
-        float neckContactPlane = 1.0 - smoothstep(0.9, 1.55, dot(neckContactDelta, neckContactDelta));
-        float authoredContactMask = max(hShadowPushMask, smoothstep(0.01, 0.09, staticShadowDelta));
-        float staticSkinContactShadow =
-          skinMask *
-          neckContactPlane *
-          mix(0.62, 1.0, authoredContactMask);
         if (uBodyDebugMode > 0.5 && uBodyDebugMode < 12.5) {
           float debugValue = skinMask;
-          if (uBodyDebugMode > 1.5 && uBodyDebugMode < 2.5) {
-            debugValue = neckContactPlane;
-          } else if (uBodyDebugMode > 2.5 && uBodyDebugMode < 3.5) {
-            debugValue = staticSkinContactShadow;
-          } else if (uBodyDebugMode > 3.5 && uBodyDebugMode < 4.5) {
+          if (uBodyDebugMode > 3.5 && uBodyDebugMode < 4.5) {
             debugValue = valueSample.r;
           } else if (uBodyDebugMode > 4.5 && uBodyDebugMode < 5.5) {
             debugValue = valueSample.g;
@@ -377,7 +330,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
           gl_FragColor = vec4(outputColor(vec3(debugValue)), 1.0);
           return;
         }
-        // Experimental neck/contact shadow is kept debuggable but disabled until its data path is complete.
         if (uBodyDebugMode > 23.5 && uBodyDebugMode < 24.5) {
           gl_FragColor = vec4(outputColor(vec3(clamp(toonLuma, 0.0, 1.0))), 1.0);
           return;
@@ -515,24 +467,6 @@ export function updateSekaiBodyMaterial(
     next.controllerShadowRimColorWeight ?? (next.controllerShadowRimColor ? 1.0 : 0.0);
   material.uniforms.uControllerRimEdgeSmoothness.value = next.controllerRimEdgeSmoothness ?? 0.38;
   material.uniforms.uControllerRimShadowSharpness.value = next.controllerRimShadowSharpness ?? 0.0;
-  if (next.neckContactCenter && material.uniforms.uNeckContactCenter) {
-    material.uniforms.uNeckContactCenter.value.copy(next.neckContactCenter);
-  }
-  if (next.neckContactSize && material.uniforms.uNeckContactSize) {
-    material.uniforms.uNeckContactSize.value.copy(next.neckContactSize);
-  }
-  if (next.neckContactBasisX && material.uniforms.uNeckContactBasisX) {
-    material.uniforms.uNeckContactBasisX.value.copy(next.neckContactBasisX).normalize();
-  }
-  if (next.neckContactBasisY && material.uniforms.uNeckContactBasisY) {
-    material.uniforms.uNeckContactBasisY.value.copy(next.neckContactBasisY).normalize();
-  }
-  if (next.neckContactBasisZ && material.uniforms.uNeckContactBasisZ) {
-    material.uniforms.uNeckContactBasisZ.value.copy(next.neckContactBasisZ).normalize();
-  }
-  if (next.neckContactStrength !== undefined && material.uniforms.uNeckContactStrength) {
-    material.uniforms.uNeckContactStrength.value = 0.0;
-  }
   if (next.bodyDebugMode !== undefined && material.uniforms.uBodyDebugMode) {
     material.uniforms.uBodyDebugMode.value = next.bodyDebugMode;
   }
@@ -635,10 +569,10 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uSkinColor2: { value: new THREE.Color(initial.skinColor2 ?? initial.warmColor) },
       uMainTex: { value: initial.mainTex ?? null },
       uShadowTex: { value: initial.shadowTex ?? null },
-      uFaceShadowTex: { value: initial.faceShadowTex ?? null },
+      uFaceShadowTex: { value: null },
       uUseMainTex: { value: initial.mainTex ? 1.0 : 0.0 },
       uUseShadowTex: { value: initial.shadowTex ? 1.0 : 0.0 },
-      uUseFaceShadowTex: { value: initial.faceShadowTex ? 1.0 : 0.0 },
+      uUseFaceShadowTex: { value: 0.0 },
       uLightDirection: { value: initial.lightDirection.clone().normalize() },
       uFaceRight: { value: new THREE.Vector3(1, 0, 0) },
       uFaceUp: { value: new THREE.Vector3(0, 1, 0) },
@@ -649,7 +583,7 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uFaceSdfUseLightDirection: { value: initial.faceSdfUseLightDirection ?? 0.5 },
       uFaceDebugMode: { value: initial.faceDebugMode ?? 0 },
       uFaceDebugLightMode: { value: initial.faceDebugLightMode ?? 0 },
-      uFaceSdfEnabled: { value: initial.faceSdfEnabled === false ? 0.0 : 1.0 },
+      uFaceSdfEnabled: { value: 0.0 },
     },
     vertexShader: `
       #include <common>
@@ -812,10 +746,10 @@ export function updateSekaiFaceMaterial(
   material.uniforms.uSkinColor2.value.set(next.skinColor2 ?? next.warmColor);
   material.uniforms.uMainTex.value = next.mainTex ?? null;
   material.uniforms.uShadowTex.value = next.shadowTex ?? null;
-  material.uniforms.uFaceShadowTex.value = next.faceShadowTex ?? null;
+  material.uniforms.uFaceShadowTex.value = null;
   material.uniforms.uUseMainTex.value = next.mainTex ? 1.0 : 0.0;
   material.uniforms.uUseShadowTex.value = next.shadowTex ? 1.0 : 0.0;
-  material.uniforms.uUseFaceShadowTex.value = next.faceShadowTex ? 1.0 : 0.0;
+  material.uniforms.uUseFaceShadowTex.value = 0.0;
   material.uniforms.uLightDirection.value.copy(
     next.lightDirection.clone().normalize()
   );
@@ -831,8 +765,8 @@ export function updateSekaiFaceMaterial(
   if (next.faceDebugLightMode !== undefined) {
     material.uniforms.uFaceDebugLightMode.value = next.faceDebugLightMode;
   }
-  if (next.faceSdfEnabled !== undefined && material.uniforms.uFaceSdfEnabled) {
-    material.uniforms.uFaceSdfEnabled.value = next.faceSdfEnabled ? 1.0 : 0.0;
+  if (material.uniforms.uFaceSdfEnabled) {
+    material.uniforms.uFaceSdfEnabled.value = 0.0;
   }
 }
 

@@ -49,7 +49,6 @@ import type {
 } from "../parts/runtimePartComposer";
 import { runtimeRoleId } from "../parts/runtimePartComposer";
 
-const NECK_CONTACT_SHADOW_STRENGTH = 0.0;
 const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241);
 const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
 const CAPTURE_CAMERA_TARGET_SCALE = new THREE.Vector3(
@@ -83,6 +82,14 @@ const EYELASH_THROUGH_HAIR_ALPHA = 0.55;
 const EYELASH_THROUGH_HAIR_ALPHA_CUTOFF = 0.25;
 const EYEBROW_THROUGH_HAIR_ALPHA = 0.55;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
+const PROJECTED_SHADOW_FLOOR_Y = 0;
+const PROJECTED_SHADOW_FLOOR_BIAS = 0.003;
+const DIRECTIONAL_SHADOW_WIDTH = 0.72;
+const DIRECTIONAL_SHADOW_HEIGHT = 1.06;
+const DIRECTIONAL_SHADOW_OPACITY = 0.28;
+const CROSS_SHADOW_SIZE = 0.46;
+const CROSS_SHADOW_HEIGHT_LIMIT = 1.65;
+const CROSS_SHADOW_OPACITY = 0.22;
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
 
@@ -186,8 +193,6 @@ export type MaterialBindingMode = "manifest" | "glb";
 export type BodyDebugMode =
   | "off"
   | "skin"
-  | "neck"
-  | "contact"
   | "h_r"
   | "h_g"
   | "h_b"
@@ -297,13 +302,6 @@ export type RuntimeMaterialDebug = {
   shaderSkinTintEnabled?: number | null;
   shaderSkinColorDefault?: string | null;
   shaderSkinColor1?: string | null;
-  shaderNeckContactCenterX?: number | null;
-  shaderNeckContactCenterY?: number | null;
-  shaderNeckContactCenterZ?: number | null;
-  shaderNeckContactSizeX?: number | null;
-  shaderNeckContactSizeY?: number | null;
-  shaderNeckContactSizeZ?: number | null;
-  shaderNeckContactStrength?: number | null;
   shaderBodyDebugMode?: number | null;
   shaderFaceSoftness?: number | null;
   shaderFaceSdfUseLightDirection?: number | null;
@@ -1279,47 +1277,10 @@ function drawCaptureTriangleBackground(width: number, height: number) {
   return canvas;
 }
 
-function getBodyNeckContactCenter(bodyAsset?: BodyAssetManifest | null) {
-  const anchor = bodyAsset?.neckAnchor ?? { x: 0, y: 1.62, z: 0.16 };
-  return new THREE.Vector3(anchor.x, anchor.y - 0.12, anchor.z - 0.04);
-}
-
-function getBodyNeckContactSize(bodyAsset?: BodyAssetManifest | null, coordinateScale = 1) {
-  const heightScale = THREE.MathUtils.clamp(bodyAsset?.characterHeightMeters ?? 1.6, 1.45, 1.85) / 1.6;
-  return new THREE.Vector3(0.22 * heightScale, 0.14 * heightScale, 0.34 * heightScale)
-    .multiplyScalar(coordinateScale);
-}
-
-function getBodyNeckContactCenterFromResolvedNeck(
-  neckPosition: THREE.Vector3,
-  coordinateScale: number,
-  basisY = new THREE.Vector3(0, 1, 0),
-  basisZ = new THREE.Vector3(0, 0, 1)
-) {
-  return neckPosition.clone()
-    .addScaledVector(basisY, -0.12 * coordinateScale)
-    .addScaledVector(basisZ, -0.04 * coordinateScale);
-}
-
-function getBodyNeckContactCoordinateScale(
-  bodyAsset: BodyAssetManifest,
-  neckPosition: THREE.Vector3
-) {
-  const manifestNeckY = Math.abs(bodyAsset.neckAnchor.y);
-  if (manifestNeckY <= 0.001) {
-    return 1;
-  }
-  return THREE.MathUtils.clamp(Math.abs(neckPosition.y) / manifestNeckY, 0.35, 1.2);
-}
-
 function bodyDebugModeToUniform(mode: BodyDebugMode) {
   switch (mode) {
     case "skin":
       return 1;
-    case "neck":
-      return 2;
-    case "contact":
-      return 3;
     case "h_r":
       return 4;
     case "h_g":
@@ -1384,12 +1345,6 @@ function cloneBodyShaderMaterial(
     skinColor2?: THREE.ColorRepresentation;
     lighting?: MaterialLightingSettings;
     skinTintEnabled?: boolean;
-    neckContactCenter?: THREE.Vector3;
-    neckContactSize?: THREE.Vector3;
-    neckContactBasisX?: THREE.Vector3;
-    neckContactBasisY?: THREE.Vector3;
-    neckContactBasisZ?: THREE.Vector3;
-    neckContactStrength?: number;
     bodyDebugMode?: number;
     shadowWidthOverride?: number | null;
     valueShadowInfluence?: number;
@@ -1498,24 +1453,6 @@ function cloneBodyShaderMaterial(
       source.uniforms.uControllerRimEdgeSmoothness?.value ?? 0.38,
     controllerRimShadowSharpness:
       source.uniforms.uControllerRimShadowSharpness?.value ?? 0,
-    neckContactCenter:
-      params.neckContactCenter ??
-      source.uniforms.uNeckContactCenter?.value.clone(),
-    neckContactSize:
-      params.neckContactSize ??
-      source.uniforms.uNeckContactSize?.value.clone(),
-    neckContactBasisX:
-      params.neckContactBasisX ??
-      source.uniforms.uNeckContactBasisX?.value.clone(),
-    neckContactBasisY:
-      params.neckContactBasisY ??
-      source.uniforms.uNeckContactBasisY?.value.clone(),
-    neckContactBasisZ:
-      params.neckContactBasisZ ??
-      source.uniforms.uNeckContactBasisZ?.value.clone(),
-    neckContactStrength:
-      params.neckContactStrength ??
-      source.uniforms.uNeckContactStrength?.value,
     bodyDebugMode:
       params.bodyDebugMode ??
       source.uniforms.uBodyDebugMode?.value ??
@@ -1564,7 +1501,7 @@ function cloneFaceShaderMaterial(
       `#${source.uniforms.uSkinColor2.value.getHexString()}`,
     mainTex: params.mainTex ?? null,
     shadowTex: params.shadowTex ?? null,
-    faceShadowTex: params.faceShadowTex ?? null,
+    faceShadowTex: null,
     lightDirection: source.uniforms.uLightDirection.value.clone(),
     lightIntensity: source.uniforms.uLightIntensity.value,
     ambientIntensity: source.uniforms.uAmbientIntensity.value,
@@ -1572,7 +1509,7 @@ function cloneFaceShaderMaterial(
     faceSdfUseLightDirection: source.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
     faceDebugMode: source.uniforms.uFaceDebugMode?.value ?? 0,
     faceDebugLightMode: source.uniforms.uFaceDebugLightMode?.value ?? 0,
-    faceSdfEnabled: params.faceSdfEnabled ?? ((source.uniforms.uFaceSdfEnabled?.value ?? 1.0) > 0.5),
+    faceSdfEnabled: false,
   });
   updateSekaiFaceBasis(
     material,
@@ -3497,6 +3434,152 @@ function retargetUnityPrefabAnimationClip(
   };
 }
 
+function createProjectedShadowTexture(size = 128) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas 2D context is required for projected shadow texture.");
+  }
+  const gradient = context.createRadialGradient(
+    size * 0.5,
+    size * 0.5,
+    size * 0.05,
+    size * 0.5,
+    size * 0.5,
+    size * 0.5
+  );
+  gradient.addColorStop(0.0, "rgba(0, 0, 0, 0.72)");
+  gradient.addColorStop(0.45, "rgba(0, 0, 0, 0.32)");
+  gradient.addColorStop(1.0, "rgba(0, 0, 0, 0.0)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+type CharacterProjectedShadowUpdate = {
+  targetWorldPosition: THREE.Vector3;
+  lightWorldPosition: THREE.Vector3 | null;
+  floorY: number;
+  characterHeight: number;
+  visible: boolean;
+};
+
+class CharacterProjectedShadowController {
+  readonly group = new THREE.Group();
+
+  private readonly defaultDirection = new THREE.Vector3(-0.35, 0, 0.94).normalize();
+  private readonly directionalAnchor = new THREE.Group();
+  private readonly crossAnchor = new THREE.Group();
+  private readonly directionalMaterial: THREE.MeshBasicMaterial;
+  private readonly crossMaterial: THREE.MeshBasicMaterial;
+
+  constructor() {
+    const shadowTexture = createProjectedShadowTexture();
+    const directionalGeometry = new THREE.PlaneGeometry(1, 1);
+    const crossGeometry = new THREE.PlaneGeometry(1, 1);
+    this.directionalMaterial = new THREE.MeshBasicMaterial({
+      color: "#000000",
+      map: shadowTexture,
+      transparent: true,
+      opacity: DIRECTIONAL_SHADOW_OPACITY,
+      depthWrite: false,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      side: THREE.DoubleSide,
+    });
+    this.crossMaterial = new THREE.MeshBasicMaterial({
+      color: "#000000",
+      map: shadowTexture,
+      transparent: true,
+      opacity: CROSS_SHADOW_OPACITY,
+      depthWrite: false,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      side: THREE.DoubleSide,
+    });
+
+    const directionalMesh = new THREE.Mesh(directionalGeometry, this.directionalMaterial);
+    directionalMesh.name = "CharacterDirectionalShadow";
+    directionalMesh.rotation.x = -Math.PI / 2;
+    directionalMesh.renderOrder = -100;
+    directionalMesh.scale.set(DIRECTIONAL_SHADOW_WIDTH, DIRECTIONAL_SHADOW_HEIGHT, 1);
+    this.directionalAnchor.add(directionalMesh);
+
+    const crossMesh = new THREE.Mesh(crossGeometry, this.crossMaterial);
+    crossMesh.name = "CharacterCrossShadow";
+    crossMesh.rotation.x = -Math.PI / 2;
+    crossMesh.renderOrder = -99;
+    crossMesh.scale.set(CROSS_SHADOW_SIZE, CROSS_SHADOW_SIZE, 1);
+    this.crossAnchor.add(crossMesh);
+
+    this.group.name = "CharacterProjectedShadow";
+    this.group.add(this.directionalAnchor);
+    this.group.add(this.crossAnchor);
+    this.group.visible = false;
+  }
+
+  update(state: CharacterProjectedShadowUpdate) {
+    this.group.visible = state.visible;
+    if (!state.visible) {
+      return;
+    }
+
+    const direction = this.resolveDirectionalShadowDirection(
+      state.targetWorldPosition,
+      state.lightWorldPosition
+    );
+    const effectiveHeight = Math.max(0.001, state.characterHeight);
+    const heightRatio = (state.targetWorldPosition.y - state.floorY) / effectiveHeight;
+    const distanceToFloor = DIRECTIONAL_SHADOW_HEIGHT * heightRatio;
+    this.directionalAnchor.position.set(
+      state.targetWorldPosition.x + direction.x * distanceToFloor,
+      state.floorY + PROJECTED_SHADOW_FLOOR_BIAS,
+      state.targetWorldPosition.z + direction.z * distanceToFloor
+    );
+    this.directionalAnchor.rotation.y = Math.atan2(direction.x, direction.z);
+    this.directionalMaterial.opacity = DIRECTIONAL_SHADOW_OPACITY;
+
+    const crossHeightRatio = state.targetWorldPosition.y / CROSS_SHADOW_HEIGHT_LIMIT;
+    const crossAlpha =
+      crossHeightRatio < 0
+        ? 1
+        : 1 - Math.min(crossHeightRatio, 1);
+    this.crossAnchor.position.set(
+      state.targetWorldPosition.x,
+      state.floorY + PROJECTED_SHADOW_FLOOR_BIAS * 1.5,
+      state.targetWorldPosition.z
+    );
+    this.crossMaterial.opacity = CROSS_SHADOW_OPACITY * crossAlpha;
+  }
+
+  private resolveDirectionalShadowDirection(
+    targetWorldPosition: THREE.Vector3,
+    lightWorldPosition: THREE.Vector3 | null
+  ) {
+    if (!lightWorldPosition) {
+      return this.defaultDirection.clone();
+    }
+    const direction = new THREE.Vector3(
+      targetWorldPosition.x - lightWorldPosition.x,
+      0,
+      targetWorldPosition.z - lightWorldPosition.z
+    );
+    if (direction.lengthSq() < 0.000001) {
+      return this.defaultDirection.clone();
+    }
+    return direction.normalize();
+  }
+}
+
 export class Haruki3DEngine {
   private readonly container: HTMLElement;
   private readonly scene: THREE.Scene;
@@ -3512,6 +3595,7 @@ export class Haruki3DEngine {
   private readonly bodyMaterial: THREE.ShaderMaterial;
   private readonly hairMaterial: THREE.ShaderMaterial;
   private readonly faceMaterial: THREE.ShaderMaterial;
+  private readonly projectedShadow: CharacterProjectedShadowController;
   private readonly characterRoot: THREE.Group;
   private readonly bodySlot: THREE.Group;
   private readonly headSlot: THREE.Group;
@@ -3526,11 +3610,6 @@ export class Haruki3DEngine {
   private currentImportSnapshot: PartImportSnapshot | null = null;
   private currentBodyAttachNode: THREE.Object3D | null = null;
   private currentHeadAttachOriginNode: THREE.Object3D | null = null;
-  private currentBodyNeckContactCenter: THREE.Vector3 | null = null;
-  private currentBodyNeckContactSize: THREE.Vector3 | null = null;
-  private currentBodyNeckContactBasisX: THREE.Vector3 | null = null;
-  private currentBodyNeckContactBasisY: THREE.Vector3 | null = null;
-  private currentBodyNeckContactBasisZ: THREE.Vector3 | null = null;
   private currentCompositionStatus: CompositionStatus = {
     mode: "separate_parts",
     linkedBoneCount: 0,
@@ -3726,6 +3805,8 @@ export class Haruki3DEngine {
     this.characterRoot.add(this.headSlot);
     this.applyCharacterHeight(light.characterHeight);
     this.scene.add(this.characterRoot);
+    this.projectedShadow = new CharacterProjectedShadowController();
+    this.scene.add(this.projectedShadow.group);
     this.setPresentationMode(options.presentationMode ?? "interactive");
     this.applyCameraPreset(options.cameraPreset ?? "default");
 
@@ -4050,7 +4131,7 @@ export class Haruki3DEngine {
   }
 
   private applyRenderIsolationMode() {
-    const faceSdfEnabled = this.renderIsolationMode === "face_sdf";
+    const faceSdfEnabled = false;
     const eyelightOnly = this.renderIsolationMode === "eyelight_only";
     const noEyelight = this.renderIsolationMode === "no_eyelight";
     const faceLayersVisible = this.renderIsolationMode !== "no_face_layers";
@@ -4340,63 +4421,6 @@ export class Haruki3DEngine {
       if (entry.resolvedKind === "hair" && entry.shaderHairShadowEnabled !== undefined) {
         entry.shaderHairShadowEnabled = enabled;
       }
-    }
-  }
-
-  private applyBodyNeckContactUniforms() {
-    if (!this.currentBodyAsset || !this.currentBodyAnimationRoot) {
-      return;
-    }
-    if (this.bodyDebugMode === "off" && NECK_CONTACT_SHADOW_STRENGTH <= 0.0) {
-      return;
-    }
-
-    const contact = this.resolveBodyNeckContact(
-      this.currentBodyAsset,
-      this.currentBodyAnimationRoot
-    );
-    this.currentBodyNeckContactCenter = contact.center.clone();
-    this.currentBodyNeckContactSize = contact.size.clone();
-    this.currentBodyNeckContactBasisX = contact.basisX.clone();
-    this.currentBodyNeckContactBasisY = contact.basisY.clone();
-    this.currentBodyNeckContactBasisZ = contact.basisZ.clone();
-
-    const syncMaterial = (material: THREE.Material) => {
-      if (!(material instanceof THREE.ShaderMaterial)) {
-        return;
-      }
-      const uniforms = material.uniforms;
-      uniforms.uNeckContactCenter?.value.copy(contact.center);
-      uniforms.uNeckContactSize?.value.copy(contact.size);
-      uniforms.uNeckContactBasisX?.value.copy(contact.basisX);
-      uniforms.uNeckContactBasisY?.value.copy(contact.basisY);
-      uniforms.uNeckContactBasisZ?.value.copy(contact.basisZ);
-    };
-
-    syncMaterial(this.bodyMaterial);
-    for (const slot of [this.bodySlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          syncMaterial(material);
-        }
-      });
-    }
-
-    for (const entry of this.runtimeDebug.body) {
-      if (entry.shaderNeckContactCenterX === undefined) {
-        continue;
-      }
-      entry.shaderNeckContactCenterX = contact.center.x;
-      entry.shaderNeckContactCenterY = contact.center.y;
-      entry.shaderNeckContactCenterZ = contact.center.z;
-      entry.shaderNeckContactSizeX = contact.size.x;
-      entry.shaderNeckContactSizeY = contact.size.y;
-      entry.shaderNeckContactSizeZ = contact.size.z;
     }
   }
 
@@ -4759,13 +4783,52 @@ export class Haruki3DEngine {
     } else {
       this.currentSpringRuntime?.resetPose();
     }
-    this.applyBodyNeckContactUniforms();
+    this.updateProjectedShadows();
     this.updateShaderCameraPositions();
     this.updateShaderFaceBasis();
   }
 
   getCharacterRoot() {
     return this.characterRoot;
+  }
+
+  private updateProjectedShadows() {
+    if (!this.currentBodyAsset) {
+      this.projectedShadow.update({
+        targetWorldPosition: new THREE.Vector3(),
+        lightWorldPosition: null,
+        floorY: PROJECTED_SHADOW_FLOOR_Y,
+        characterHeight: this.characterHeight,
+        visible: false,
+      });
+      return;
+    }
+
+    const lightPosition = new THREE.Vector3();
+    this.directionalLight.getWorldPosition(lightPosition);
+    this.projectedShadow.update({
+      targetWorldPosition: this.resolveProjectedShadowTargetWorldPosition(),
+      lightWorldPosition: lightPosition,
+      floorY: PROJECTED_SHADOW_FLOOR_Y,
+      characterHeight: this.characterHeight,
+      visible: true,
+    });
+  }
+
+  private resolveProjectedShadowTargetWorldPosition() {
+    const root = this.currentBodyAnimationRoot ?? this.characterRoot;
+    root.updateMatrixWorld(true);
+    const candidates = [
+      this.findNodeByImportedName(root, "Position"),
+      this.findNodeByImportedName(root, "Hip"),
+      this.findNodeByImportedName(root, "Hips"),
+      this.findNodeByImportedName(root, "Waist"),
+      this.findNodeByImportedName(root, "Root"),
+    ];
+    const target = candidates.find((node): node is THREE.Object3D => node !== null) ?? root;
+    const position = new THREE.Vector3();
+    target.getWorldPosition(position);
+    return position;
   }
 
   getCanvas() {
@@ -5223,7 +5286,6 @@ export class Haruki3DEngine {
     );
     this.directionalLight.intensity = next.intensity;
     this.fillLight.intensity = next.ambient;
-    const bodyNeckContact = this.getCurrentBodyNeckContact();
     updateSekaiBodyMaterial(this.bodyMaterial, {
       baseColor: this.currentBodyAsset?.proxy.bodyColor ?? "#f5d6d0",
       shadowColor: this.currentBodyAsset?.proxy.shadowColor ?? "#c79b95",
@@ -5268,12 +5330,6 @@ export class Haruki3DEngine {
       controllerShadowRimColorWeight: this.bodyMaterial.uniforms.uControllerShadowRimColorWeight.value,
       controllerRimEdgeSmoothness: this.bodyMaterial.uniforms.uControllerRimEdgeSmoothness.value,
       controllerRimShadowSharpness: this.bodyMaterial.uniforms.uControllerRimShadowSharpness.value,
-      neckContactCenter: bodyNeckContact.center,
-      neckContactSize: bodyNeckContact.size,
-      neckContactBasisX: bodyNeckContact.basisX,
-      neckContactBasisY: bodyNeckContact.basisY,
-      neckContactBasisZ: bodyNeckContact.basisZ,
-      neckContactStrength: NECK_CONTACT_SHADOW_STRENGTH,
       bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
       skinTintEnabled: true,
     });
@@ -5626,72 +5682,6 @@ export class Haruki3DEngine {
       return null;
     }
     return this.findNodeByImportedName(root, name);
-  }
-
-  private resolveBodyNeckContact(
-    bodyAsset: BodyAssetManifest,
-    root?: THREE.Object3D | null
-  ) {
-    if (root) {
-      root.updateMatrixWorld(true);
-      const neckNode =
-        this.findNodeByName(root, bodyAsset.skeleton.neckAttach.nodeName) ??
-        this.findNodeByImportedName(root, "Neck");
-      if (neckNode) {
-        const neckPosition = new THREE.Vector3();
-        neckNode.getWorldPosition(neckPosition);
-        root.worldToLocal(neckPosition);
-        const rootQuaternion = new THREE.Quaternion();
-        const neckQuaternion = new THREE.Quaternion();
-        root.getWorldQuaternion(rootQuaternion);
-        neckNode.getWorldQuaternion(neckQuaternion);
-        const contactQuaternion = rootQuaternion.invert().multiply(neckQuaternion);
-        const basisX = new THREE.Vector3(1, 0, 0).applyQuaternion(contactQuaternion).normalize();
-        const basisY = new THREE.Vector3(0, 1, 0).applyQuaternion(contactQuaternion).normalize();
-        const basisZ = new THREE.Vector3(0, 0, 1).applyQuaternion(contactQuaternion).normalize();
-        const coordinateScale = getBodyNeckContactCoordinateScale(bodyAsset, neckPosition);
-        return {
-          center: getBodyNeckContactCenterFromResolvedNeck(
-            neckPosition,
-            coordinateScale,
-            basisY,
-            basisZ
-          ),
-          size: getBodyNeckContactSize(bodyAsset, coordinateScale),
-          basisX,
-          basisY,
-          basisZ,
-        };
-      }
-    }
-
-    return {
-      center: getBodyNeckContactCenter(bodyAsset),
-      size: getBodyNeckContactSize(bodyAsset),
-      basisX: new THREE.Vector3(1, 0, 0),
-      basisY: new THREE.Vector3(0, 1, 0),
-      basisZ: new THREE.Vector3(0, 0, 1),
-    };
-  }
-
-  private getCurrentBodyNeckContact() {
-    return {
-      center:
-        this.currentBodyNeckContactCenter?.clone() ??
-        getBodyNeckContactCenter(this.currentBodyAsset),
-      size:
-        this.currentBodyNeckContactSize?.clone() ??
-        getBodyNeckContactSize(this.currentBodyAsset),
-      basisX:
-        this.currentBodyNeckContactBasisX?.clone() ??
-        new THREE.Vector3(1, 0, 0),
-      basisY:
-        this.currentBodyNeckContactBasisY?.clone() ??
-        new THREE.Vector3(0, 1, 0),
-      basisZ:
-        this.currentBodyNeckContactBasisZ?.clone() ??
-        new THREE.Vector3(0, 0, 1),
-    };
   }
 
   private collectBones(root: THREE.Object3D) {
@@ -6392,12 +6382,6 @@ export class Haruki3DEngine {
     options: { exactMaterialNameOnly?: boolean } = {}
   ) {
     this.runtimeDebug.body = [];
-    const bodyNeckContact = this.resolveBodyNeckContact(bodyAsset, root);
-    this.currentBodyNeckContactCenter = bodyNeckContact.center.clone();
-    this.currentBodyNeckContactSize = bodyNeckContact.size.clone();
-    this.currentBodyNeckContactBasisX = bodyNeckContact.basisX.clone();
-    this.currentBodyNeckContactBasisY = bodyNeckContact.basisY.clone();
-    this.currentBodyNeckContactBasisZ = bodyNeckContact.basisZ.clone();
     const slotEntries: Array<{
       key: string;
       meshKey: string;
@@ -6436,12 +6420,6 @@ export class Haruki3DEngine {
           bodyAsset.proxy.shadowColor,
         lighting,
         skinTintEnabled: usesSekaiSkinTint(materialKind),
-        neckContactCenter: bodyNeckContact.center,
-        neckContactSize: bodyNeckContact.size,
-        neckContactBasisX: bodyNeckContact.basisX,
-        neckContactBasisY: bodyNeckContact.basisY,
-        neckContactBasisZ: bodyNeckContact.basisZ,
-        neckContactStrength: NECK_CONTACT_SHADOW_STRENGTH,
         bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
       });
       material.userData.pjskLighting = lighting;
@@ -6564,20 +6542,6 @@ export class Haruki3DEngine {
             shaderSkinColor1: shaderUniforms?.uSkinColor1?.value
               ? `#${shaderUniforms.uSkinColor1.value.getHexString()}`
               : null,
-            shaderNeckContactCenterX:
-              shaderUniforms?.uNeckContactCenter?.value?.x ?? null,
-            shaderNeckContactCenterY:
-              shaderUniforms?.uNeckContactCenter?.value?.y ?? null,
-            shaderNeckContactCenterZ:
-              shaderUniforms?.uNeckContactCenter?.value?.z ?? null,
-            shaderNeckContactSizeX:
-              shaderUniforms?.uNeckContactSize?.value?.x ?? null,
-            shaderNeckContactSizeY:
-              shaderUniforms?.uNeckContactSize?.value?.y ?? null,
-            shaderNeckContactSizeZ:
-              shaderUniforms?.uNeckContactSize?.value?.z ?? null,
-            shaderNeckContactStrength:
-              shaderUniforms?.uNeckContactStrength?.value ?? null,
             shaderBodyDebugMode:
               shaderUniforms?.uBodyDebugMode?.value ?? null,
           });
@@ -6634,7 +6598,7 @@ export class Haruki3DEngine {
       const mainTex = await this.loadTexture(slot.mainTex);
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      const faceShadowTex = await this.loadTexture(slot.faceShadowTex, THREE.NoColorSpace);
+      const faceShadowTex = null;
       const kind = slot.materialKind ?? "face";
       const lighting = tuneLightingForPreview(kind, slot.lighting);
       let material: THREE.Material;
@@ -6862,7 +6826,7 @@ export class Haruki3DEngine {
         if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceDebugMode) {
           material.uniforms.uFaceDebugMode.value = faceSdfDebugModeToUniform(this.faceSdfDebugMode);
           material.uniforms.uFaceDebugLightMode.value = faceSdfDebugLightModeToUniform(this.faceSdfDebugLightMode);
-          material.uniforms.uFaceSdfEnabled.value = this.renderIsolationMode === "face_sdf" ? 1.0 : 0.0;
+          material.uniforms.uFaceSdfEnabled.value = 0.0;
         }
         material.side = THREE.FrontSide;
         configureBaseStencilClear(material);
@@ -7341,12 +7305,6 @@ export class Haruki3DEngine {
     this.currentRuntimeExtension = null;
     this.currentVrmSpringBoneManager = loaded.springBoneManager ?? null;
     this.currentBodyAttachNode = null;
-    const bodyNeckContact = this.resolveBodyNeckContact(bodyAsset, loaded.root);
-    this.currentBodyNeckContactCenter = bodyNeckContact.center.clone();
-    this.currentBodyNeckContactSize = bodyNeckContact.size.clone();
-    this.currentBodyNeckContactBasisX = bodyNeckContact.basisX.clone();
-    this.currentBodyNeckContactBasisY = bodyNeckContact.basisY.clone();
-    this.currentBodyNeckContactBasisZ = bodyNeckContact.basisZ.clone();
     updateSekaiBodyMaterial(this.bodyMaterial, {
       baseColor: bodyAsset.proxy.bodyColor,
       shadowColor: bodyAsset.proxy.shadowColor,
@@ -7382,12 +7340,6 @@ export class Haruki3DEngine {
       saturation: this.bodyMaterial.uniforms.uSaturation.value,
       partsAmbientColor: `#${this.bodyMaterial.uniforms.uPartsAmbientColor.value.getHexString()}`,
       reflectionBlendColor: `#${this.bodyMaterial.uniforms.uReflectionBlendColor.value.getHexString()}`,
-      neckContactCenter: bodyNeckContact.center,
-      neckContactSize: bodyNeckContact.size,
-      neckContactBasisX: bodyNeckContact.basisX,
-      neckContactBasisY: bodyNeckContact.basisY,
-      neckContactBasisZ: bodyNeckContact.basisZ,
-      neckContactStrength: NECK_CONTACT_SHADOW_STRENGTH,
       bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
       skinTintEnabled: true,
     });
