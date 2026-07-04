@@ -640,7 +640,10 @@ type PrefabHeadFollowNodeDebug = {
   canonicalPath: string;
   parentPath: string | null;
   localPosition: { x: number; y: number; z: number };
+  localQuaternion: { x: number; y: number; z: number; w: number };
   worldPosition: { x: number; y: number; z: number };
+  worldQuaternion: { x: number; y: number; z: number; w: number };
+  worldForward: { x: number; y: number; z: number };
 };
 
 type RuntimePrefabTransformSource = {
@@ -3291,6 +3294,15 @@ function vectorDebugSnapshot(vector: THREE.Vector3) {
   };
 }
 
+function quaternionDebugSnapshot(quaternion: THREE.Quaternion) {
+  return {
+    x: Number(quaternion.x.toFixed(5)),
+    y: Number(quaternion.y.toFixed(5)),
+    z: Number(quaternion.z.toFixed(5)),
+    w: Number(quaternion.w.toFixed(5)),
+  };
+}
+
 function parseRuntimeRoleId(roleId: string): { characterId: number; unit: string | null } {
   const [rawCharacterId, ...unitParts] = roleId.split(":");
   const characterId = Number(rawCharacterId);
@@ -3322,7 +3334,11 @@ function makePrefabNodeDebug(
 ): PrefabHeadFollowNodeDebug {
   node.updateMatrixWorld(true);
   const worldPosition = new THREE.Vector3();
+  const worldQuaternion = new THREE.Quaternion();
+  const worldForward = new THREE.Vector3(0, 0, 1);
   node.getWorldPosition(worldPosition);
+  node.getWorldQuaternion(worldQuaternion);
+  worldForward.applyQuaternion(worldQuaternion).normalize();
   return {
     path: buildObjectPath(node, root),
     canonicalPath: buildObjectPath(node, root, true),
@@ -3330,7 +3346,10 @@ function makePrefabNodeDebug(
       ? buildObjectPath(node.parent, root)
       : null,
     localPosition: vectorDebugSnapshot(node.position),
+    localQuaternion: quaternionDebugSnapshot(node.quaternion),
     worldPosition: vectorDebugSnapshot(worldPosition),
+    worldQuaternion: quaternionDebugSnapshot(worldQuaternion),
+    worldForward: vectorDebugSnapshot(worldForward),
   };
 }
 
@@ -8572,6 +8591,18 @@ export class Haruki3DEngine {
         mounted.root.quaternion.copy(this.tempQuaternion);
         mounted.root.scale.copy(this.tempScale);
         mounted.root.updateMatrix();
+      }
+      const bodyHead = graph.nodeByPath.get(
+        "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck/Head"
+      ) ?? graph.nodeByPath.get("body/Position/Hip/Waist/Spine/Chest/Neck/Head");
+      const faceHead = graph.nodeByPath.get(
+        "face/Position/Hip/Waist/Spine/Chest/Neck/Head"
+      );
+      if (bodyHead && faceHead) {
+        faceHead.position.copy(bodyHead.position);
+        faceHead.quaternion.copy(bodyHead.quaternion);
+        faceHead.scale.copy(bodyHead.scale);
+        faceHead.updateMatrix();
       }
       graph.root.updateMatrixWorld(true);
     }

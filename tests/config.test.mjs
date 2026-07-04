@@ -705,6 +705,22 @@ test("unity prefab source graph mounts every duplicate composed face root", () =
   assert.doesNotMatch(engineSource, /findUnityPrefabChildByName\(mountedHeadRoot, "Position"\)/);
 });
 
+test("unity prefab source graph copies body head local transform onto face head", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /const bodyHead = graph\.nodeByPath\.get/);
+  assert.match(engineSource, /"body\/Position\/PositionOffset\/Hip\/Waist\/Spine\/Chest\/Neck\/Head"/);
+  assert.match(engineSource, /const faceHead = graph\.nodeByPath\.get/);
+  assert.match(engineSource, /"face\/Position\/Hip\/Waist\/Spine\/Chest\/Neck\/Head"/);
+  assert.match(
+    engineSource,
+    /faceHead\.position\.copy\(bodyHead\.position\);\s+faceHead\.quaternion\.copy\(bodyHead\.quaternion\);\s+faceHead\.scale\.copy\(bodyHead\.scale\);/s
+  );
+});
+
 test("part runtime loader preserves registry package path on loaded packages", () => {
   const loaderSource = fs.readFileSync(
     path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
