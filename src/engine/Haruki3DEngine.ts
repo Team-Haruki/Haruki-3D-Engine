@@ -62,7 +62,7 @@ const COSTUME_SHOP_CAMERA = {
 } as const;
 const COSTUME_SHOP_CAMERA_CAPTURE_STATE = {
   rotationYDegrees: 0,
-  zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
+  zoomValue: 0,
   zoomMoveValue: 0,
 } as const;
 const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0.0245;
@@ -701,6 +701,14 @@ type RuntimeUnityBodyHeadAssemblySource = {
   runtimeMountPath?: string | null;
   parentingMode?: string;
   coordinateSpace?: string;
+  faceRendererName?: string | null;
+  combineNodeAName?: string | null;
+  combineNodeBName?: string | null;
+  childMoveSuffix?: string | null;
+  parentCombineNodeAPath?: string | null;
+  parentCombineNodeBPath?: string | null;
+  childCombineNodeAPath?: string | null;
+  childCombineNodeBPath?: string | null;
 };
 
 type RuntimeNativeMeshSetSource = {
@@ -762,6 +770,7 @@ type UnityPrefabSourceGraph = {
   headOriginPath: string | null;
   assemblyMount: THREE.Object3D | null;
   assemblyMountPath: string | null;
+  usesModelCombineSetup: boolean;
   headOriginRestLocalToHeadRoot: THREE.Matrix4 | null;
   headRootMounts: Array<{
     root: THREE.Object3D;
@@ -2132,6 +2141,191 @@ function computeUnityPrefabRestOffset(
     .multiply(origin.matrixWorld);
 }
 
+function isModelCombineSetupAssembly(
+  assembly: RuntimeUnityBodyHeadAssemblySource | undefined
+) {
+  return assembly?.parentingMode === "model_combine_setup";
+}
+
+function setParentKeepingLocal(child: THREE.Object3D, parent: THREE.Object3D) {
+  if (child.parent) {
+    child.parent.remove(child);
+  }
+  parent.add(child);
+  child.updateMatrix();
+}
+
+function drainChildrenKeepingLocal(sourceParent: THREE.Object3D, destParent: THREE.Object3D) {
+  while (sourceParent.children.length > 0) {
+    setParentKeepingLocal(sourceParent.children[0], destParent);
+  }
+}
+
+function resolveModelCombineNode(
+  nodeByPath: Map<string, THREE.Object3D>,
+  candidates: Array<string | null | undefined>,
+  rootPath: string | null | undefined,
+  name: string
+) {
+  const direct = resolvePrefabGraphNode(nodeByPath, candidates);
+  if (direct) {
+    return direct;
+  }
+  if (!rootPath) {
+    return null;
+  }
+  let best: { path: string; node: THREE.Object3D } | null = null;
+  for (const [path, node] of nodeByPath.entries()) {
+    if (
+      node.name === name &&
+      (path === rootPath || path.startsWith(`${rootPath}/`)) &&
+      (!best || path.length < best.path.length)
+    ) {
+      best = { path, node };
+    }
+  }
+  return best;
+}
+
+function moveKnownFaceRendererTransforms(
+  nodeByPath: Map<string, THREE.Object3D>,
+  childRootPath: string | null | undefined,
+  destParent: THREE.Object3D,
+  faceRendererName: string
+) {
+  if (!childRootPath) {
+    return;
+  }
+  for (const rendererName of new Set([faceRendererName, "Face", "Hair", "Acc"])) {
+    const node = nodeByPath.get(`${childRootPath}/${rendererName}`);
+    if (node) {
+      setParentKeepingLocal(node, destParent);
+    }
+  }
+}
+
+function detachNode(node: THREE.Object3D) {
+  if (node.parent) {
+    node.parent.remove(node);
+  }
+  node.userData.pjskModelCombineDestroyed = true;
+}
+
+function applyOfficialModelCombineSetup(
+  root: THREE.Group,
+  nodeByPath: Map<string, THREE.Object3D>,
+  defaultBodyRoot: string,
+  assembly: RuntimeUnityBodyHeadAssemblySource | undefined
+) {
+  const combineNodeAName = assembly?.combineNodeAName ?? "Neck";
+  const combineNodeBName = assembly?.combineNodeBName ?? "Head";
+  const childMoveSuffix = assembly?.childMoveSuffix ?? "_target";
+  const parentRootPath = assembly?.parentRootPath ?? defaultBodyRoot;
+  const childRootPath = assembly?.childRootPath ?? "face";
+  const bodyNodeA = resolveModelCombineNode(
+    nodeByPath,
+    [
+      assembly?.parentCombineNodeAPath,
+      assembly?.parentAttachPath,
+      `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/${combineNodeAName}`,
+      `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}`,
+    ],
+    parentRootPath,
+    combineNodeAName
+  );
+  const bodyNodeB = resolveModelCombineNode(
+    nodeByPath,
+    [
+      assembly?.parentCombineNodeBPath,
+      bodyNodeA ? `${bodyNodeA.path}/${combineNodeBName}` : null,
+      `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
+      `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
+    ],
+    bodyNodeA?.path,
+    combineNodeBName
+  );
+  const faceNodeA = resolveModelCombineNode(
+    nodeByPath,
+    [
+      assembly?.childCombineNodeAPath,
+      assembly?.childOriginPath,
+      `${childRootPath}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}`,
+    ],
+    childRootPath,
+    combineNodeAName
+  );
+  const faceNodeB = resolveModelCombineNode(
+    nodeByPath,
+    [
+      assembly?.childCombineNodeBPath,
+      faceNodeA ? `${faceNodeA.path}/${combineNodeBName}` : null,
+      `${childRootPath}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
+    ],
+    faceNodeA?.path,
+    combineNodeBName
+  );
+
+  if (!bodyNodeA || !bodyNodeB || !faceNodeA || !faceNodeB) {
+    return {
+      active: false,
+      reason: "model combine setup nodes were not fully resolved",
+      bodyNodeA,
+      bodyNodeB,
+      faceNodeA,
+      faceNodeB,
+    };
+  }
+
+  drainChildrenKeepingLocal(bodyNodeB.node, faceNodeB.node);
+
+  const bodyNodeAParent = bodyNodeA.node.parent;
+  if (bodyNodeAParent) {
+    for (const child of [...faceNodeA.node.children]) {
+      if (child.name.endsWith(childMoveSuffix)) {
+        setParentKeepingLocal(child, bodyNodeAParent);
+      }
+    }
+    moveKnownFaceRendererTransforms(
+      nodeByPath,
+      childRootPath,
+      nodeByPath.get(parentRootPath) ?? bodyNodeAParent,
+      assembly?.faceRendererName ?? "Face"
+    );
+    setParentKeepingLocal(faceNodeA.node, bodyNodeAParent);
+  }
+
+  faceNodeA.node.position.copy(bodyNodeA.node.position);
+  faceNodeA.node.quaternion.copy(bodyNodeA.node.quaternion);
+  faceNodeA.node.scale.copy(bodyNodeA.node.scale);
+  faceNodeA.node.updateMatrix();
+  faceNodeB.node.position.copy(bodyNodeB.node.position);
+  faceNodeB.node.quaternion.copy(bodyNodeB.node.quaternion);
+  faceNodeB.node.scale.copy(bodyNodeB.node.scale);
+  faceNodeB.node.updateMatrix();
+
+  nodeByPath.set(bodyNodeA.path, faceNodeA.node);
+  nodeByPath.set(bodyNodeB.path, faceNodeB.node);
+  if (assembly?.parentAttachPath) {
+    nodeByPath.set(assembly.parentAttachPath, faceNodeA.node);
+  }
+  if (assembly?.parentCombineNodeBPath) {
+    nodeByPath.set(assembly.parentCombineNodeBPath, faceNodeB.node);
+  }
+
+  detachNode(bodyNodeB.node);
+  detachNode(bodyNodeA.node);
+  root.updateMatrixWorld(true);
+
+  return {
+    active: true,
+    reason: null,
+    bodyNodeA,
+    bodyNodeB,
+    faceNodeA,
+    faceNodeB,
+  };
+}
+
 function buildUnityPrefabSourceGraph(
   extension: unknown,
   bodyAsset: BodyAssetManifest,
@@ -2217,9 +2411,13 @@ function buildUnityPrefabSourceGraph(
     headAsset.assembly.attachOrigin.nodeName
   );
   const headOrigin = headOriginByPath ?? headOriginByName;
+  const useModelCombineSetup = isModelCombineSetupAssembly(assembly);
+  const modelCombine = useModelCombineSetup
+    ? applyOfficialModelCombineSetup(root, nodeByPath, defaultBodyRoot, assembly)
+    : null;
 
   let headOriginRestLocalToHeadRoot: THREE.Matrix4 | null = null;
-  if (headRoot && headOrigin) {
+  if (!useModelCombineSetup && headRoot && headOrigin) {
     headRoot.node.updateMatrixWorld(true);
     headOrigin.node.updateMatrixWorld(true);
     headOriginRestLocalToHeadRoot = new THREE.Matrix4()
@@ -2249,7 +2447,7 @@ function buildUnityPrefabSourceGraph(
   let assemblyMount: THREE.Object3D | null = null;
   let assemblyMountPath: string | null = null;
   const runtimeMountPath = assembly?.runtimeMountPath ?? "PJSK_RuntimeMount_face";
-  if (bodyAttach && headRoot) {
+  if (!useModelCombineSetup && bodyAttach && headRoot) {
     assemblyMount = new THREE.Object3D();
     assemblyMount.name = runtimeMountPath.split("/").pop() ?? "PJSK_RuntimeMount_face";
     assemblyMount.userData.pjskTransformPath = runtimeMountPath;
@@ -2294,10 +2492,18 @@ function buildUnityPrefabSourceGraph(
   }
 
   const debug: PrefabHeadFollowDebug = {
-    active: Boolean(bodyAttach && headRoot && headOrigin && headOriginRestLocalToHeadRoot),
-    sourcePath: bodyAttach?.path ?? null,
-    targetPath: headOrigin?.path ?? null,
-    reason: bodyAttach
+    active: useModelCombineSetup
+      ? Boolean(modelCombine?.active)
+      : Boolean(bodyAttach && headRoot && headOrigin && headOriginRestLocalToHeadRoot),
+    sourcePath: useModelCombineSetup
+      ? modelCombine?.bodyNodeA?.path ?? null
+      : bodyAttach?.path ?? null,
+    targetPath: useModelCombineSetup
+      ? modelCombine?.faceNodeA?.path ?? null
+      : headOrigin?.path ?? null,
+    reason: useModelCombineSetup
+      ? modelCombine?.reason ?? null
+      : bodyAttach
       ? headRoot
         ? headOrigin
           ? headOriginRestLocalToHeadRoot
@@ -2320,6 +2526,12 @@ function buildUnityPrefabSourceGraph(
       runtimeMount: assemblyMount
         ? makePrefabNodeDebug(assemblyMount, root)
         : null,
+      modelCombineBodyNeck: modelCombine?.bodyNodeA
+        ? makePrefabNodeDebug(modelCombine.bodyNodeA.node, root)
+        : null,
+      modelCombineFaceNeck: modelCombine?.faceNodeA
+        ? makePrefabNodeDebug(modelCombine.faceNodeA.node, root)
+        : null,
     },
   };
 
@@ -2335,6 +2547,7 @@ function buildUnityPrefabSourceGraph(
     headOriginPath: headOrigin?.path ?? null,
     assemblyMount,
     assemblyMountPath,
+    usesModelCombineSetup: useModelCombineSetup,
     headOriginRestLocalToHeadRoot,
     headRootMounts,
     debug,
@@ -3191,6 +3404,13 @@ function isFaceAssemblyBridgeMotionTarget(target: BodyMotionTarget) {
 
 function hasUnityBodyHeadAssembly(extension: unknown) {
   const setup = readRuntimeUnitySetup0414ForGraph(extension);
+  if (setup?.bodyHeadAssembly?.parentingMode === "model_combine_setup") {
+    return Boolean(
+      setup.bodyHeadAssembly.parentAttachPath &&
+      setup.bodyHeadAssembly.childRootPath &&
+      setup.bodyHeadAssembly.childOriginPath
+    );
+  }
   return Boolean(
     setup?.bodyHeadAssembly?.parentAttachPath &&
     setup.bodyHeadAssembly.childRootPath &&
@@ -8386,6 +8606,7 @@ export class Haruki3DEngine {
 
     graph.root.updateMatrixWorld(true);
     if (
+      !graph.usesModelCombineSetup &&
       graph.bodyAttach &&
       graph.headRoot &&
       graph.headOrigin

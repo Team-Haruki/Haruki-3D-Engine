@@ -32,7 +32,7 @@ type RuntimeExtraBone = {
   node: THREE.Object3D;
   referenceNode: THREE.Object3D;
   coefficient: number;
-  defaultEuler: THREE.Euler;
+  defaultQuaternion: THREE.Quaternion;
   axisX: boolean;
   axisY: boolean;
   axisZ: boolean;
@@ -48,8 +48,8 @@ const DEG2RAD = Math.PI / 180;
 const ROTATION_ORDERS: THREE.EulerOrder[] = [
   "XYZ",
   "XZY",
-  "YZX",
   "YXZ",
+  "YZX",
   "ZXY",
   "ZYX",
 ];
@@ -58,6 +58,7 @@ export class SekaiExtraBoneRuntime {
   private readonly entries: RuntimeExtraBone[];
   private readonly sourceEuler = new THREE.Euler();
   private readonly targetEuler = new THREE.Euler();
+  private readonly targetQuaternion = new THREE.Quaternion();
 
   private constructor(entries: RuntimeExtraBone[]) {
     this.entries = entries;
@@ -95,11 +96,12 @@ export class SekaiExtraBoneRuntime {
 
       const order = ROTATION_ORDERS[readNumber(entry.RotationOrder ?? entry.rotationOrder, 0)]
         ?? "XYZ";
+      const defaultEuler = readDefaultEuler(entry, order);
       runtimeEntries.push({
         node,
         referenceNode,
         coefficient: readNumber(entry.Coefficient ?? entry.coefficient, 1),
-        defaultEuler: readDefaultEuler(entry, order),
+        defaultQuaternion: new THREE.Quaternion().setFromEuler(defaultEuler),
         axisX: readBoolean(entry.AxisX ?? entry.axisX, true),
         axisY: readBoolean(entry.AxisY ?? entry.axisY, true),
         axisZ: readBoolean(entry.AxisZ ?? entry.axisZ, true),
@@ -114,18 +116,22 @@ export class SekaiExtraBoneRuntime {
   update(): void {
     for (const entry of this.entries) {
       this.sourceEuler.setFromQuaternion(entry.referenceNode.quaternion, entry.order);
-      this.targetEuler.copy(entry.defaultEuler);
+      const sign = entry.coefficient > 0 ? -1 : entry.coefficient < 0 ? 1 : 0;
+      this.targetEuler.set(0, 0, 0, entry.order);
       if (entry.axisX) {
-        this.targetEuler.x += this.sourceEuler.x * entry.coefficient;
+        this.targetEuler.x = this.sourceEuler.x * sign;
       }
       if (entry.axisY) {
-        this.targetEuler.y += this.sourceEuler.y * entry.coefficient;
+        this.targetEuler.y = this.sourceEuler.y * sign;
       }
       if (entry.axisZ) {
-        this.targetEuler.z += this.sourceEuler.z * entry.coefficient;
+        this.targetEuler.z = this.sourceEuler.z * sign;
       }
-      this.targetEuler.order = entry.order;
-      entry.node.quaternion.setFromEuler(this.targetEuler);
+      this.targetQuaternion.setFromEuler(this.targetEuler);
+      entry.node.quaternion.copy(entry.defaultQuaternion).slerp(
+        this.targetQuaternion,
+        Math.abs(entry.coefficient)
+      );
       entry.node.updateMatrix();
       entry.node.updateMatrixWorld(true);
     }

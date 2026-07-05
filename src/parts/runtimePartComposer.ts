@@ -1007,9 +1007,17 @@ function resolveComposedBodyHeadAssembly(prefabGraphs: unknown[]) {
     parentAttachPath,
     childRootPath: "face",
     childOriginPath,
-    runtimeMountPath: `${parentAttachPath}/__PJSK_RuntimeMount_face`,
-    parentingMode: "parent_child_runtime_mount",
+    runtimeMountPath: null,
+    parentingMode: "model_combine_setup",
     coordinateSpace: "unity-left-handed",
+    faceRendererName: "Face",
+    combineNodeAName: "Neck",
+    combineNodeBName: "Head",
+    childMoveSuffix: "_target",
+    parentCombineNodeAPath: parentAttachPath,
+    parentCombineNodeBPath: `${parentAttachPath}/Head`,
+    childCombineNodeAPath: childOriginPath,
+    childCombineNodeBPath: `${childOriginPath}/Head`,
   };
 }
 

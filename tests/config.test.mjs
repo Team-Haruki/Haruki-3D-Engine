@@ -315,7 +315,7 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   assert.match(engineSource, /farZ: 4\.5/);
   assert.match(engineSource, /fov: 25/);
   assert.match(engineSource, /const COSTUME_SHOP_CAMERA_CAPTURE_STATE = \{/);
-  assert.match(engineSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
+  assert.match(engineSource, /zoomValue: 0/);
   assert.match(engineSource, /zoomMoveValue: 0/);
   assert.match(engineSource, /calculateCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
@@ -754,14 +754,15 @@ test("legacy custom part manifests infer character height before capture framing
   );
 });
 
-test("unity prefab source graph mounts composed part head without exporter assembly metadata", () => {
+test("unity prefab source graph keeps legacy runtime mount behind model-combine mode", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
   assert.match(engineSource, /const runtimeMountPath = assembly\?\.runtimeMountPath \?\? "PJSK_RuntimeMount_face"/);
-  assert.match(engineSource, /if \(bodyAttach && headRoot\)/);
+  assert.match(engineSource, /if \(!useModelCombineSetup && bodyAttach && headRoot\)/);
+  assert.match(engineSource, /usesModelCombineSetup: useModelCombineSetup/);
   assert.doesNotMatch(engineSource, /if \(bodyAttach && headRoot && assembly\?\.runtimeMountPath\)/);
 });
 
@@ -778,20 +779,34 @@ test("unity prefab source graph mounts every duplicate composed face root", () =
   assert.doesNotMatch(engineSource, /findUnityPrefabChildByName\(mountedHeadRoot, "Position"\)/);
 });
 
-test("unity prefab source graph copies body head local transform onto face head", () => {
+test("unity prefab source graph applies official ModelCombineSetup graft instead of per-frame face head sync", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /const bodyHead = graph\.nodeByPath\.get/);
-  assert.match(engineSource, /"body\/Position\/PositionOffset\/Hip\/Waist\/Spine\/Chest\/Neck\/Head"/);
-  assert.match(engineSource, /const faceHead = graph\.nodeByPath\.get/);
-  assert.match(engineSource, /"face\/Position\/Hip\/Waist\/Spine\/Chest\/Neck\/Head"/);
-  assert.match(
-    engineSource,
-    /faceHead\.position\.copy\(bodyHead\.position\);\s+faceHead\.quaternion\.copy\(bodyHead\.quaternion\);\s+faceHead\.scale\.copy\(bodyHead\.scale\);/s
+  assert.match(engineSource, /function applyOfficialModelCombineSetup/);
+  assert.match(engineSource, /assembly\?\.faceRendererName \?\? "Face"/);
+  assert.match(engineSource, /new Set\(\[faceRendererName, "Face", "Hair", "Acc"\]\)/);
+  assert.match(engineSource, /drainChildrenKeepingLocal\(bodyNodeB\.node, faceNodeB\.node\)/);
+  assert.match(engineSource, /child\.name\.endsWith\(childMoveSuffix\)/);
+  assert.match(engineSource, /nodeByPath\.set\(bodyNodeA\.path, faceNodeA\.node\)/);
+  assert.match(engineSource, /nodeByPath\.set\(bodyNodeB\.path, faceNodeB\.node\)/);
+  assert.match(engineSource, /detachNode\(bodyNodeB\.node\)/);
+  assert.match(engineSource, /detachNode\(bodyNodeA\.node\)/);
+  assert.match(engineSource, /!graph\.usesModelCombineSetup/);
+});
+
+test("Sekai ExtraBone runtime follows official rotation order and coefficient direction", () => {
+  const extraBoneSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/sekaiExtraBoneRuntime.ts"),
+    "utf8"
   );
+
+  assert.match(extraBoneSource, /"XYZ",\s+"XZY",\s+"YXZ",\s+"YZX",\s+"ZXY",\s+"ZYX"/s);
+  assert.match(extraBoneSource, /const sign = entry\.coefficient > 0 \? -1 : entry\.coefficient < 0 \? 1 : 0/);
+  assert.match(extraBoneSource, /entry\.node\.quaternion\.copy\(entry\.defaultQuaternion\)\.slerp/);
+  assert.match(extraBoneSource, /Math\.abs\(entry\.coefficient\)/);
 });
 
 test("part runtime loader preserves registry package path on loaded packages", () => {
@@ -871,8 +886,12 @@ test("composed part runtime declares body-head assembly for motion retarget supp
   assert.match(composerSource, /childRootPath:\s*"face"/);
   assert.match(composerSource, /childOriginPath,/);
   assert.match(composerSource, /"face\/Position\/Hip\/Waist\/Spine\/Chest\/Neck"/);
-  assert.match(composerSource, /runtimeMountPath:\s*`\$\{parentAttachPath\}\/__PJSK_RuntimeMount_face`/);
-  assert.match(composerSource, /parentingMode:\s*"parent_child_runtime_mount"/);
+  assert.match(composerSource, /runtimeMountPath:\s*null/);
+  assert.match(composerSource, /parentingMode:\s*"model_combine_setup"/);
+  assert.match(composerSource, /faceRendererName:\s*"Face"/);
+  assert.match(composerSource, /combineNodeAName:\s*"Neck"/);
+  assert.match(composerSource, /combineNodeBName:\s*"Head"/);
+  assert.match(composerSource, /childMoveSuffix:\s*"_target"/);
   assert.match(composerSource, /coordinateSpace:\s*"unity-left-handed"/);
   assert.match(engineSource, /hasUnityBodyHeadAssembly\(extension\)/);
   assert.match(engineSource, /isFaceAssemblyBridgeMotionTarget/);
