@@ -416,12 +416,14 @@ export function composeRuntimeCombinedCharacterAsset(
   }
 
   const body = requirePart(partSet, selection.characterId, selection.unit, "body", selection.bodyCostume3dId);
-  const head = requirePart(partSet, selection.characterId, selection.unit, "head", selection.headCostume3dId);
+  const head = resolveHeadRuntime(partSet, selection);
   const hair = requirePart(partSet, selection.characterId, selection.unit, "hair", selection.hairCostume3dId);
   const optional = resolveOptionalHeadRuntime(partSet, selection);
 
   assertPartRuntimeProxyMetadata(body, "body");
-  assertPartRuntimeProxyMetadata(head, "head");
+  if (head) {
+    assertPartRuntimeProxyMetadata(head, "head");
+  }
   assertSameRole(selection.characterId, selection.unit, [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[]);
   assertHeadHairCompatible(partSet.compatibility, selection);
   const allRuntimes = [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[];
@@ -529,6 +531,43 @@ function requirePart(
   }
   const runtime = partSet.packages.get(entry.packagePath);
   return withRegistryEntryRuntimeMetadata(runtime!, entry);
+}
+
+function resolveHeadRuntime(
+  partSet: PartPackageSet,
+  selection: CustomPartSelection
+): PartRuntimePackage | null {
+  const head = findRegistryPart(
+    partSet,
+    selection.characterId,
+    selection.unit,
+    "head",
+    selection.headCostume3dId
+  );
+  if (head) {
+    if (!partSet.packages.has(head.packagePath)) {
+      throw new Error(`Missing loaded head package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headCostume3dId}.`);
+    }
+    return withRegistryEntryRuntimeMetadata(partSet.packages.get(head.packagePath)!, head);
+  }
+
+  const headOptional = findRegistryPart(
+    partSet,
+    selection.characterId,
+    selection.unit,
+    "head_optional",
+    selection.headCostume3dId
+  );
+  if (!headOptional) {
+    throw new Error(`Missing loaded head package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headCostume3dId}.`);
+  }
+  if (isEmptyHeadOptionalEntry(headOptional)) {
+    return null;
+  }
+  if (!partSet.packages.has(headOptional.packagePath)) {
+    throw new Error(`Missing loaded head_optional package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headCostume3dId}.`);
+  }
+  return withRegistryEntryRuntimeMetadata(partSet.packages.get(headOptional.packagePath)!, headOptional);
 }
 
 function resolveOptionalHeadRuntime(

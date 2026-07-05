@@ -69,7 +69,7 @@ const COSTUME_SHOP_CAMERA = {
 } as const;
 const COSTUME_SHOP_CAMERA_CAPTURE_STATE = {
   rotationYDegrees: 0,
-  zoomValue: 0,
+  zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
   zoomMoveValue: 0,
 } as const;
 const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(-15, 50, 0);
@@ -2813,24 +2813,7 @@ function buildUnityRuntimeBoneInverseBindMatrices(
 
   const matrices: THREE.Matrix4[] = [];
   for (let offset = 0; offset < values.length; offset += 16) {
-    matrices.push(new THREE.Matrix4().set(
-      values[offset] ?? 1,
-      values[offset + 1] ?? 0,
-      values[offset + 2] ?? 0,
-      values[offset + 3] ?? 0,
-      values[offset + 4] ?? 0,
-      values[offset + 5] ?? 1,
-      values[offset + 6] ?? 0,
-      values[offset + 7] ?? 0,
-      values[offset + 8] ?? 0,
-      values[offset + 9] ?? 0,
-      values[offset + 10] ?? 1,
-      values[offset + 11] ?? 0,
-      values[offset + 12] ?? 0,
-      values[offset + 13] ?? 0,
-      values[offset + 14] ?? 0,
-      values[offset + 15] ?? 1
-    ));
+    matrices.push(new THREE.Matrix4().fromArray(values, offset));
   }
   return matrices;
 }

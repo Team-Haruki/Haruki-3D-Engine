@@ -153,12 +153,14 @@ export class CustomWardrobeController {
     }
     const entries = [
       this.findRegistryEntry(selection, "body", selection.bodyCostume3dId),
-      this.findRegistryEntry(selection, "head", selection.headCostume3dId),
+      this.findHeadRegistryEntry(selection),
       this.findRegistryEntry(selection, "hair", selection.hairCostume3dId),
       selection.headOptionalCostume3dId
         ? this.findRegistryEntry(selection, "head_optional", selection.headOptionalCostume3dId)
         : null,
-    ].filter(Boolean) as PartRegistryEntry[];
+    ].filter((entry): entry is PartRegistryEntry =>
+      entry !== null && entry.status !== "empty"
+    );
 
     await Promise.all(entries.map(async (entry) => {
       if (this.partSet!.packages.has(entry.packagePath)) {
@@ -169,6 +171,14 @@ export class CustomWardrobeController {
         throw new Error(`Failed to load ${entry.partType} package ${entry.packagePath}.`);
       }
     }));
+  }
+
+  private findHeadRegistryEntry(selection: CustomPartSelection): PartRegistryEntry {
+    try {
+      return this.findRegistryEntry(selection, "head", selection.headCostume3dId);
+    } catch {
+      return this.findRegistryEntry(selection, "head_optional", selection.headCostume3dId);
+    }
   }
 
   private findRegistryEntry(

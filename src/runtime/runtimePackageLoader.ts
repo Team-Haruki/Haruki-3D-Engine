@@ -532,7 +532,10 @@ function selectPartRuntimeCandidates(
         addEntry(findRegistryEntry(entry.characterId, "body", entry.bodyCostume3dId, entry.unit));
       }
       if (typeof entry.headCostume3dId === "number") {
-        addEntry(findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit));
+        addEntry(
+          findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit) ??
+          findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit)
+        );
       }
       if (typeof entry.hairCostume3dId === "number") {
         addEntry(findRegistryEntry(entry.characterId, "hair", entry.hairCostume3dId, entry.unit));
