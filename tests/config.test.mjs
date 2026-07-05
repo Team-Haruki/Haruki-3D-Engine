@@ -855,6 +855,21 @@ test("part composer treats empty head optional slots as no-op selections", () =>
   assert.match(composerSource, /return null/);
 });
 
+test("part composer mounts head optional accessories on body attach nodes and applies face-specific adjustments", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /resolveHeadOptionalFaceId/);
+  assert.match(composerSource, /extractFaceIdFromBundlePath/);
+  assert.match(composerSource, /accessoryTransformAdjustments/);
+  assert.match(composerSource, /applyAccessoryTransformAdjustment/);
+  assert.match(composerSource, /transformVectorArray\(positions, matrix, scale, position, true\)/);
+  assert.match(composerSource, /transformVectorArray\(normals, matrix, inverseScale\(scale\), \{ x: 0, y: 0, z: 0 \}, false\)/);
+  assert.match(composerSource, /root === "body" \|\| root === "sit_body" \|\| root === "guitar_body"/);
+});
+
 test("part composer resolves material textures relative to each source package", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),

@@ -88,6 +88,11 @@ export type PartRuntimePackage = {
     modelAssetbundleName?: string | null;
     headCostume3dAssetbundleType?: string | null;
   };
+  source?: {
+    bundlePath?: string | null;
+    colorVariationBundlePath?: string | null;
+    assetRootRelativeBundlePath?: string | null;
+  };
   mount?: Record<string, unknown>;
   manifest: unknown;
   nativeMeshes?: Record<string, unknown>;
@@ -173,6 +178,21 @@ type RuntimePrefabTransform = Record<string, unknown> & {
 type RuntimePrefabMonoBehaviour = Record<string, unknown> & {
   pathId?: number;
   runtimePartIndex?: number;
+};
+
+type AccessoryTransformAdjustment = {
+  position?: VectorLike | null;
+  rotationEulerDegrees?: VectorLike | null;
+  scale?: VectorLike | null;
+};
+
+type VectorLike = {
+  x?: number;
+  y?: number;
+  z?: number;
+  X?: number;
+  Y?: number;
+  Z?: number;
 };
 
 type RuntimeManager = Record<string, unknown> & {
@@ -1557,6 +1577,7 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
   const warnings = runtimes.flatMap((runtime) => runtime.warnings ?? []);
   const meshes: Record<string, unknown>[] = [];
   const optionalMeshKeys = new Set<string>();
+  const headOptionalFaceId = resolveHeadOptionalFaceId(runtimes);
   for (const runtime of runtimes) {
     const partType = normalizeRuntimePartType(runtime.part.partType);
     for (const mesh of readRecordArray(runtime.nativeMeshes?.meshes)) {
@@ -1591,8 +1612,14 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
         continue;
       }
       optionalMeshKeys.add(dedupeKey);
+      const adjustment = resolveAccessoryTransformAdjustment(runtime, headOptionalFaceId);
+      if (hasAccessoryTransformAdjustments(runtime) && !headOptionalFaceId) {
+        warnings.push(
+          `Head optional mesh '${readOptionalString(mesh.meshPath) || readOptionalString(mesh.meshName) || "<unnamed>"}' kept without accessory transform adjustment: face id could not be resolved from the active head package.`
+        );
+      }
       meshes.push({
-        ...mesh,
+        ...applyAccessoryTransformAdjustment(mesh, adjustment),
         sourceRendererTransformPath,
         rendererTransformPath: attachPath,
       });
@@ -1603,6 +1630,164 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
     meshes,
     warnings,
   };
+}
+
+function resolveHeadOptionalFaceId(runtimes: PartRuntimePackage[]) {
+  const candidates = [
+    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) === "head"),
+    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) === "hair"),
+    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) !== "head_optional"),
+  ];
+  for (const runtime of candidates) {
+    const fromBundle = extractFaceIdFromBundlePath(readOptionalString(runtime.source?.bundlePath));
+    if (fromBundle) {
+      return fromBundle;
+    }
+    const fromModelName = extractFaceIdFromBundlePath(readOptionalString(runtime.part.modelAssetbundleName));
+    if (fromModelName) {
+      return fromModelName;
+    }
+  }
+  return null;
+}
+
+function extractFaceIdFromBundlePath(value: string) {
+  const normalized = value.replace(/\\/g, "/").replace(/\.bundle$/i, "");
+  const match = normalized.match(/(?:^|\/)face\/([^/]+)\/([^/]+)$/i);
+  if (!match) {
+    return null;
+  }
+  return `${match[1]}/${match[2]}`;
+}
+
+function hasAccessoryTransformAdjustments(runtime: PartRuntimePackage) {
+  return Object.keys(readAccessoryTransformAdjustments(runtime)).length > 0;
+}
+
+function resolveAccessoryTransformAdjustment(
+  runtime: PartRuntimePackage,
+  faceId: string | null
+): AccessoryTransformAdjustment | null {
+  if (!faceId) {
+    return null;
+  }
+  const adjustments = readAccessoryTransformAdjustments(runtime);
+  const adjustment = adjustments[faceId];
+  return isRecord(adjustment) ? adjustment as AccessoryTransformAdjustment : null;
+}
+
+function readAccessoryTransformAdjustments(runtime: PartRuntimePackage) {
+  return asRecord(runtime.mount?.accessoryTransformAdjustments);
+}
+
+function applyAccessoryTransformAdjustment(
+  mesh: Record<string, unknown>,
+  adjustment: AccessoryTransformAdjustment | null
+) {
+  if (!adjustment) {
+    return mesh;
+  }
+  const position = readVectorLike(adjustment.position, 0, 0, 0);
+  const rotation = readVectorLike(adjustment.rotationEulerDegrees, 0, 0, 0);
+  const scale = readVectorLike(adjustment.scale, 1, 1, 1);
+  const matrix = buildEulerRotationMatrix(
+    degreesToRadians(rotation.x),
+    degreesToRadians(rotation.y),
+    degreesToRadians(rotation.z)
+  );
+  const transformed = { ...mesh };
+  const positions = readStrictNumberArray(mesh.positions);
+  if (positions) {
+    transformed.positions = transformVectorArray(positions, matrix, scale, position, true);
+  }
+  const normals = readStrictNumberArray(mesh.normals);
+  if (normals) {
+    transformed.normals = transformVectorArray(normals, matrix, inverseScale(scale), { x: 0, y: 0, z: 0 }, false);
+  }
+  return transformed;
+}
+
+function readStrictNumberArray(value: unknown) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "number")
+    ? value
+    : null;
+}
+
+function readVectorLike(
+  value: unknown,
+  defaultX: number,
+  defaultY: number,
+  defaultZ: number
+) {
+  const record = asRecord(value);
+  return {
+    x: readNumber(record.x ?? record.X, defaultX),
+    y: readNumber(record.y ?? record.Y, defaultY),
+    z: readNumber(record.z ?? record.Z, defaultZ),
+  };
+}
+
+function readNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function degreesToRadians(value: number) {
+  return value * Math.PI / 180;
+}
+
+function inverseScale(scale: { x: number; y: number; z: number }) {
+  return {
+    x: Math.abs(scale.x) > 0.000001 ? 1 / scale.x : 1,
+    y: Math.abs(scale.y) > 0.000001 ? 1 / scale.y : 1,
+    z: Math.abs(scale.z) > 0.000001 ? 1 / scale.z : 1,
+  };
+}
+
+function buildEulerRotationMatrix(rx: number, ry: number, rz: number) {
+  const cx = Math.cos(rx);
+  const sx = Math.sin(rx);
+  const cy = Math.cos(ry);
+  const sy = Math.sin(ry);
+  const cz = Math.cos(rz);
+  const sz = Math.sin(rz);
+  return [
+    cy * cz,
+    sx * sy * cz - cx * sz,
+    cx * sy * cz + sx * sz,
+    cy * sz,
+    sx * sy * sz + cx * cz,
+    cx * sy * sz - sx * cz,
+    -sy,
+    sx * cy,
+    cx * cy,
+  ] as const;
+}
+
+function transformVectorArray(
+  values: number[],
+  matrix: readonly number[],
+  scale: { x: number; y: number; z: number },
+  translation: { x: number; y: number; z: number },
+  includeTranslation: boolean
+) {
+  const result = values.slice();
+  for (let index = 0; index + 2 < result.length; index += 3) {
+    const x = result[index] * scale.x;
+    const y = result[index + 1] * scale.y;
+    const z = result[index + 2] * scale.z;
+    result[index] = matrix[0] * x + matrix[1] * y + matrix[2] * z + (includeTranslation ? translation.x : 0);
+    result[index + 1] = matrix[3] * x + matrix[4] * y + matrix[5] * z + (includeTranslation ? translation.y : 0);
+    result[index + 2] = matrix[6] * x + matrix[7] * y + matrix[8] * z + (includeTranslation ? translation.z : 0);
+    if (!includeTranslation) {
+      const length = Math.hypot(result[index], result[index + 1], result[index + 2]);
+      if (length > 0.000001) {
+        result[index] /= length;
+        result[index + 1] /= length;
+        result[index + 2] /= length;
+      }
+    }
+  }
+  return result;
 }
 
 function resolveHeadOptionalAttachPath(
@@ -1639,11 +1824,15 @@ function normalizePathSegment(value: string | null | undefined): string | null {
 }
 
 function attachPathPriority(path: string): number {
-  if (path.startsWith("face/Position/")) {
+  const root = firstPathSegment(path);
+  if (root === "body" || root === "sit_body" || root === "guitar_body") {
     return 0;
   }
-  if (path.startsWith("face/")) {
+  if (path.startsWith("face/Position/")) {
     return 1;
+  }
+  if (path.startsWith("face/")) {
+    return 2;
   }
   return 10;
 }
@@ -1702,6 +1891,10 @@ function cloneRecord<T>(value: T): T {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
 }
 
 function readStringArray(value: unknown): string[] {
