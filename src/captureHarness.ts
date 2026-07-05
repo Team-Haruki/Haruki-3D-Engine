@@ -156,6 +156,7 @@ function readFaceSdfDebugMode(params: URLSearchParams): FaceSdfDebugMode {
     case "mask":
     case "limit":
     case "basis":
+    case "range":
       return mode;
     default:
       return "off";

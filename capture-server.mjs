@@ -271,7 +271,7 @@ function normalizeFaceSdfDebugMode(value) {
     return undefined;
   }
   const normalized = String(value);
-  return ["sdf", "mask", "limit", "basis"].includes(normalized)
+  return ["sdf", "mask", "limit", "basis", "range"].includes(normalized)
     ? normalized
     : undefined;
 }

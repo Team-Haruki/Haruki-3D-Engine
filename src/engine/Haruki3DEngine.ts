@@ -22,6 +22,7 @@ import {
   createSekaiFaceMaterial,
   updateSekaiFaceBasis,
   updateSekaiFaceMaterial,
+  updateSekaiFaceShadowParameters,
 } from "../materials/sekaiFaceMaterial";
 import {
   createSekaiLayerMaterial,
@@ -35,7 +36,13 @@ import {
 import { UnityPrefabSpringRuntime } from "./unityPrefabSpringRuntimeAdapter";
 import { SekaiExtraBoneRuntime } from "./sekaiExtraBoneRuntime";
 import {
+  applyUnityRuntimeConstraints,
+  type RuntimeConstraintDebug,
+  type RuntimeConstraintSetupSource,
+} from "./unityConstraintRuntime";
+import {
   convertUnityPositionToThree,
+  convertUnityDirectionToThree,
   convertUnityQuaternionToThree,
   readUnityQuaternion,
   readUnityVector3,
@@ -65,6 +72,21 @@ const COSTUME_SHOP_CAMERA_CAPTURE_STATE = {
   zoomValue: 0,
   zoomMoveValue: 0,
 } as const;
+const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(-15, 50, 0);
+const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
+  new THREE.Vector3(0, 0, 1)
+    .applyEuler(
+      new THREE.Euler(
+        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.x),
+        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.y),
+        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.z),
+        "XYZ"
+      )
+    )
+    .normalize()
+).normalize();
+const COSTUME_SHOP_USE_FACE_SHADOW_LIMITER = true;
+const COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE = 0;
 const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0.0245;
 const CHARACTER_EYE_STENCIL_BIT = 0x01;
 const CHARACTER_EYELASH_STENCIL_BIT = 0x02;
@@ -228,7 +250,7 @@ export type BodyDebugMode =
   | "toon_luma"
   | "shadow_mask"
   | "shadow_target";
-export type FaceSdfDebugMode = "off" | "sdf" | "mask" | "limit" | "basis";
+export type FaceSdfDebugMode = "off" | "sdf" | "mask" | "limit" | "basis" | "range";
 export type FaceSdfDebugLightMode = "scene" | "front" | "left" | "right" | "back";
 export type RenderIsolationMode =
   | "normal"
@@ -373,6 +395,8 @@ export type RuntimeCameraDebug = {
 
 export type RuntimeFaceLightDebug = {
   lightDirection: { x: number; y: number; z: number };
+  previewLightDirection: { x: number; y: number; z: number };
+  costumeShopLightRotationDegrees: { x: number; y: number; z: number };
   faceRightWorld: { x: number; y: number; z: number };
   faceUpWorld: { x: number; y: number; z: number };
   faceForwardWorld: { x: number; y: number; z: number };
@@ -404,6 +428,7 @@ export type RuntimeDebugSnapshot = {
   outlineShells: RuntimeOutlineShellDebug[];
   camera?: RuntimeCameraDebug;
   faceLight?: RuntimeFaceLightDebug;
+  constraints?: RuntimeConstraintDebug | null;
 };
 
 export type SpringBoneRuntimeSnapshot = {
@@ -685,6 +710,7 @@ type RuntimeUnitySetupSource = {
   version?: string | number;
   prefabGraphs?: RuntimePrefabGraphSource[];
   bodyHeadAssembly?: RuntimeUnityBodyHeadAssemblySource;
+  constraintSetup?: RuntimeConstraintSetupSource;
   activeRootProfile?: {
     defaultBodyRoot?: string;
     activeRoots?: string[];
@@ -1580,6 +1606,9 @@ function cloneFaceShaderMaterial(
     ambientIntensity: source.uniforms.uAmbientIntensity.value,
     faceSoftness: source.uniforms.uFaceSoftness.value,
     faceSdfUseLightDirection: source.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
+    headDotDirectionalLight: source.uniforms.uHeadDotDirectionalLight?.value,
+    useFaceShadowLimiter: (source.uniforms.uUseFaceShadowLimiter?.value ?? 1.0) > 0.5,
+    faceShadowLimitRange: source.uniforms.uFaceShadowLimitRange?.value ?? 0,
     faceDebugMode: source.uniforms.uFaceDebugMode?.value ?? 0,
     faceDebugLightMode: source.uniforms.uFaceDebugLightMode?.value ?? 0,
     faceSdfEnabled: params.faceSdfEnabled ?? false,
@@ -1914,6 +1943,8 @@ function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
       return 3;
     case "basis":
       return 4;
+    case "range":
+      return 5;
     default:
       return 0;
   }
@@ -3988,6 +4019,7 @@ export class Haruki3DEngine {
   private cameraDebugChangeCallback: (() => void) | null = null;
   private currentLoadedRuntimePackage: RuntimePackageLoadResult | null = null;
   private lastNativeMeshInstallDiagnostics: ReturnType<typeof installUnityRuntimeNativeMeshes> | null = null;
+  private lastConstraintSetupDiagnostics: RuntimeConstraintDebug | null = null;
   private readonly runtimeDebug: RuntimeDebugSnapshot = {
     materialBindingMode: "manifest",
     body: [],
@@ -4091,11 +4123,14 @@ export class Haruki3DEngine {
     this.faceMaterial = createSekaiFaceMaterial({
       baseColor: "#ffe4dc",
       warmColor: "#ffd4c8",
-      lightDirection: this.directionalLight.position.clone(),
+      lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
       lightIntensity: light.intensity,
       ambientIntensity: light.ambient,
       faceSoftness: light.faceSoftness,
       faceSdfUseLightDirection: light.faceSdfUseLightDirection,
+      headDotDirectionalLight: this.headDotDirectionalLight,
+      useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
+      faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
     });
 
     this.characterRoot = new THREE.Group();
@@ -4194,6 +4229,7 @@ export class Haruki3DEngine {
     this.currentBodyAsset = characterAsset.bodyAsset;
     this.currentHeadAsset = characterAsset.headAsset;
     this.currentImportIsCombined = true;
+    this.lastConstraintSetupDiagnostics = null;
     this.applyCharacterHeight(characterAsset.bodyAsset.characterHeightMeters ?? this.characterHeight);
     const loaded = await this.loadCombinedCharacterAsset(characterAsset);
 
@@ -4780,13 +4816,15 @@ export class Haruki3DEngine {
         valueTex: slot.valueTex,
       })) ?? [],
       nativeMeshes: this.lastNativeMeshInstallDiagnostics,
+      constraints: this.lastConstraintSetupDiagnostics,
       camera: this.getCameraDebugSnapshot(),
       faceLight: this.getFaceLightDebugSnapshot(),
     };
   }
 
   getFaceLightDebugSnapshot(): RuntimeFaceLightDebug {
-    const lightDirection = this.directionalLight.position.clone().normalize();
+    const previewLightDirection = this.directionalLight.position.clone().normalize();
+    const lightDirection = COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
     const headHorizontalFromUp = new THREE.Vector2();
     const headHorizontalFromRight = new THREE.Vector2();
     const headHorizontalFromForward = new THREE.Vector2();
@@ -4808,8 +4846,8 @@ export class Haruki3DEngine {
     );
     normalizeFaceShadowHorizontal(
       lightHorizontal,
-      this.directionalLight.position.x,
-      this.directionalLight.position.z
+      lightDirection.x,
+      lightDirection.z
     );
     const headYawDegrees = THREE.MathUtils.radToDeg(
       Math.atan2(this.faceForwardWorld.x, this.faceForwardWorld.z)
@@ -4846,6 +4884,10 @@ export class Haruki3DEngine {
     );
     return {
       lightDirection: vectorDebugSnapshot(lightDirection),
+      previewLightDirection: vectorDebugSnapshot(previewLightDirection),
+      costumeShopLightRotationDegrees: vectorDebugSnapshot(
+        COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES
+      ),
       faceRightWorld: vectorDebugSnapshot(faceRight),
       faceUpWorld: vectorDebugSnapshot(faceUp),
       faceForwardWorld: vectorDebugSnapshot(faceForward),
@@ -5785,11 +5827,14 @@ export class Haruki3DEngine {
         this.currentHeadAsset?.proxy.skinColor2 ??
         this.currentHeadAsset?.proxy.faceShadeColor ??
         "#ffd4c8",
-      lightDirection: this.directionalLight.position.clone(),
+      lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
       lightIntensity: next.intensity,
       ambientIntensity: next.ambient,
       faceSoftness: next.faceSoftness,
       faceSdfUseLightDirection: next.faceSdfUseLightDirection,
+      headDotDirectionalLight: this.headDotDirectionalLight,
+      useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
+      faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
     });
     this.updateLoadedMaterialLight(next);
   }
@@ -5946,6 +5991,7 @@ export class Haruki3DEngine {
 
   private updateLoadedMaterialLight(next: PreviewLightState) {
     const lightDirection = this.directionalLight.position.clone().normalize();
+    const faceShadowLightDirection = COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
     const rimDirection = getSekaiPreviewRimDirection();
     for (const slot of [this.bodySlot, this.headSlot]) {
       slot.traverse((node) => {
@@ -5959,7 +6005,10 @@ export class Haruki3DEngine {
             continue;
           }
           const uniforms = material.uniforms;
-          uniforms.uLightDirection?.value.copy(lightDirection);
+          const isFaceShadowMaterial = Boolean(uniforms.uFaceShadowTex || uniforms.uHeadDotDirectionalLight);
+          uniforms.uLightDirection?.value.copy(
+            isFaceShadowMaterial ? faceShadowLightDirection : lightDirection
+          );
           if (uniforms.uLightIntensity) {
             uniforms.uLightIntensity.value = next.intensity;
           }
@@ -7709,12 +7758,15 @@ export class Haruki3DEngine {
       skinColorDefault: headAsset.proxy.skinColorDefault ?? headAsset.proxy.faceColor,
       skinColor1: headAsset.proxy.skinColor1 ?? headAsset.proxy.faceShadeColor,
       skinColor2: headAsset.proxy.skinColor2 ?? headAsset.proxy.faceShadeColor,
-      lightDirection: this.directionalLight.position.clone(),
+      lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
       lightIntensity: this.directionalLight.intensity,
       ambientIntensity: this.fillLight.intensity,
       faceSoftness: this.faceMaterial.uniforms.uFaceSoftness.value,
       faceSdfUseLightDirection:
         this.faceMaterial.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
+      headDotDirectionalLight: this.headDotDirectionalLight,
+      useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
+      faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
     });
     updateSekaiBodyMaterial(this.hairMaterial, {
       baseColor: headAsset.proxy.hairColor,
@@ -8001,13 +8053,13 @@ export class Haruki3DEngine {
     this.faceUpWorld.crossVectors(this.faceForwardWorld, this.faceRightWorld).normalize();
     normalizeFaceShadowHorizontal(
       this.faceShadowHeadHorizontal,
-      this.faceRightWorld.x,
-      this.faceRightWorld.z
+      -this.faceUpWorld.x,
+      -this.faceUpWorld.z
     );
     normalizeFaceShadowHorizontal(
       this.faceShadowLightHorizontal,
-      this.directionalLight.position.x,
-      this.directionalLight.position.z
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.x,
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.z
     );
     const headYawDegrees = THREE.MathUtils.radToDeg(
       Math.atan2(this.faceForwardWorld.x, this.faceForwardWorld.z)
@@ -8027,6 +8079,13 @@ export class Haruki3DEngine {
       this.faceUpWorld,
       this.faceForwardWorld
     );
+    updateSekaiFaceShadowParameters(
+      this.faceMaterial,
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+      this.headDotDirectionalLight,
+      COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
+      COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE
+    );
     for (const slot of [this.bodySlot, this.headSlot]) {
       slot.traverse((node) => {
         const mesh = node as THREE.Mesh;
@@ -8044,6 +8103,13 @@ export class Haruki3DEngine {
               this.faceRightWorld,
               this.faceUpWorld,
               this.faceForwardWorld
+            );
+            updateSekaiFaceShadowParameters(
+              material,
+              COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+              this.headDotDirectionalLight,
+              COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
+              COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE
             );
           }
           if (material.uniforms.uHeadPosition) {
@@ -8657,6 +8723,12 @@ export class Haruki3DEngine {
       }
       graph.root.updateMatrixWorld(true);
     }
+
+    this.lastConstraintSetupDiagnostics = applyUnityRuntimeConstraints(
+      graph,
+      readRuntimeUnitySetup0414ForGraph(this.currentRuntimeExtension)?.constraintSetup,
+      this.characterHeight
+    );
 
     for (const binding of graph.meshCarrierBindings) {
       binding.target.position.copy(binding.source.position);

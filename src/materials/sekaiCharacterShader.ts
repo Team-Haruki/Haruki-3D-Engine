@@ -522,6 +522,9 @@ export type FaceMaterialUniforms = {
   ambientIntensity: number;
   faceSoftness: number;
   faceSdfUseLightDirection?: number;
+  headDotDirectionalLight?: THREE.Vector2;
+  useFaceShadowLimiter?: boolean;
+  faceShadowLimitRange?: number;
   faceDebugMode?: number;
   faceDebugLightMode?: number;
   faceSdfEnabled?: boolean;
@@ -551,6 +554,11 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uFaceRight: { value: new THREE.Vector3(1, 0, 0) },
       uFaceUp: { value: new THREE.Vector3(0, 1, 0) },
       uFaceForward: { value: new THREE.Vector3(0, 0, 1) },
+      uHeadDotDirectionalLight: {
+        value: (initial.headDotDirectionalLight ?? new THREE.Vector2(0, 0)).clone(),
+      },
+      uUseFaceShadowLimiter: { value: initial.useFaceShadowLimiter === false ? 0.0 : 1.0 },
+      uFaceShadowLimitRange: { value: initial.faceShadowLimitRange ?? 0.0 },
       uLightIntensity: { value: initial.lightIntensity },
       uAmbientIntensity: { value: initial.ambientIntensity },
       uFaceSoftness: { value: initial.faceSoftness },
@@ -609,6 +617,9 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       uniform vec3 uFaceRight;
       uniform vec3 uFaceUp;
       uniform vec3 uFaceForward;
+      uniform vec2 uHeadDotDirectionalLight;
+      uniform float uUseFaceShadowLimiter;
+      uniform float uFaceShadowLimitRange;
       uniform float uLightIntensity;
       uniform float uAmbientIntensity;
       uniform float uFaceSoftness;
@@ -663,7 +674,9 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
           }
           vec3 tbnLight = vec3(dot(lightDir, faceRight), dot(lightDir, faceUp), dot(lightDir, faceForward));
           vec2 faceLight = tbnLight.xz / max(length(tbnLight.xz), 0.001);
-          float faceSide = faceLight.x;
+          float officialSide = clamp(uHeadDotDirectionalLight.x, -1.0, 1.0);
+          float officialRange = clamp(uHeadDotDirectionalLight.y, 0.0, 1.0);
+          float faceSide = mix(faceLight.x, officialSide, clamp(uFaceSdfUseLightDirection, 0.0, 1.0));
           float faceFront = faceLight.y;
           vec2 sdfUv = vFaceShadowUv;
           // SekaiShaderTextureHelper does abs(uv * -1 + FlipX):
@@ -681,8 +694,12 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
           sdfLimit = clamp(sdfLimit, 0.015, 0.985);
           float sdfWidth = mix(0.018, 0.11, clamp(uFaceSoftness, 0.0, 1.0));
           float sideGate = smoothstep(0.035, 0.18, abs(faceSide));
+          float rangeLimit = clamp(uFaceShadowLimitRange, 0.0, 1.0);
+          float rangeGate = uUseFaceShadowLimiter > 0.5
+            ? smoothstep(rangeLimit, min(rangeLimit + 0.18, 1.0), officialRange)
+            : 1.0;
           float sdfMask = 1.0 - smoothstep(sdfLimit - sdfWidth, sdfLimit + sdfWidth, sdfValue);
-          sdfMask *= sideGate;
+          sdfMask *= sideGate * rangeGate;
           if (uFaceDebugMode > 0.5) {
             if (uFaceDebugMode < 1.5) {
               gl_FragColor = vec4(outputColor(vec3(sdfValue)), 1.0);
@@ -696,7 +713,11 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
               gl_FragColor = vec4(outputColor(vec3(sdfLimit)), 1.0);
               return;
             }
-            gl_FragColor = vec4(outputColor(max(vec3(faceSide, -faceSide, faceFront), vec3(0.0))), 1.0);
+            if (uFaceDebugMode < 4.5) {
+              gl_FragColor = vec4(outputColor(max(vec3(faceSide, -faceSide, faceFront), vec3(0.0))), 1.0);
+              return;
+            }
+            gl_FragColor = vec4(outputColor(vec3(officialRange)), 1.0);
             return;
           }
           if (uFaceSdfEnabled > 0.5) {
@@ -729,6 +750,13 @@ export function updateSekaiFaceMaterial(
   material.uniforms.uLightDirection.value.copy(
     next.lightDirection.clone().normalize()
   );
+  updateSekaiFaceShadowParameters(
+    material,
+    next.lightDirection,
+    next.headDotDirectionalLight ?? material.uniforms.uHeadDotDirectionalLight?.value,
+    next.useFaceShadowLimiter,
+    next.faceShadowLimitRange
+  );
   material.uniforms.uLightIntensity.value = next.lightIntensity;
   material.uniforms.uAmbientIntensity.value = next.ambientIntensity;
   material.uniforms.uFaceSoftness.value = next.faceSoftness;
@@ -755,6 +783,25 @@ export function updateSekaiFaceBasis(
   material.uniforms.uFaceRight?.value.copy(faceRight).normalize();
   material.uniforms.uFaceUp?.value.copy(faceUp).normalize();
   material.uniforms.uFaceForward?.value.copy(faceForward).normalize();
+}
+
+export function updateSekaiFaceShadowParameters(
+  material: THREE.ShaderMaterial,
+  lightDirection: THREE.Vector3,
+  headDotDirectionalLight?: THREE.Vector2 | null,
+  useFaceShadowLimiter = true,
+  faceShadowLimitRange = 0
+) {
+  material.uniforms.uLightDirection?.value.copy(lightDirection).normalize();
+  if (headDotDirectionalLight && material.uniforms.uHeadDotDirectionalLight) {
+    material.uniforms.uHeadDotDirectionalLight.value.copy(headDotDirectionalLight);
+  }
+  if (material.uniforms.uUseFaceShadowLimiter) {
+    material.uniforms.uUseFaceShadowLimiter.value = useFaceShadowLimiter ? 1.0 : 0.0;
+  }
+  if (material.uniforms.uFaceShadowLimitRange) {
+    material.uniforms.uFaceShadowLimitRange.value = faceShadowLimitRange;
+  }
 }
 export type SekaiLayerMode = "alpha" | "add" | "eye" | "eyelight";
 

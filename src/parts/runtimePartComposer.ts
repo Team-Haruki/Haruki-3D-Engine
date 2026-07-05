@@ -159,6 +159,7 @@ type RuntimeSetup = {
   colliders?: RuntimeCollider[];
   colliderBindings?: RuntimeColliderBinding[];
   managerColliderCaches?: RuntimeManagerColliderCache[];
+  constraintSetup?: RuntimeConstraintSetup;
   warnings?: string[];
   [key: string]: unknown;
 };
@@ -262,6 +263,35 @@ type RuntimeManagerColliderCache = Record<string, unknown> & {
   panelColliderIndexes?: number[];
 };
 
+type RuntimeConstraintSetup = Record<string, unknown> & {
+  version?: string | number;
+  sourceKind?: string;
+  constraints?: RuntimeConstraint[];
+  warnings?: string[];
+};
+
+type RuntimeConstraint = Record<string, unknown> & {
+  partKind?: string;
+  type?: string;
+  pathId?: number;
+  ownerPath?: string | null;
+  ownerName?: string | null;
+  enabled?: boolean | null;
+  active?: boolean | null;
+  sources?: RuntimeConstraintSource[];
+  status?: string;
+  reason?: string;
+  runtimePartIndex?: number;
+};
+
+type RuntimeConstraintSource = Record<string, unknown> & {
+  sourcePathId?: number | null;
+  sourceName?: string | null;
+  sourcePath?: string | null;
+  weight?: number;
+  translationOffset?: VectorLike | null;
+};
+
 type RuntimePartWithIndex = {
   runtime: PartRuntimePackage;
   partIndex: number;
@@ -276,6 +306,7 @@ type RemappedRuntimePart = RuntimePartWithIndex & {
   colliders: RuntimeCollider[];
   colliderBindings: RuntimeColliderBinding[];
   managerColliderCaches: RuntimeManagerColliderCache[];
+  constraints: RuntimeConstraint[];
   activeRoots: string[];
 };
 
@@ -970,6 +1001,7 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
   const managers = remappedParts.flatMap((part) => part.managers);
   const bones = remappedParts.flatMap((part) => part.bones);
   const colliders = remappedParts.flatMap((part) => part.colliders);
+  const constraints = remappedParts.flatMap((part) => part.constraints);
   const colliderBindings = rebuildColliderBindings(remappedParts);
   const managerColliderCaches = rebuildManagerColliderCaches(remappedParts, colliderBindings);
   const bindingDecisions = rebuildBindingDecisions(bones, colliderBindings);
@@ -989,6 +1021,7 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
         "load active part packages",
         "merge part native meshes",
         "merge active part springbone records",
+        "repair constraints after composition",
         "rebind colliderFlag springs to current body colliders",
         "reset spring runtime",
       ],
@@ -1005,6 +1038,14 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     colliders,
     colliderBindings,
     bindingDecisions,
+    constraintSetup: {
+      version: "0414",
+      sourceKind: "viewer_composed_part_runtime_package",
+      constraints,
+      warnings: uniqueStrings(remappedParts.flatMap((part) =>
+        readStringArray(part.setup.constraintSetup?.warnings)
+      )),
+    },
     managerColliderCaches,
     warnings,
   };
@@ -1072,6 +1113,7 @@ function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {
     managerColliderCaches: springBone.managerColliderCaches as RuntimeManagerColliderCache[] | undefined,
     activeRootProfile: springBone.activeRootProfile as Record<string, unknown> | undefined,
     bindingDecisions: springBone.bindingDecisions as RuntimeBindingDecision[] | undefined,
+    constraintSetup: springBone.constraintSetup as RuntimeConstraintSetup | undefined,
   };
 }
 
@@ -1106,6 +1148,7 @@ function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): Remap
     ) as RuntimeManagerColliderCache[],
     managers
   );
+  const constraints = remapRuntimeConstraints(setup.constraintSetup, partIndex, partType, selectedActiveRoots);
   withInferredSpringManagerBoneRefs(managers, bones, managerColliderCaches);
   return {
     runtime,
@@ -1118,6 +1161,7 @@ function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): Remap
     colliders,
     colliderBindings,
     managerColliderCaches,
+    constraints,
     activeRoots: selectedActiveRoots,
   };
 }
@@ -1174,6 +1218,33 @@ function filterManagerColliderCachesByActiveManagers(
     typeof cache.managerPathId !== "number" ||
     activeManagerPathIds.has(cache.managerPathId)
   );
+}
+
+function remapRuntimeConstraints(
+  setup: RuntimeConstraintSetup | undefined,
+  partIndex: number,
+  partType: RuntimePartType,
+  activeRoots: string[]
+): RuntimeConstraint[] {
+  const roots = new Set(activeRoots.map((root) => normalizeRootName(root)));
+  return (cloneArrayWithPartPrefix(setup?.constraints, partIndex, partType) as RuntimeConstraint[])
+    .map((constraint) => {
+      const sources = readRecordArray(constraint.sources).map((source) => {
+        const cloned = { ...source } as RuntimeConstraintSource;
+        if (typeof cloned.sourcePathId === "number") {
+          cloned.sourcePathId = remapNumericId(cloned.sourcePathId, partIndex);
+        }
+        return cloned;
+      });
+      return { ...constraint, sources };
+    })
+    .filter((constraint) => {
+      const ownerRoot = normalizeRootName(firstPathSegment(constraint.ownerPath));
+      const sourceRoots = readRecordArray(constraint.sources)
+        .map((source) => normalizeRootName(firstPathSegment(readOptionalString(source.sourcePath))));
+      return (!ownerRoot || roots.has(ownerRoot)) &&
+        sourceRoots.every((sourceRoot) => !sourceRoot || roots.has(sourceRoot));
+    });
 }
 
 function remapPrefabGraph(value: unknown, partIndex: number): RuntimePrefabGraph | null {

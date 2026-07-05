@@ -341,7 +341,7 @@ test("combined runtime imports apply character height before capture camera fram
 
   assert.match(
     engineSource,
-    /this\.currentBodyAsset = characterAsset\.bodyAsset;\s+this\.currentHeadAsset = characterAsset\.headAsset;\s+this\.currentImportIsCombined = true;\s+this\.applyCharacterHeight\(characterAsset\.bodyAsset\.characterHeightMeters \?\? this\.characterHeight\);/s
+    /this\.currentBodyAsset = characterAsset\.bodyAsset;\s+this\.currentHeadAsset = characterAsset\.headAsset;\s+this\.currentImportIsCombined = true;\s+(?:this\.lastConstraintSetupDiagnostics = null;\s+)?this\.applyCharacterHeight\(characterAsset\.bodyAsset\.characterHeightMeters \?\? this\.characterHeight\);/s
   );
 });
 
@@ -389,7 +389,7 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.doesNotMatch(shaderSource, /staticShadowMask/);
 });
 
-test("body shader does not consume face sdf range controls for neck or collar shading", () => {
+test("face sdf uses official face-only head light parameters", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -399,13 +399,20 @@ test("body shader does not consume face sdf range controls for neck or collar sh
     "utf8"
   );
 
-  assert.doesNotMatch(shaderSource, /uFaceShadowRangeLimit/);
-  assert.doesNotMatch(shaderSource, /uHeadDotDirectionalLight/);
-  assert.doesNotMatch(shaderSource, /headDotShadow|headYawShadow|rangeLimit \* uShadowWeight/);
+  assert.match(engineSource, /COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE\.Vector3\(-15, 50, 0\)/);
+  assert.match(engineSource, /COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree/);
+  assert.match(shaderSource, /uniform vec2 uHeadDotDirectionalLight;/);
+  assert.match(shaderSource, /uniform float uUseFaceShadowLimiter;/);
+  assert.match(shaderSource, /uniform float uFaceShadowLimitRange;/);
+  assert.match(shaderSource, /float officialSide = clamp\(uHeadDotDirectionalLight\.x, -1\.0, 1\.0\);/);
+  assert.match(shaderSource, /float officialRange = clamp\(uHeadDotDirectionalLight\.y, 0\.0, 1\.0\);/);
+  assert.match(engineSource, /export type FaceSdfDebugMode = "off" \| "sdf" \| "mask" \| "limit" \| "basis" \| "range";/);
+  assert.match(engineSource, /-this\.faceUpWorld\.x,\s+-this\.faceUpWorld\.z/s);
+  assert.match(engineSource, /updateSekaiFaceShadowParameters\(\s+material,\s+COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,\s+this\.headDotDirectionalLight/s);
+  assert.doesNotMatch(shaderSource, /rangeLimit \* uShadowWeight/);
   assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
   assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
   assert.match(engineSource, /if \(material\.uniforms\.uHeadPosition\) \{\s+material\.uniforms\.uHeadPosition\.value\.copy\(this\.hairHeadPosition\);\s+\}/s);
-  assert.doesNotMatch(engineSource, /uniforms\.uHeadDotDirectionalLight\.value\.copy\(this\.headDotDirectionalLight\)/);
 });
 
 test("head material binding normalizes old runtime hair and accessory kinds before FaceSDF fallback", () => {
@@ -496,6 +503,7 @@ test("character shader keeps sssekai-verified C/S/H and vertex color channel sem
   assert.match(shaderSource, /vertexRimIntensity = clamp\(vColor\.g, 0\.0, 1\.0\);/);
   assert.match(shaderSource, /vFaceShadowUv = uv1;/);
   assert.match(shaderSource, /texture2D\(uFaceShadowTex, sdfUv\)/);
+  assert.match(shaderSource, /sdfMask \*= sideGate \* rangeGate;/);
 });
 
 test("projected character shadows are separate scene objects", () => {
@@ -552,14 +560,30 @@ test("part registry runtime path keeps role motion separate from part packages",
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const constraintRuntimeSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityConstraintRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(composerSource, /type RoleRuntimePackage =/);
   assert.match(composerSource, /resolveHeadOptionalAttachPath/);
   assert.match(composerSource, /sourceRendererTransformPath/);
+  assert.match(composerSource, /constraintSetup:\s*\{/);
+  assert.match(composerSource, /repair constraints after composition/);
   assert.match(loaderSource, /roleRuntimePath/);
   assert.match(loaderSource, /loadRoleRuntimePackages/);
   assert.match(engineSource, /applyCustomRoleDefaultMotion/);
   assert.match(engineSource, /nativeMeshes: this\.lastNativeMeshInstallDiagnostics/);
+  assert.match(engineSource, /constraints: this\.lastConstraintSetupDiagnostics/);
+  assert.match(engineSource, /applyUnityRuntimeConstraints/);
+  assert.match(composerSource, /sourcePathId = remapNumericId/);
+  assert.match(constraintRuntimeSource, /export function applyUnityRuntimeConstraints/);
+  assert.match(constraintRuntimeSource, /constraint\.sources/);
+  assert.match(constraintRuntimeSource, /transform name \$\{name\} matched \$\{candidates\.length\} nodes/);
+  assert.match(constraintRuntimeSource, /parent constraint applied with height-scaled translation offsets/);
+  assert.match(constraintRuntimeSource, /rotation constraint is only applied for a single resolved source/);
+  assert.match(constraintRuntimeSource, /aim constraint remains diagnostic-only/);
+  assert.match(constraintRuntimeSource, /multiplyScalar\(characterHeight\)/);
 });
 
 test("custom composer filters complete-head hair packages instead of stacking duplicate face roots", () => {
