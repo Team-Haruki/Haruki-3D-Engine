@@ -278,6 +278,7 @@ type RuntimeConstraint = Record<string, unknown> & {
   ownerName?: string | null;
   enabled?: boolean | null;
   active?: boolean | null;
+  worldUpObjectPathId?: number | null;
   sources?: RuntimeConstraintSource[];
   status?: string;
   reason?: string;
@@ -1236,6 +1237,9 @@ function remapRuntimeConstraints(
         }
         return cloned;
       });
+      if (typeof constraint.worldUpObjectPathId === "number") {
+        constraint.worldUpObjectPathId = remapNumericId(constraint.worldUpObjectPathId, partIndex);
+      }
       return { ...constraint, sources };
     })
     .filter((constraint) => {

@@ -581,9 +581,27 @@ test("part registry runtime path keeps role motion separate from part packages",
   assert.match(constraintRuntimeSource, /constraint\.sources/);
   assert.match(constraintRuntimeSource, /transform name \$\{name\} matched \$\{candidates\.length\} nodes/);
   assert.match(constraintRuntimeSource, /parent constraint applied with height-scaled translation offsets/);
-  assert.match(constraintRuntimeSource, /rotation constraint is only applied for a single resolved source/);
-  assert.match(constraintRuntimeSource, /aim constraint remains diagnostic-only/);
+  assert.match(constraintRuntimeSource, /rotation constraint applied with weighted source rotations/);
+  assert.match(constraintRuntimeSource, /aim constraint applied with exported aim\/up vectors/);
+  assert.match(constraintRuntimeSource, /applyAimConstraint/);
+  assert.match(constraintRuntimeSource, /worldUpObject/);
   assert.match(constraintRuntimeSource, /multiplyScalar\(characterHeight\)/);
+});
+
+test("runtime shadow debug exposes projected and hair-shadow layers", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /export type RuntimeProjectedShadowDebug =/);
+  assert.match(engineSource, /projectedShadow\?: RuntimeProjectedShadowDebug/);
+  assert.match(engineSource, /projectedShadow: this\.projectedShadow\.getDebugSnapshot/);
+  assert.match(engineSource, /export type HairShadowMode = "off" \| "head_proximity";/);
+  assert.match(engineSource, /private hairShadowMode: HairShadowMode = "head_proximity";/);
+  assert.match(engineSource, /hairShadowMode: this\.hairShadowMode/);
+  assert.match(engineSource, /CharacterDirectionalShadow/);
+  assert.match(engineSource, /CharacterCrossShadow/);
 });
 
 test("custom composer filters complete-head hair packages instead of stacking duplicate face roots", () => {

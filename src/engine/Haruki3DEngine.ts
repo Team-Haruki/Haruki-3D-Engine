@@ -274,7 +274,7 @@ export type RenderIsolationMode =
   | "no_body_outline"
   | "no_hair_outline"
   | "no_face_outline";
-export type HairShadowMode = "light" | "legacy_head";
+export type HairShadowMode = "off" | "head_proximity";
 
 export type BodyAnimationKind = "unity-json";
 
@@ -412,8 +412,26 @@ export type RuntimeFaceLightDebug = {
   lightYawDegrees: number;
 };
 
+export type RuntimeProjectedShadowDebug = {
+  visible: boolean;
+  floorY: number;
+  characterHeight: number;
+  directional: {
+    position: { x: number; y: number; z: number };
+    forward: { x: number; y: number; z: number };
+    scale: { x: number; y: number; z: number };
+    opacity: number;
+  };
+  cross: {
+    position: { x: number; y: number; z: number };
+    scale: { x: number; y: number; z: number };
+    opacity: number;
+  };
+};
+
 export type RuntimeDebugSnapshot = {
   materialBindingMode: MaterialBindingMode;
+  hairShadowMode: HairShadowMode;
   body: RuntimeMaterialDebug[];
   head: RuntimeMaterialDebug[];
   headMaterialSlots: Array<{
@@ -428,6 +446,7 @@ export type RuntimeDebugSnapshot = {
   outlineShells: RuntimeOutlineShellDebug[];
   camera?: RuntimeCameraDebug;
   faceLight?: RuntimeFaceLightDebug;
+  projectedShadow?: RuntimeProjectedShadowDebug;
   constraints?: RuntimeConstraintDebug | null;
 };
 
@@ -3907,6 +3926,41 @@ class CharacterProjectedShadowController {
     }
     return direction.normalize();
   }
+
+  getDebugSnapshot(
+    floorY: number,
+    characterHeight: number
+  ): RuntimeProjectedShadowDebug {
+    this.directionalAnchor.updateMatrixWorld(true);
+    this.crossAnchor.updateMatrixWorld(true);
+    const directionalForward = new THREE.Vector3(0, 0, 1)
+      .applyQuaternion(this.directionalAnchor.getWorldQuaternion(new THREE.Quaternion()))
+      .normalize();
+    return {
+      visible: this.group.visible,
+      floorY: Number(floorY.toFixed(4)),
+      characterHeight: Number(characterHeight.toFixed(4)),
+      directional: {
+        position: vectorDebugSnapshot(this.directionalAnchor.position),
+        forward: vectorDebugSnapshot(directionalForward),
+        scale: vectorDebugSnapshot(new THREE.Vector3(
+          DIRECTIONAL_SHADOW_WIDTH,
+          1,
+          DIRECTIONAL_SHADOW_HEIGHT
+        )),
+        opacity: Number(this.directionalMaterial.opacity.toFixed(4)),
+      },
+      cross: {
+        position: vectorDebugSnapshot(this.crossAnchor.position),
+        scale: vectorDebugSnapshot(new THREE.Vector3(
+          CROSS_SHADOW_SIZE,
+          1,
+          CROSS_SHADOW_SIZE
+        )),
+        opacity: Number(this.crossMaterial.opacity.toFixed(4)),
+      },
+    };
+  }
 }
 
 export class Haruki3DEngine {
@@ -4008,7 +4062,7 @@ export class Haruki3DEngine {
   private readonly hairHeadPosition = new THREE.Vector3();
   private currentHairOffset = new THREE.Vector3();
   private materialBindingMode: MaterialBindingMode = "manifest";
-  private hairShadowMode: HairShadowMode = "light";
+  private hairShadowMode: HairShadowMode = "head_proximity";
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
   private toonValueShadowInfluence = 0;
@@ -4022,6 +4076,7 @@ export class Haruki3DEngine {
   private lastConstraintSetupDiagnostics: RuntimeConstraintDebug | null = null;
   private readonly runtimeDebug: RuntimeDebugSnapshot = {
     materialBindingMode: "manifest",
+    hairShadowMode: this.hairShadowMode,
     body: [],
     head: [],
     headMaterialSlots: [],
@@ -4365,6 +4420,7 @@ export class Haruki3DEngine {
 
   setHairShadowMode(mode: HairShadowMode) {
     this.hairShadowMode = mode;
+    this.runtimeDebug.hairShadowMode = mode;
     this.applyHairShadowModeUniforms();
   }
 
@@ -4770,12 +4826,12 @@ export class Haruki3DEngine {
     }
   }
 
-  private isLegacyHairShadowEnabled() {
-    return this.hairShadowMode === "legacy_head";
+  private isHeadProximityHairShadowEnabled() {
+    return this.hairShadowMode === "head_proximity";
   }
 
   private applyHairShadowModeUniforms() {
-    const enabled = this.isLegacyHairShadowEnabled() ? 1.0 : 0.0;
+    const enabled = this.isHeadProximityHairShadowEnabled() ? 1.0 : 0.0;
     if (this.hairMaterial.uniforms.uHairShadowEnabled) {
       this.hairMaterial.uniforms.uHairShadowEnabled.value = enabled;
     }
@@ -4819,6 +4875,10 @@ export class Haruki3DEngine {
       constraints: this.lastConstraintSetupDiagnostics,
       camera: this.getCameraDebugSnapshot(),
       faceLight: this.getFaceLightDebugSnapshot(),
+      projectedShadow: this.projectedShadow.getDebugSnapshot(
+        PROJECTED_SHADOW_FLOOR_Y,
+        this.characterHeight
+      ),
     };
   }
 
@@ -5810,7 +5870,7 @@ export class Haruki3DEngine {
       controllerRimEdgeSmoothness: this.hairMaterial.uniforms.uControllerRimEdgeSmoothness.value,
       controllerRimShadowSharpness: this.hairMaterial.uniforms.uControllerRimShadowSharpness.value,
       skinTintEnabled: false,
-      hairShadowEnabled: this.isLegacyHairShadowEnabled(),
+      hairShadowEnabled: this.isHeadProximityHairShadowEnabled(),
     });
     updateSekaiFaceMaterial(this.faceMaterial, {
       baseColor: this.currentHeadAsset?.proxy.faceColor ?? "#ffe4dc",
@@ -7125,7 +7185,7 @@ export class Haruki3DEngine {
           shadowColor: headAsset.proxy.hairShadowColor,
           lighting,
           skinTintEnabled: false,
-          hairShadowEnabled: this.isLegacyHairShadowEnabled(),
+          hairShadowEnabled: this.isHeadProximityHairShadowEnabled(),
           lambertEnabled: false,
           headPosition: this.hairHeadPosition,
           bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
