@@ -24,6 +24,7 @@ const engine = new Haruki3DEngine({
   initialLight: { ...previewLightDefaults },
   presentationMode: "interactive",
   cameraPreset: "capture",
+  cameraProfile: "full-body",
 });
 
 await engine.loadRuntimePackage({ baseUrl: "/assets/runtime/001/" });
@@ -38,6 +39,7 @@ Constructor options:
 - `initialLight`: initial scene light state.
 - `presentationMode`: `"interactive"` or `"capture"`.
 - `cameraPreset`: `"default"` or `"capture"`. The legacy `"id5-debug"` value is accepted by CLI/config callers as an alias for `"capture"`.
+- `cameraProfile`: capture-only CostumeShop framing, `"full-body"` or `"official-default"`.
 - `autoRender`: starts the internal render loop when true.
 - `manageResize`: installs resize handling when true.
 
@@ -98,7 +100,7 @@ const result = await engine.captureRoleParts(request);
 `captureRoleParts` fixes the capture defaults used by the current pipeline:
 
 - animation: `motion_loop` at phase `0.5`
-- camera: official CostumeShop perspective camera data at max zoom (`fov=25`, `zoomValue=0.35`, final `y=0.85`, `z=4.5`)
+- camera: official CostumeShop perspective camera data, defaulting to the max-zoom `"full-body"` profile (`fov=25`, `zoomValue=0.35`, final `y=0.85`, `z=4.5`)
 - SpringBone: `unity-prefab`
 - output state: capture presentation mode
 
@@ -155,7 +157,7 @@ The service keeps one Chromium page and one engine instance warm, so repeated re
 Camera and presentation are part of the engine API because capture and external viewers need identical output:
 
 ```ts
-engine.applyCameraPreset("capture");
+engine.applyCameraPreset("capture", "full-body");
 engine.shiftCameraRight(1);
 engine.setViewportSize(1400, 1000);
 engine.setPresentationMode("capture");

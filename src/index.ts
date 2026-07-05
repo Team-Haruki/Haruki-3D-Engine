@@ -19,6 +19,7 @@ export {
   type HarukiRuntimePackageRequest,
   type MaterialBindingMode,
   type PartImportSnapshot,
+  type PjskCameraProfile,
   type PjskCameraPreset,
   type PjskPresentationMode,
   type ProjectedShadowSettings,

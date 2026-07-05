@@ -227,22 +227,26 @@ test("persistent capture server propagates config defaults into role parts captu
 
   assert.match(serverSource, /defaultPhase/);
   assert.match(serverSource, /defaultCameraPreset/);
+  assert.match(serverSource, /defaultCameraProfile/);
   assert.match(serverSource, /new URLSearchParams\(\{/);
   assert.match(serverSource, /normalizeCharacterYawMode\(input\.characterYawMode, null\)/);
+  assert.match(serverSource, /normalizeCameraProfile\(input\.cameraProfile, defaultCameraProfile\)/);
   assert.doesNotMatch(serverSource, /characterYawMode: "face-camera"/);
   assert.doesNotMatch(serverSource, /capturePhase=0\.5&captureClip=motion_loop&springRuntimeMode=unity-prefab&cameraPreset=id5-debug/);
   assert.match(harnessSource, /phase: request\.phase \?\? config\.phase/);
   assert.match(harnessSource, /cameraPreset: request\.cameraPreset \?\? config\.cameraPreset/);
+  assert.match(harnessSource, /cameraProfile: request\.cameraProfile \?\? config\.cameraProfile/);
   assert.match(harnessSource, /characterYawMode: request\.characterYawMode \?\? config\.characterYawMode \?\? undefined/);
   assert.match(harnessSource, /faceSdfEnabled: request\.faceSdfEnabled \?\? config\.faceSdfEnabled/);
   assert.match(harnessSource, /faceSdfDebugMode: request\.faceSdfDebugMode \?\? config\.faceSdfDebugMode/);
   assert.match(serverSource, /faceSdfEnabled: readBoolean\(input\.faceSdfEnabled\)/);
   assert.match(serverSource, /faceSdfDebugMode: normalizeFaceSdfDebugMode\(input\.faceSdfDebugMode\)/);
   assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
+  assert.match(engineSource, /cameraProfile\?: PjskCameraProfile/);
   assert.match(engineSource, /faceSdfEnabled\?: boolean/);
   assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
   assert.match(engineSource, /characterYawMode\?: "0" \| "45" \| "-45" \| "90" \| "-90" \| "180" \| "face-camera"/);
-  assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture"\)/);
+  assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture", request\.cameraProfile\)/);
   assert.match(engineSource, /this\.applyCaptureCharacterYawMode\(request\.characterYawMode\)/);
 });
 
@@ -340,7 +344,12 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
     "--out", "/tmp/out.png",
     "--camera-preset", "id5-debug",
   ]);
-  const configOptions = resolveCaptureRuntimeOptions({ capture: { cameraPreset: "id5-debug" } }, {});
+  const configOptions = resolveCaptureRuntimeOptions({
+    capture: {
+      cameraPreset: "id5-debug",
+      cameraProfile: "official-default",
+    },
+  }, {});
   const harnessSource = fs.readFileSync(
     path.join(repoRoot, "src/captureHarness.ts"),
     "utf8"
@@ -351,8 +360,11 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   );
 
   assert.equal(runtimeOptions.cameraPreset, "capture");
+  assert.equal(runtimeOptions.cameraProfile, "full-body");
   assert.equal(configOptions.cameraPreset, "capture");
+  assert.equal(configOptions.cameraProfile, "official-default");
   assert.match(engineSource, /export type PjskCameraPreset = "default" \| "capture";/);
+  assert.match(engineSource, /export type PjskCameraProfile = "official-default" \| "full-body";/);
   assert.match(engineSource, /const COSTUME_SHOP_CAMERA = \{/);
   assert.match(engineSource, /zoomDuration: 0\.35/);
   assert.match(engineSource, /bottomLowerLimitPosition: 0\.4/);
@@ -362,9 +374,12 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   assert.match(engineSource, /nearZ: 2\.3/);
   assert.match(engineSource, /farZ: 4\.5/);
   assert.match(engineSource, /fov: 25/);
-  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_CAPTURE_STATE = \{/);
+  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = \{/);
+  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = \{/);
+  assert.match(engineSource, /zoomValue: 0/);
   assert.match(engineSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
   assert.match(engineSource, /zoomMoveValue: 0/);
+  assert.match(engineSource, /getCostumeShopCameraState/);
   assert.match(engineSource, /calculateCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
   assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_TARGET_SCALE/);
@@ -379,6 +394,7 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   );
   assert.match(harnessSource, /cameraPreset: "capture"/);
   assert.match(harnessSource, /return normalizeCameraPreset\(params\.get\("cameraPreset"\)\);/);
+  assert.match(harnessSource, /return normalizeCameraProfile\(params\.get\("cameraProfile"\)\);/);
 });
 
 test("combined runtime imports apply character height before capture camera framing", () => {
@@ -497,6 +513,11 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
   assert.match(engineSource, /shaderSkinColor2/);
   assert.match(engineSource, /bodyDebugMode\?: BodyDebugMode/);
   assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
+  assert.match(engineSource, /const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1\.0/);
+  assert.match(engineSource, /private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE/);
+  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /float valueShadowInfluence = clamp\(uValueShadowInfluence, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /float shadowBand = mix\(geometricShadowBand, hAdjustedShadowBand, valueShadowInfluence\);/);
 });
 
 test("native prefab meshes bind with exported Unity inverse bind matrices before fallback", () => {
@@ -1014,6 +1035,10 @@ test("unity prefab spring runtime is created from prefab source graph on initial
     engineSource,
     /this\.currentSpringRuntime = this\.createSpringRuntime\(\s*this\.currentPrefabSourceGraph\?\.root \?\? runtimeRoot\s*\)/
   );
+  assert.match(engineSource, /runtimePresent: boolean/);
+  assert.match(engineSource, /active: boolean/);
+  assert.match(engineSource, /const runtimePresent = Boolean\(utjRuntime\)/);
+  assert.match(engineSource, /const active = Boolean\(utjRuntime\?\.enabled\)/);
 });
 
 test("part composer infers missing spring manager bone references from part-local paths", () => {

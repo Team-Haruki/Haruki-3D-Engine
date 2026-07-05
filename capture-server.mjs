@@ -32,6 +32,7 @@ const {
   defaultWarmupMode,
   defaultSpringRuntimeMode,
   defaultCameraPreset,
+  defaultCameraProfile,
   defaultProjectedShadow,
   tempCaptureTtlMs,
   tempCaptureMaxBytes,
@@ -233,6 +234,7 @@ function validateCaptureRequest(input) {
         : readId("headOptionalCostume3dId"),
     phase: Number(input.phase) || defaultPhase,
     cameraPreset: normalizeCameraPreset(input.cameraPreset, defaultCameraPreset),
+    cameraProfile: normalizeCameraProfile(input.cameraProfile, defaultCameraProfile),
     characterYawMode: normalizeCharacterYawMode(input.characterYawMode, null),
     warmupMs: Math.max(Math.trunc(Number(input.warmupMs) || defaultWarmupMs), 0),
     warmupFrames: Math.max(Math.trunc(Number(input.warmupFrames) || defaultWarmupFrames), 0),
@@ -314,6 +316,13 @@ function normalizeCameraPreset(value, fallback) {
     return fallback;
   }
   return value === "default" ? "default" : "capture";
+}
+
+function normalizeCameraProfile(value, fallback) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+  return value === "official-default" ? "official-default" : "full-body";
 }
 
 function normalizeCharacterYawMode(value, fallback) {
@@ -621,6 +630,7 @@ class CaptureRuntimeSession {
       captureWarmupMode: defaultWarmupMode,
       springRuntimeMode: defaultSpringRuntimeMode,
       cameraPreset: defaultCameraPreset,
+      cameraProfile: defaultCameraProfile,
       projectedShadowWidth: String(defaultProjectedShadow.width),
       projectedShadowHeight: String(defaultProjectedShadow.height),
       projectedShadowOpacity: String(defaultProjectedShadow.opacity),

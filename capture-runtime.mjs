@@ -49,6 +49,7 @@ export function parseArgs(argv) {
     renderIsolation: "",
     springRuntimeMode: "",
     cameraPreset: "",
+    cameraProfile: "",
     traceUtjBones: [],
     traceUtjMaxEvents: 240,
     traceOut: "",
@@ -116,6 +117,12 @@ export function parseArgs(argv) {
         throw new Error(`Invalid --camera-preset ${preset}`);
       }
       options.cameraPreset = normalizeCameraPreset(preset);
+    } else if (arg === "--camera-profile") {
+      const profile = readValue();
+      if (!["official-default", "full-body"].includes(profile)) {
+        throw new Error(`Invalid --camera-profile ${profile}`);
+      }
+      options.cameraProfile = profile;
     } else if (arg === "--utj-springbone") {
       options.springRuntimeMode = "unity-prefab";
     } else if (arg === "--no-utj-springbone") {
@@ -277,6 +284,8 @@ Options:
   --spring-runtime-mode <mode>
                        Spring runtime: off, unity-prefab. Default: unity-prefab
   --camera-preset <id> Camera preset: default, capture. Default: capture
+  --camera-profile <id>
+                       Capture camera profile: full-body, official-default. Default: full-body
   --utj-springbone     Compatibility alias for --spring-runtime-mode unity-prefab
   --no-utj-springbone  Compatibility alias for --spring-runtime-mode off
   --trace-utj-bone <s> Trace spring stages for bones whose name/path contains this text
@@ -689,6 +698,7 @@ async function evaluateCaptureRequest(client, options) {
     warmupFrames: options.warmupFrames,
     warmupMode: options.warmupMode,
     cameraPreset: options.cameraPreset,
+    cameraProfile: options.cameraProfile,
     traceUtjBones: options.traceUtjBones,
     traceUtjMaxEvents: options.traceUtjMaxEvents,
     projectedShadow: options.projectedShadow,
@@ -738,6 +748,7 @@ async function capture(options) {
     `&renderIsolation=${encodeURIComponent(options.renderIsolation)}` +
     `&springRuntimeMode=${encodeURIComponent(options.springRuntimeMode)}` +
     `&cameraPreset=${encodeURIComponent(options.cameraPreset)}` +
+    `&cameraProfile=${encodeURIComponent(options.cameraProfile)}` +
     `&projectedShadowWidth=${options.projectedShadow.width}` +
     `&projectedShadowHeight=${options.projectedShadow.height}` +
     `&projectedShadowOpacity=${options.projectedShadow.opacity}` +

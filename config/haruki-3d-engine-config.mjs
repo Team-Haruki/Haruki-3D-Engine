@@ -45,6 +45,7 @@ export function resolveCaptureRuntimeOptions(config, cliOptions) {
     renderIsolation: stringValue(cliOptions.renderIsolation, capture.renderIsolation, "normal"),
     springRuntimeMode: springRuntimeMode(cliOptions.springRuntimeMode, capture.springRuntimeMode),
     cameraPreset: cameraPreset(cliOptions.cameraPreset, capture.cameraPreset),
+    cameraProfile: cameraProfile(cliOptions.cameraProfile, capture.cameraProfile),
     projectedShadow,
     chromium: stringValue(cliOptions.chromium, process.env.CHROMIUM, chromium.executable, "chromium"),
   };
@@ -78,6 +79,11 @@ export function resolveCaptureServerOptions(config, env = process.env) {
       env.HARUKI_CAPTURE_CAMERA_PRESET,
       env.HARUKI_CAMERA_PRESET,
       capture.cameraPreset
+    ),
+    defaultCameraProfile: cameraProfile(
+      env.HARUKI_CAPTURE_CAMERA_PROFILE,
+      env.HARUKI_CAMERA_PROFILE,
+      capture.cameraProfile
     ),
     defaultProjectedShadow: projectedShadow,
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
@@ -266,4 +272,13 @@ function cameraPreset(primary, secondary) {
 
 function normalizeCameraPreset(value) {
   return value === "default" ? "default" : "capture";
+}
+
+function cameraProfile(primary, secondary, tertiary) {
+  const value = stringValue(primary, secondary, tertiary, "full-body");
+  return normalizeCameraProfile(value);
+}
+
+function normalizeCameraProfile(value) {
+  return value === "official-default" ? "official-default" : "full-body";
 }

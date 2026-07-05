@@ -4,6 +4,7 @@ import {
   type BodyDebugMode,
   type HarukiCaptureRolePartsRequest,
   type HarukiCaptureRolePartsResult,
+  type PjskCameraProfile,
   type PjskCameraPreset,
   type ProjectedShadowSettingsInput,
   type RenderIsolationMode,
@@ -44,6 +45,7 @@ type CaptureConfig = {
   renderIsolation: RenderIsolationMode;
   springRuntimeMode: SpringRuntimeMode;
   cameraPreset: PjskCameraPreset;
+  cameraProfile: PjskCameraProfile;
   characterYawMode: CaptureCharacterYawMode | null;
   projectedShadow: ProjectedShadowSettingsInput;
   utjTraceBones: string[];
@@ -100,6 +102,7 @@ function readCaptureConfig(): CaptureConfig | null {
     renderIsolation: readRenderIsolationMode(params),
     springRuntimeMode: readSpringRuntimeMode(params),
     cameraPreset: readCameraPreset(params),
+    cameraProfile: readCameraProfile(params),
     characterYawMode: isCaptureCharacterYawMode(yawMode) ? yawMode : null,
     projectedShadow: readProjectedShadowSettings(params),
     utjTraceBones: params
@@ -256,6 +259,14 @@ function normalizeCameraPreset(value: string | null): PjskCameraPreset {
   return value === "default" ? "default" : "capture";
 }
 
+function readCameraProfile(params: URLSearchParams): PjskCameraProfile {
+  return normalizeCameraProfile(params.get("cameraProfile"));
+}
+
+function normalizeCameraProfile(value: string | null): PjskCameraProfile {
+  return value === "official-default" ? "official-default" : "full-body";
+}
+
 function isCharacterYawMode(value: string | null): value is CharacterYawMode {
   return value === "0" ||
     value === "45" ||
@@ -318,6 +329,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       warmupFrames: request.warmupFrames ?? config.warmupFrames,
       warmupMode: request.warmupMode ?? config.warmupMode,
       cameraPreset: request.cameraPreset ?? config.cameraPreset,
+      cameraProfile: request.cameraProfile ?? config.cameraProfile,
       characterYawMode: request.characterYawMode ?? config.characterYawMode ?? undefined,
       bodyDebugMode: request.bodyDebugMode ?? config.bodyDebugMode,
       faceSdfEnabled: request.faceSdfEnabled ?? config.faceSdfEnabled,
@@ -365,6 +377,7 @@ async function prepareCaptureFrame(config: CaptureConfig) {
     warmupFrames: config.warmupFrames,
     warmupMode: config.warmupMode,
     cameraPreset: config.cameraPreset,
+    cameraProfile: config.cameraProfile,
     characterYawMode: config.characterYawMode ?? undefined,
     traceUtjBones: config.utjTraceBones,
     traceUtjMaxEvents: config.utjTraceMaxEvents,
@@ -407,7 +420,7 @@ async function bootstrapCapture() {
     engine.setFaceSdfDebugMode(config.faceSdfDebugMode);
     engine.setFaceSdfDebugLightMode(config.faceSdfDebugLightMode);
     engine.setRenderIsolationMode(config.renderIsolation);
-    engine.applyCameraPreset(config.cameraPreset);
+    engine.applyCameraPreset(config.cameraPreset, config.cameraProfile);
     if (config.characterYawMode && config.characterYawMode !== "face-camera") {
       engine.setCharacterYawDegrees(characterYawDegreesByMode[config.characterYawMode]);
     }

@@ -57,6 +57,11 @@ import { runtimeRoleId } from "../parts/runtimePartComposer";
 const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241);
 const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
 const DEFAULT_CAMERA_FOV = 35;
+type CostumeShopCameraState = {
+  rotationYDegrees: number;
+  zoomValue: number;
+  zoomMoveValue: number;
+};
 const COSTUME_SHOP_CAMERA = {
   zoomDuration: 0.35,
   bottomLowerLimitPosition: 0.4,
@@ -67,11 +72,17 @@ const COSTUME_SHOP_CAMERA = {
   farZ: 4.5,
   fov: 25,
 } as const;
-const COSTUME_SHOP_CAMERA_CAPTURE_STATE = {
+const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = {
+  rotationYDegrees: 0,
+  zoomValue: 0,
+  zoomMoveValue: 0,
+} as const;
+const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = {
   rotationYDegrees: 0,
   zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
   zoomMoveValue: 0,
 } as const;
+const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
 const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(-15, 50, 0);
 const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
   new THREE.Vector3(0, 0, 1)
@@ -141,12 +152,14 @@ type SpringRuntimeController = UnityPrefabSpringRuntime;
 
 export type PjskPresentationMode = "interactive" | "capture";
 export type PjskCameraPreset = "default" | "capture";
+export type PjskCameraProfile = "official-default" | "full-body";
 
 export type PjskEngineOptions = {
   container: HTMLElement;
   initialLight: PreviewLightState;
   presentationMode?: PjskPresentationMode;
   cameraPreset?: PjskCameraPreset;
+  cameraProfile?: PjskCameraProfile;
   autoRender?: boolean;
   manageResize?: boolean;
 };
@@ -171,6 +184,7 @@ export type HarukiCaptureRolePartsRequest = {
   warmupFrames?: number;
   warmupMode?: "animation" | "runtime";
   cameraPreset?: PjskCameraPreset;
+  cameraProfile?: PjskCameraProfile;
   characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
   traceUtjBones?: string[];
   traceUtjMaxEvents?: number;
@@ -190,6 +204,7 @@ export type HarukiPrepareCaptureFrameRequest = {
   warmupFrames?: number;
   warmupMode?: "animation" | "runtime";
   cameraPreset?: PjskCameraPreset;
+  cameraProfile?: PjskCameraProfile;
   characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
   traceUtjBones?: string[];
   traceUtjMaxEvents?: number;
@@ -405,6 +420,8 @@ export type RuntimeOutlineShellDebug = {
 };
 
 export type RuntimeCameraDebug = {
+  preset: PjskCameraPreset;
+  profile: PjskCameraProfile | null;
   position: { x: number; y: number; z: number };
   target: { x: number; y: number; z: number };
   offset: { x: number; y: number; z: number };
@@ -483,6 +500,8 @@ export type RuntimeDebugSnapshot = {
 
 export type SpringBoneRuntimeSnapshot = {
   present: boolean;
+  runtimePresent: boolean;
+  active: boolean;
   bodyManagerCount: number;
   bodySpringBoneCount: number;
   bodyExtraBoneCount: number;
@@ -925,8 +944,12 @@ function summarizeSpringBoneMetadata(
   const body = summarizeSpringBonePart(raw.body ?? raw.Body);
   const head = summarizeSpringBonePart(raw.head ?? raw.Head);
   const present = Boolean(raw.body ?? raw.Body ?? raw.head ?? raw.Head);
+  const runtimePresent = Boolean(utjRuntime);
+  const active = Boolean(utjRuntime?.enabled);
   return {
     present,
+    runtimePresent,
+    active,
     bodyManagerCount: body.managers,
     bodySpringBoneCount: body.bones,
     bodyExtraBoneCount: body.extraBones,
@@ -1284,7 +1307,7 @@ function getDefaultCameraPosition(characterHeight: number) {
 }
 
 function calculateCostumeShopCameraPose(
-  state = COSTUME_SHOP_CAMERA_CAPTURE_STATE
+  state: CostumeShopCameraState = COSTUME_SHOP_CAMERA_FULL_BODY_STATE
 ) {
   const zoomValue = THREE.MathUtils.clamp(
     state.zoomValue,
@@ -1321,6 +1344,12 @@ function calculateCostumeShopCameraPose(
     target: new THREE.Vector3(0, y, 0),
     position,
   };
+}
+
+function getCostumeShopCameraState(profile: PjskCameraProfile) {
+  return profile === "official-default"
+    ? COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE
+    : COSTUME_SHOP_CAMERA_FULL_BODY_STATE;
 }
 
 function makeSeededRandom(seed: number) {
@@ -4130,7 +4159,9 @@ export class Haruki3DEngine {
   private hairShadowMode: HairShadowMode = "sekai_head_position";
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
-  private toonValueShadowInfluence = 0;
+  private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE;
+  private currentCameraPreset: PjskCameraPreset = "default";
+  private currentCameraProfile: PjskCameraProfile | null = null;
   private faceSdfEnabled = false;
   private faceSdfDebugMode: FaceSdfDebugMode = "off";
   private faceSdfDebugLightMode: FaceSdfDebugLightMode = "scene";
@@ -4217,6 +4248,7 @@ export class Haruki3DEngine {
       ambientIntensity: light.ambient,
       shadowThreshold: light.shadowThreshold,
       shadowWeight: light.shadowWeight,
+      valueShadowInfluence: this.toonValueShadowInfluence,
       characterAmbientIntensity: light.characterAmbient,
       rimIntensity: light.rimIntensity,
       controllerRimThreshold: light.rimThreshold,
@@ -4232,6 +4264,7 @@ export class Haruki3DEngine {
       ambientIntensity: light.ambient,
       shadowThreshold: light.shadowThreshold,
       shadowWeight: light.shadowWeight,
+      valueShadowInfluence: this.toonValueShadowInfluence,
       characterAmbientIntensity: light.characterAmbient,
       rimIntensity: light.rimIntensity,
       controllerRimThreshold: light.rimThreshold,
@@ -4265,7 +4298,7 @@ export class Haruki3DEngine {
     this.projectedShadow = new CharacterProjectedShadowController();
     this.scene.add(this.projectedShadow.group);
     this.setPresentationMode(options.presentationMode ?? "interactive");
-    this.applyCameraPreset(options.cameraPreset ?? "default");
+    this.applyCameraPreset(options.cameraPreset ?? "default", options.cameraProfile);
 
     this.handleResize = this.handleResize.bind(this);
     if (this.manageResize) {
@@ -5060,6 +5093,8 @@ export class Haruki3DEngine {
     const offset = position.clone().sub(target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
     return {
+      preset: this.currentCameraPreset,
+      profile: this.currentCameraProfile,
       position: {
         x: Number(position.x.toFixed(4)),
         y: Number(position.y.toFixed(4)),
@@ -5539,6 +5574,7 @@ export class Haruki3DEngine {
       warmupFrames: request.warmupFrames,
       warmupMode: request.warmupMode,
       cameraPreset: request.cameraPreset,
+      cameraProfile: request.cameraProfile,
       characterYawMode: request.characterYawMode,
       bodyDebugMode: request.bodyDebugMode,
       faceSdfEnabled: request.faceSdfEnabled,
@@ -5621,7 +5657,7 @@ export class Haruki3DEngine {
       this.setAnimationPaused(true);
     }
 
-    this.applyCameraPreset(request.cameraPreset ?? "capture");
+    this.applyCameraPreset(request.cameraPreset ?? "capture", request.cameraProfile);
     this.applyCaptureCharacterYawMode(request.characterYawMode);
     this.stepCaptureFrame(0, false);
     this.renderFrame();
@@ -6206,13 +6242,16 @@ export class Haruki3DEngine {
     this.controls.update();
   }
 
-  applyCameraPreset(preset: PjskCameraPreset) {
+  applyCameraPreset(preset: PjskCameraPreset, profile: PjskCameraProfile = "full-body") {
+    this.currentCameraPreset = preset;
     if (preset === "capture") {
-      const pose = calculateCostumeShopCameraPose();
+      this.currentCameraProfile = profile;
+      const pose = calculateCostumeShopCameraPose(getCostumeShopCameraState(profile));
       this.controls.target.copy(pose.target);
       this.camera.position.copy(pose.position);
       this.camera.fov = COSTUME_SHOP_CAMERA.fov;
     } else {
+      this.currentCameraProfile = null;
       const target = getDefaultCameraTarget(this.characterHeight);
       const offset = DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(this.characterHeight);
       this.controls.target.copy(target);
