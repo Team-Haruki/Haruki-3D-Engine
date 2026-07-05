@@ -691,6 +691,7 @@ async function evaluateCaptureRequest(client, options) {
     cameraPreset: options.cameraPreset,
     traceUtjBones: options.traceUtjBones,
     traceUtjMaxEvents: options.traceUtjMaxEvents,
+    projectedShadow: options.projectedShadow,
   };
   const result = await client.send("Runtime.evaluate", {
     expression: `window.__HARUKI_CAPTURE_REQUEST__(${JSON.stringify(request)}).then((result) => result.snapshots)`,
@@ -737,6 +738,15 @@ async function capture(options) {
     `&renderIsolation=${encodeURIComponent(options.renderIsolation)}` +
     `&springRuntimeMode=${encodeURIComponent(options.springRuntimeMode)}` +
     `&cameraPreset=${encodeURIComponent(options.cameraPreset)}` +
+    `&projectedShadowWidth=${options.projectedShadow.width}` +
+    `&projectedShadowHeight=${options.projectedShadow.height}` +
+    `&projectedShadowOpacity=${options.projectedShadow.opacity}` +
+    `&crossShadowSize=${options.projectedShadow.crossSize}` +
+    `&crossShadowOpacity=${options.projectedShadow.crossOpacity}` +
+    `&projectedShadowFloorY=${options.projectedShadow.floorY}` +
+    `&projectedShadowAdjust=${options.projectedShadow.adjustShadow ? "true" : "false"}` +
+    `&projectedShadowAdjustAlpha=${options.projectedShadow.adjustAlpha ? "true" : "false"}` +
+    `&projectedShadowInvisibleHeight=${options.projectedShadow.invisibleHeight}` +
     `&captureFullRuntimeOnly=${options.partCapture ? "false" : "true"}` +
     `&utjTraceMaxEvents=${options.traceUtjMaxEvents}` +
     options.traceUtjBones.map((filter) => `&utjTraceBone=${encodeURIComponent(filter)}`).join("") +

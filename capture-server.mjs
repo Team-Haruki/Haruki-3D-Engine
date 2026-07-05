@@ -32,6 +32,7 @@ const {
   defaultWarmupMode,
   defaultSpringRuntimeMode,
   defaultCameraPreset,
+  defaultProjectedShadow,
   tempCaptureTtlMs,
   tempCaptureMaxBytes,
   captureGCIntervalMs,
@@ -188,6 +189,27 @@ function validateCaptureRequest(input) {
     .map((value) => value.trim())
     .filter(Boolean);
   const readBoolean = (value) => value === true || value === "true" || value === 1 || value === "1";
+  const readProjectedShadow = (value) => {
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const readNumber = (name, fallback, min, max = Infinity) => {
+      const parsed = Number(source[name]);
+      const value = Number.isFinite(parsed) ? parsed : fallback;
+      return Math.min(Math.max(value, min), max);
+    };
+    const readBool = (name, fallback) =>
+      source[name] === undefined ? fallback : readBoolean(source[name]);
+    return {
+      width: readNumber("width", defaultProjectedShadow.width, 0.001),
+      height: readNumber("height", defaultProjectedShadow.height, 0.001),
+      opacity: readNumber("opacity", defaultProjectedShadow.opacity, 0, 1),
+      crossSize: readNumber("crossSize", defaultProjectedShadow.crossSize, 0.001),
+      crossOpacity: readNumber("crossOpacity", defaultProjectedShadow.crossOpacity, 0, 1),
+      floorY: readNumber("floorY", defaultProjectedShadow.floorY, -Infinity),
+      adjustShadow: readBool("adjustShadow", defaultProjectedShadow.adjustShadow),
+      adjustAlpha: readBool("adjustAlpha", defaultProjectedShadow.adjustAlpha),
+      invisibleHeight: readNumber("invisibleHeight", defaultProjectedShadow.invisibleHeight, 0.001),
+    };
+  };
   const readTtlMs = (value) => {
     const seconds = Number(value);
     if (!Number.isFinite(seconds) || seconds <= 0) {
@@ -219,6 +241,7 @@ function validateCaptureRequest(input) {
     faceSdfEnabled: readBoolean(input.faceSdfEnabled),
     faceSdfDebugMode: normalizeFaceSdfDebugMode(input.faceSdfDebugMode),
     faceSdfDebugLightMode: normalizeFaceSdfDebugLightMode(input.faceSdfDebugLightMode),
+    projectedShadow: readProjectedShadow(input.projectedShadow),
     width: Math.max(Math.trunc(Number(input.width) || defaultWidth), 320),
     height: Math.max(Math.trunc(Number(input.height) || defaultHeight), 320),
     scale: Math.min(Math.max(Number(input.scale) || defaultScale, 1), 2),
@@ -598,6 +621,15 @@ class CaptureRuntimeSession {
       captureWarmupMode: defaultWarmupMode,
       springRuntimeMode: defaultSpringRuntimeMode,
       cameraPreset: defaultCameraPreset,
+      projectedShadowWidth: String(defaultProjectedShadow.width),
+      projectedShadowHeight: String(defaultProjectedShadow.height),
+      projectedShadowOpacity: String(defaultProjectedShadow.opacity),
+      crossShadowSize: String(defaultProjectedShadow.crossSize),
+      crossShadowOpacity: String(defaultProjectedShadow.crossOpacity),
+      projectedShadowFloorY: String(defaultProjectedShadow.floorY),
+      projectedShadowAdjust: defaultProjectedShadow.adjustShadow ? "true" : "false",
+      projectedShadowAdjustAlpha: defaultProjectedShadow.adjustAlpha ? "true" : "false",
+      projectedShadowInvisibleHeight: String(defaultProjectedShadow.invisibleHeight),
     });
     const pageUrl = `http://127.0.0.1:${port}/capture.html?${pageParams.toString()}`;
     this.chromium = spawn(chromiumPath, [

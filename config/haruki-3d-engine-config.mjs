@@ -2,6 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const defaultEngineConfigPath = path.resolve("haruki-3d-engine.config.json");
+export const defaultProjectedShadowSettings = {
+  width: 0.72,
+  height: 1.06,
+  opacity: 0.28,
+  crossSize: 0.46,
+  crossOpacity: 0.22,
+  floorY: 0,
+  adjustShadow: false,
+  adjustAlpha: true,
+  invisibleHeight: 1.65,
+};
 
 export function loadEngineConfig(configPath = defaultEngineConfigPath) {
   const resolved = path.resolve(configPath);
@@ -18,6 +29,7 @@ export function loadEngineConfig(configPath = defaultEngineConfigPath) {
 export function resolveCaptureRuntimeOptions(config, cliOptions) {
   const capture = object(config.capture);
   const chromium = object(config.chromium);
+  const projectedShadow = projectedShadowSettings(capture, {}, cliOptions.projectedShadow);
   return {
     ...cliOptions,
     phase: numberValue(cliOptions.phase, capture.phase, 0.5),
@@ -33,6 +45,7 @@ export function resolveCaptureRuntimeOptions(config, cliOptions) {
     renderIsolation: stringValue(cliOptions.renderIsolation, capture.renderIsolation, "normal"),
     springRuntimeMode: springRuntimeMode(cliOptions.springRuntimeMode, capture.springRuntimeMode),
     cameraPreset: cameraPreset(cliOptions.cameraPreset, capture.cameraPreset),
+    projectedShadow,
     chromium: stringValue(cliOptions.chromium, process.env.CHROMIUM, chromium.executable, "chromium"),
   };
 }
@@ -41,6 +54,7 @@ export function resolveCaptureServerOptions(config, env = process.env) {
   const capture = object(config.capture);
   const chromium = object(config.chromium);
   const server = object(config.server);
+  const projectedShadow = projectedShadowSettings(capture, env);
   return {
     runtimeRoot: path.resolve(stringValue(env.HARUKI_RUNTIME_ROOT, capture.runtimeRoot, "/data/runtime")),
     captureOutputDir: path.resolve(stringValue(env.HARUKI_CAPTURE_OUTPUT_DIR, capture.outputDir, "/data/captures")),
@@ -65,6 +79,7 @@ export function resolveCaptureServerOptions(config, env = process.env) {
       env.HARUKI_CAMERA_PRESET,
       capture.cameraPreset
     ),
+    defaultProjectedShadow: projectedShadow,
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
     tempCaptureMaxBytes: sizeBytesAtLeast(env.HARUKI_CAPTURE_TEMP_MAX_BYTES, capture.tempMaxBytes, "2.5GB", 0),
     captureGCIntervalMs: durationMsAtLeast(env.HARUKI_CAPTURE_GC_INTERVAL, capture.gcInterval, "1h", 0),
@@ -101,6 +116,70 @@ function intAtLeast(primary, secondary, fallback, min) {
 
 function clampNumber(primary, secondary, fallback, min, max) {
   return Math.min(Math.max(numberValue(primary, secondary, fallback) || fallback, min), max);
+}
+
+function boolValue(...values) {
+  for (const value of values) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const normalized = value.trim().toLowerCase();
+      if (["1", "true", "yes", "on"].includes(normalized)) {
+        return true;
+      }
+      if (["0", "false", "no", "off"].includes(normalized)) {
+        return false;
+      }
+    }
+  }
+  return undefined;
+}
+
+function optionalNumber(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function projectedShadowSettings(capture, env = {}, override = undefined) {
+  const config = object(capture.projectedShadow);
+  const input = object(override);
+  return {
+    width: Math.max(
+      optionalNumber(input.width, env.HARUKI_CAPTURE_PROJECTED_SHADOW_WIDTH, config.width, defaultProjectedShadowSettings.width),
+      0.001
+    ),
+    height: Math.max(
+      optionalNumber(input.height, env.HARUKI_CAPTURE_PROJECTED_SHADOW_HEIGHT, config.height, defaultProjectedShadowSettings.height),
+      0.001
+    ),
+    opacity: Math.min(Math.max(
+      optionalNumber(input.opacity, env.HARUKI_CAPTURE_PROJECTED_SHADOW_OPACITY, config.opacity, defaultProjectedShadowSettings.opacity),
+      0
+    ), 1),
+    crossSize: Math.max(
+      optionalNumber(input.crossSize, env.HARUKI_CAPTURE_CROSS_SHADOW_SIZE, config.crossSize, defaultProjectedShadowSettings.crossSize),
+      0.001
+    ),
+    crossOpacity: Math.min(Math.max(
+      optionalNumber(input.crossOpacity, env.HARUKI_CAPTURE_CROSS_SHADOW_OPACITY, config.crossOpacity, defaultProjectedShadowSettings.crossOpacity),
+      0
+    ), 1),
+    floorY: optionalNumber(input.floorY, env.HARUKI_CAPTURE_PROJECTED_SHADOW_FLOOR_Y, config.floorY, defaultProjectedShadowSettings.floorY),
+    adjustShadow: boolValue(input.adjustShadow, env.HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST, config.adjustShadow) ??
+      defaultProjectedShadowSettings.adjustShadow,
+    adjustAlpha: boolValue(input.adjustAlpha, env.HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST_ALPHA, config.adjustAlpha) ??
+      defaultProjectedShadowSettings.adjustAlpha,
+    invisibleHeight: Math.max(
+      optionalNumber(input.invisibleHeight, env.HARUKI_CAPTURE_PROJECTED_SHADOW_INVISIBLE_HEIGHT, config.invisibleHeight, defaultProjectedShadowSettings.invisibleHeight),
+      0.001
+    ),
+  };
 }
 
 function durationMsAtLeast(primary, secondary, fallback, min) {

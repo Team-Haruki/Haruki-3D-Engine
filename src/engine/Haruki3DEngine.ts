@@ -108,14 +108,34 @@ const EYELASH_THROUGH_HAIR_ALPHA = 0.55;
 const EYELASH_THROUGH_HAIR_ALPHA_CUTOFF = 0.25;
 const EYEBROW_THROUGH_HAIR_ALPHA = 0.55;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
-const PROJECTED_SHADOW_FLOOR_Y = 0;
 const PROJECTED_SHADOW_FLOOR_BIAS = 0.003;
-const DIRECTIONAL_SHADOW_WIDTH = 0.72;
-const DIRECTIONAL_SHADOW_HEIGHT = 1.06;
-const DIRECTIONAL_SHADOW_OPACITY = 0.28;
-const CROSS_SHADOW_SIZE = 0.46;
 const CROSS_SHADOW_HEIGHT_LIMIT = 1.65;
-const CROSS_SHADOW_OPACITY = 0.22;
+
+export type ProjectedShadowSettings = {
+  width: number;
+  height: number;
+  opacity: number;
+  crossSize: number;
+  crossOpacity: number;
+  floorY: number;
+  adjustShadow: boolean;
+  adjustAlpha: boolean;
+  invisibleHeight: number;
+};
+
+export type ProjectedShadowSettingsInput = Partial<ProjectedShadowSettings>;
+
+export const defaultProjectedShadowSettings: ProjectedShadowSettings = {
+  width: 0.72,
+  height: 1.06,
+  opacity: 0.28,
+  crossSize: 0.46,
+  crossOpacity: 0.22,
+  floorY: 0,
+  adjustShadow: false,
+  adjustAlpha: true,
+  invisibleHeight: CROSS_SHADOW_HEIGHT_LIMIT,
+};
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
 
@@ -160,6 +180,7 @@ export type HarukiCaptureRolePartsRequest = {
   faceSdfEnabled?: boolean;
   faceSdfDebugMode?: FaceSdfDebugMode;
   faceSdfDebugLightMode?: FaceSdfDebugLightMode;
+  projectedShadow?: ProjectedShadowSettingsInput;
 };
 
 export type HarukiPrepareCaptureFrameRequest = {
@@ -178,6 +199,7 @@ export type HarukiPrepareCaptureFrameRequest = {
   faceSdfEnabled?: boolean;
   faceSdfDebugMode?: FaceSdfDebugMode;
   faceSdfDebugLightMode?: FaceSdfDebugLightMode;
+  projectedShadow?: ProjectedShadowSettingsInput;
 };
 
 export type HarukiCaptureRolePartsResult = {
@@ -274,7 +296,11 @@ export type RenderIsolationMode =
   | "no_body_outline"
   | "no_hair_outline"
   | "no_face_outline";
-export type HairShadowMode = "off" | "head_proximity";
+export type HairShadowMode = "off" | "sekai_head_position" | "head_proximity";
+
+function normalizeHairShadowMode(mode: HairShadowMode): HairShadowMode {
+  return mode === "head_proximity" ? "sekai_head_position" : mode;
+}
 
 export type BodyAnimationKind = "unity-json";
 
@@ -416,11 +442,14 @@ export type RuntimeProjectedShadowDebug = {
   visible: boolean;
   floorY: number;
   characterHeight: number;
+  settings: ProjectedShadowSettings;
+  targetPosition: { x: number; y: number; z: number };
   directional: {
     position: { x: number; y: number; z: number };
     forward: { x: number; y: number; z: number };
     scale: { x: number; y: number; z: number };
     opacity: number;
+    alpha: number;
   };
   cross: {
     position: { x: number; y: number; z: number };
@@ -432,6 +461,8 @@ export type RuntimeProjectedShadowDebug = {
 export type RuntimeDebugSnapshot = {
   materialBindingMode: MaterialBindingMode;
   hairShadowMode: HairShadowMode;
+  hairShadowOffset: { x: number; y: number; z: number };
+  hairShadowWorldPosition: { x: number; y: number; z: number };
   body: RuntimeMaterialDebug[];
   head: RuntimeMaterialDebug[];
   headMaterialSlots: Array<{
@@ -3814,10 +3845,30 @@ function createProjectedShadowTexture(size = 128) {
 type CharacterProjectedShadowUpdate = {
   targetWorldPosition: THREE.Vector3;
   lightWorldPosition: THREE.Vector3 | null;
-  floorY: number;
   characterHeight: number;
   visible: boolean;
 };
+
+function normalizeProjectedShadowSettings(
+  input: ProjectedShadowSettingsInput = {},
+  base: ProjectedShadowSettings = defaultProjectedShadowSettings
+): ProjectedShadowSettings {
+  const positive = (value: number | undefined, fallback: number, min = 0) =>
+    Number.isFinite(value) ? Math.max(value!, min) : fallback;
+  const unit = (value: number | undefined, fallback: number) =>
+    Number.isFinite(value) ? THREE.MathUtils.clamp(value!, 0, 1) : fallback;
+  return {
+    width: positive(input.width, base.width, 0.001),
+    height: positive(input.height, base.height, 0.001),
+    opacity: unit(input.opacity, base.opacity),
+    crossSize: positive(input.crossSize, base.crossSize, 0.001),
+    crossOpacity: unit(input.crossOpacity, base.crossOpacity),
+    floorY: Number.isFinite(input.floorY) ? input.floorY! : base.floorY,
+    adjustShadow: input.adjustShadow ?? base.adjustShadow,
+    adjustAlpha: input.adjustAlpha ?? base.adjustAlpha,
+    invisibleHeight: positive(input.invisibleHeight, base.invisibleHeight, 0.001),
+  };
+}
 
 class CharacterProjectedShadowController {
   readonly group = new THREE.Group();
@@ -3827,6 +3878,9 @@ class CharacterProjectedShadowController {
   private readonly crossAnchor = new THREE.Group();
   private readonly directionalMaterial: THREE.MeshBasicMaterial;
   private readonly crossMaterial: THREE.MeshBasicMaterial;
+  private settings = { ...defaultProjectedShadowSettings };
+  private readonly targetWorldPosition = new THREE.Vector3();
+  private directionalAlpha = defaultProjectedShadowSettings.opacity;
 
   constructor() {
     const shadowTexture = createProjectedShadowTexture();
@@ -3836,7 +3890,7 @@ class CharacterProjectedShadowController {
       color: "#000000",
       map: shadowTexture,
       transparent: true,
-      opacity: DIRECTIONAL_SHADOW_OPACITY,
+      opacity: this.settings.opacity,
       depthWrite: false,
       depthTest: true,
       polygonOffset: true,
@@ -3847,7 +3901,7 @@ class CharacterProjectedShadowController {
       color: "#000000",
       map: shadowTexture,
       transparent: true,
-      opacity: CROSS_SHADOW_OPACITY,
+      opacity: this.settings.crossOpacity,
       depthWrite: false,
       depthTest: true,
       polygonOffset: true,
@@ -3859,14 +3913,14 @@ class CharacterProjectedShadowController {
     directionalMesh.name = "CharacterDirectionalShadow";
     directionalMesh.rotation.x = -Math.PI / 2;
     directionalMesh.renderOrder = -100;
-    directionalMesh.scale.set(DIRECTIONAL_SHADOW_WIDTH, DIRECTIONAL_SHADOW_HEIGHT, 1);
+    directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
     this.directionalAnchor.add(directionalMesh);
 
     const crossMesh = new THREE.Mesh(crossGeometry, this.crossMaterial);
     crossMesh.name = "CharacterCrossShadow";
     crossMesh.rotation.x = -Math.PI / 2;
     crossMesh.renderOrder = -99;
-    crossMesh.scale.set(CROSS_SHADOW_SIZE, CROSS_SHADOW_SIZE, 1);
+    crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
     this.crossAnchor.add(crossMesh);
 
     this.group.name = "CharacterProjectedShadow";
@@ -3875,8 +3929,21 @@ class CharacterProjectedShadowController {
     this.group.visible = false;
   }
 
+  setSettings(input: ProjectedShadowSettingsInput = {}) {
+    this.settings = normalizeProjectedShadowSettings(input, this.settings);
+    const directionalMesh = this.directionalAnchor.children[0];
+    if (directionalMesh) {
+      directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
+    }
+    const crossMesh = this.crossAnchor.children[0];
+    if (crossMesh) {
+      crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
+    }
+  }
+
   update(state: CharacterProjectedShadowUpdate) {
     this.group.visible = state.visible;
+    this.targetWorldPosition.copy(state.targetWorldPosition);
     if (!state.visible) {
       return;
     }
@@ -3886,27 +3953,40 @@ class CharacterProjectedShadowController {
       state.lightWorldPosition
     );
     const effectiveHeight = Math.max(0.001, state.characterHeight);
-    const heightRatio = (state.targetWorldPosition.y - state.floorY) / effectiveHeight;
-    const distanceToFloor = DIRECTIONAL_SHADOW_HEIGHT * heightRatio;
+    const heightRatio = (state.targetWorldPosition.y - this.settings.floorY) / effectiveHeight;
+    const distanceToFloor = this.settings.height * heightRatio;
+    const directionalX = state.targetWorldPosition.x + direction.x * distanceToFloor;
+    const directionalZ = state.targetWorldPosition.z + direction.z * distanceToFloor;
     this.directionalAnchor.position.set(
-      state.targetWorldPosition.x + direction.x * distanceToFloor,
-      state.floorY + PROJECTED_SHADOW_FLOOR_BIAS,
-      state.targetWorldPosition.z + direction.z * distanceToFloor
+      this.settings.adjustShadow ? state.targetWorldPosition.x : directionalX,
+      this.settings.floorY + PROJECTED_SHADOW_FLOOR_BIAS,
+      this.settings.adjustShadow ? state.targetWorldPosition.z : directionalZ
     );
     this.directionalAnchor.rotation.y = Math.atan2(direction.x, direction.z);
-    this.directionalMaterial.opacity = DIRECTIONAL_SHADOW_OPACITY;
+    this.directionalAlpha = this.calculateShadowAlpha(state.targetWorldPosition.y);
+    this.directionalMaterial.opacity = this.directionalAlpha;
 
-    const crossHeightRatio = state.targetWorldPosition.y / CROSS_SHADOW_HEIGHT_LIMIT;
+    const crossHeightRatio =
+      (state.targetWorldPosition.y - this.settings.floorY) / this.settings.invisibleHeight;
     const crossAlpha =
       crossHeightRatio < 0
         ? 1
         : 1 - Math.min(crossHeightRatio, 1);
     this.crossAnchor.position.set(
       state.targetWorldPosition.x,
-      state.floorY + PROJECTED_SHADOW_FLOOR_BIAS * 1.5,
+      this.settings.floorY + PROJECTED_SHADOW_FLOOR_BIAS * 1.5,
       state.targetWorldPosition.z
     );
-    this.crossMaterial.opacity = CROSS_SHADOW_OPACITY * crossAlpha;
+    this.crossMaterial.opacity = this.settings.crossOpacity * crossAlpha;
+  }
+
+  private calculateShadowAlpha(targetY: number) {
+    if (!this.settings.adjustAlpha) {
+      return this.settings.opacity;
+    }
+    const t = (targetY - this.settings.floorY) / this.settings.invisibleHeight;
+    const factor = t < 0 ? 1 : 1 - Math.min(t, 1);
+    return this.settings.opacity * factor;
   }
 
   private resolveDirectionalShadowDirection(
@@ -3928,7 +4008,6 @@ class CharacterProjectedShadowController {
   }
 
   getDebugSnapshot(
-    floorY: number,
     characterHeight: number
   ): RuntimeProjectedShadowDebug {
     this.directionalAnchor.updateMatrixWorld(true);
@@ -3938,24 +4017,27 @@ class CharacterProjectedShadowController {
       .normalize();
     return {
       visible: this.group.visible,
-      floorY: Number(floorY.toFixed(4)),
+      floorY: Number(this.settings.floorY.toFixed(4)),
       characterHeight: Number(characterHeight.toFixed(4)),
+      settings: { ...this.settings },
+      targetPosition: vectorDebugSnapshot(this.targetWorldPosition),
       directional: {
         position: vectorDebugSnapshot(this.directionalAnchor.position),
         forward: vectorDebugSnapshot(directionalForward),
         scale: vectorDebugSnapshot(new THREE.Vector3(
-          DIRECTIONAL_SHADOW_WIDTH,
+          this.settings.width,
           1,
-          DIRECTIONAL_SHADOW_HEIGHT
+          this.settings.height
         )),
         opacity: Number(this.directionalMaterial.opacity.toFixed(4)),
+        alpha: Number(this.directionalAlpha.toFixed(4)),
       },
       cross: {
         position: vectorDebugSnapshot(this.crossAnchor.position),
         scale: vectorDebugSnapshot(new THREE.Vector3(
-          CROSS_SHADOW_SIZE,
+          this.settings.crossSize,
           1,
-          CROSS_SHADOW_SIZE
+          this.settings.crossSize
         )),
         opacity: Number(this.crossMaterial.opacity.toFixed(4)),
       },
@@ -4062,7 +4144,7 @@ export class Haruki3DEngine {
   private readonly hairHeadPosition = new THREE.Vector3();
   private currentHairOffset = new THREE.Vector3();
   private materialBindingMode: MaterialBindingMode = "manifest";
-  private hairShadowMode: HairShadowMode = "head_proximity";
+  private hairShadowMode: HairShadowMode = "sekai_head_position";
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
   private toonValueShadowInfluence = 0;
@@ -4077,6 +4159,8 @@ export class Haruki3DEngine {
   private readonly runtimeDebug: RuntimeDebugSnapshot = {
     materialBindingMode: "manifest",
     hairShadowMode: this.hairShadowMode,
+    hairShadowOffset: vectorDebugSnapshot(this.currentHairOffset),
+    hairShadowWorldPosition: vectorDebugSnapshot(this.hairHeadPosition),
     body: [],
     head: [],
     headMaterialSlots: [],
@@ -4419,9 +4503,13 @@ export class Haruki3DEngine {
   }
 
   setHairShadowMode(mode: HairShadowMode) {
-    this.hairShadowMode = mode;
-    this.runtimeDebug.hairShadowMode = mode;
+    this.hairShadowMode = normalizeHairShadowMode(mode);
+    this.runtimeDebug.hairShadowMode = this.hairShadowMode;
     this.applyHairShadowModeUniforms();
+  }
+
+  setProjectedShadowSettings(settings: ProjectedShadowSettingsInput = {}) {
+    this.projectedShadow.setSettings(settings);
   }
 
   setFaceSdfDebugMode(mode: FaceSdfDebugMode) {
@@ -4827,7 +4915,7 @@ export class Haruki3DEngine {
   }
 
   private isHeadProximityHairShadowEnabled() {
-    return this.hairShadowMode === "head_proximity";
+    return this.hairShadowMode === "sekai_head_position";
   }
 
   private applyHairShadowModeUniforms() {
@@ -4873,10 +4961,11 @@ export class Haruki3DEngine {
       })) ?? [],
       nativeMeshes: this.lastNativeMeshInstallDiagnostics,
       constraints: this.lastConstraintSetupDiagnostics,
+      hairShadowOffset: vectorDebugSnapshot(this.currentHairOffset),
+      hairShadowWorldPosition: vectorDebugSnapshot(this.hairHeadPosition),
       camera: this.getCameraDebugSnapshot(),
       faceLight: this.getFaceLightDebugSnapshot(),
       projectedShadow: this.projectedShadow.getDebugSnapshot(
-        PROJECTED_SHADOW_FLOOR_Y,
         this.characterHeight
       ),
     };
@@ -5247,7 +5336,6 @@ export class Haruki3DEngine {
       this.projectedShadow.update({
         targetWorldPosition: new THREE.Vector3(),
         lightWorldPosition: null,
-        floorY: PROJECTED_SHADOW_FLOOR_Y,
         characterHeight: this.characterHeight,
         visible: false,
       });
@@ -5259,7 +5347,6 @@ export class Haruki3DEngine {
     this.projectedShadow.update({
       targetWorldPosition: this.resolveProjectedShadowTargetWorldPosition(),
       lightWorldPosition: lightPosition,
-      floorY: PROJECTED_SHADOW_FLOOR_Y,
       characterHeight: this.characterHeight,
       visible: true,
     });
@@ -5474,6 +5561,7 @@ export class Haruki3DEngine {
       faceSdfEnabled: request.faceSdfEnabled,
       faceSdfDebugMode: request.faceSdfDebugMode,
       faceSdfDebugLightMode: request.faceSdfDebugLightMode,
+      projectedShadow: request.projectedShadow,
       traceUtjBones: request.traceUtjBones,
       traceUtjMaxEvents: request.traceUtjMaxEvents,
       springDebugBones: request.springDebugBones,
@@ -5503,6 +5591,9 @@ export class Haruki3DEngine {
     }
     if (request.faceSdfDebugLightMode !== undefined) {
       this.setFaceSdfDebugLightMode(request.faceSdfDebugLightMode);
+    }
+    if (request.projectedShadow !== undefined) {
+      this.setProjectedShadowSettings(request.projectedShadow);
     }
     this.setUtjSpringBoneTraceFilters(
       request.traceUtjBones ?? [],
@@ -8133,6 +8224,8 @@ export class Haruki3DEngine {
     );
     this.hairHeadPosition.copy(this.currentHairOffset);
     headNode.localToWorld(this.hairHeadPosition);
+    this.runtimeDebug.hairShadowOffset = vectorDebugSnapshot(this.currentHairOffset);
+    this.runtimeDebug.hairShadowWorldPosition = vectorDebugSnapshot(this.hairHeadPosition);
     updateSekaiFaceBasis(
       this.faceMaterial,
       this.faceRightWorld,

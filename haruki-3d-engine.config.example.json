@@ -12,6 +12,17 @@
     "warmupMode": "animation",
     "springRuntimeMode": "unity-prefab",
     "cameraPreset": "capture",
+    "projectedShadow": {
+      "width": 0.72,
+      "height": 1.06,
+      "opacity": 0.28,
+      "crossSize": 0.46,
+      "crossOpacity": 0.22,
+      "floorY": 0,
+      "adjustShadow": false,
+      "adjustAlpha": true,
+      "invisibleHeight": 1.65
+    },
     "tempTtl": "6h",
     "tempMaxBytes": "2.5GB",
     "gcInterval": "1h"

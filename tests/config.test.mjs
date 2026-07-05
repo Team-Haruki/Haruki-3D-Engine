@@ -28,6 +28,17 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
       clip: "motion_loop",
       springRuntimeMode: "unity-prefab",
       cameraPreset: "capture",
+      projectedShadow: {
+        width: 0.88,
+        height: 1.22,
+        opacity: 0.33,
+        crossSize: 0.5,
+        crossOpacity: 0.2,
+        floorY: -0.02,
+        adjustShadow: true,
+        adjustAlpha: false,
+        invisibleHeight: 1.8
+      },
       tempTtl: "30m",
       gcInterval: "15m",
       idleShutdown: "45m"
@@ -64,6 +75,17 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(server.defaultClip, "motion_loop");
   assert.equal(server.defaultSpringRuntimeMode, "unity-prefab");
   assert.equal(server.defaultCameraPreset, "capture");
+  assert.deepEqual(server.defaultProjectedShadow, {
+    width: 0.88,
+    height: 1.22,
+    opacity: 0.33,
+    crossSize: 0.5,
+    crossOpacity: 0.2,
+    floorY: -0.02,
+    adjustShadow: true,
+    adjustAlpha: false,
+    invisibleHeight: 1.8,
+  });
   assert.equal(server.tempCaptureTtlMs, 30 * 60 * 1000);
   assert.equal(server.captureGCIntervalMs, 15 * 60 * 1000);
   assert.equal(server.idleShutdownMs, 45 * 60 * 1000);
@@ -79,6 +101,32 @@ test("capture server accepts documented HARUKI_CAPTURE camera and spring env nam
 
   assert.equal(server.defaultSpringRuntimeMode, "off");
   assert.equal(server.defaultCameraPreset, "default");
+});
+
+test("capture server accepts projected shadow env overrides", () => {
+  const server = resolveCaptureServerOptions({}, {
+    HARUKI_CAPTURE_PROJECTED_SHADOW_WIDTH: "0.9",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_HEIGHT: "1.2",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_OPACITY: "0.35",
+    HARUKI_CAPTURE_CROSS_SHADOW_SIZE: "0.52",
+    HARUKI_CAPTURE_CROSS_SHADOW_OPACITY: "0.18",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_FLOOR_Y: "-0.01",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST: "true",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST_ALPHA: "false",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_INVISIBLE_HEIGHT: "2.1",
+  });
+
+  assert.deepEqual(server.defaultProjectedShadow, {
+    width: 0.9,
+    height: 1.2,
+    opacity: 0.35,
+    crossSize: 0.52,
+    crossOpacity: 0.18,
+    floorY: -0.01,
+    adjustShadow: true,
+    adjustAlpha: false,
+    invisibleHeight: 2.1,
+  });
 });
 
 test("capture server accepts idle shutdown duration env", () => {
@@ -516,7 +564,8 @@ test("projected character shadows are separate scene objects", () => {
   assert.match(engineSource, /CharacterDirectionalShadow/);
   assert.match(engineSource, /CharacterCrossShadow/);
   assert.match(engineSource, /this\.scene\.add\(this\.projectedShadow\.group\)/);
-  assert.match(engineSource, /distanceToFloor = DIRECTIONAL_SHADOW_HEIGHT \* heightRatio/);
+  assert.match(engineSource, /distanceToFloor = this\.settings\.height \* heightRatio/);
+  assert.match(engineSource, /setProjectedShadowSettings\(settings: ProjectedShadowSettingsInput/);
 });
 
 test("capture runtime parser allows config to replace built-in defaults", () => {
@@ -597,9 +646,10 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
   assert.match(engineSource, /export type RuntimeProjectedShadowDebug =/);
   assert.match(engineSource, /projectedShadow\?: RuntimeProjectedShadowDebug/);
   assert.match(engineSource, /projectedShadow: this\.projectedShadow\.getDebugSnapshot/);
-  assert.match(engineSource, /export type HairShadowMode = "off" \| "head_proximity";/);
-  assert.match(engineSource, /private hairShadowMode: HairShadowMode = "head_proximity";/);
+  assert.match(engineSource, /export type HairShadowMode = "off" \| "sekai_head_position" \| "head_proximity";/);
+  assert.match(engineSource, /private hairShadowMode: HairShadowMode = "sekai_head_position";/);
   assert.match(engineSource, /hairShadowMode: this\.hairShadowMode/);
+  assert.match(engineSource, /hairShadowWorldPosition: vectorDebugSnapshot\(this\.hairHeadPosition\)/);
   assert.match(engineSource, /CharacterDirectionalShadow/);
   assert.match(engineSource, /CharacterCrossShadow/);
 });

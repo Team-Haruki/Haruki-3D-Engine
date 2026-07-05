@@ -21,6 +21,8 @@ export {
   type PartImportSnapshot,
   type PjskCameraPreset,
   type PjskPresentationMode,
+  type ProjectedShadowSettings,
+  type ProjectedShadowSettingsInput,
   type PjskViewerEngineOptions,
   type PjskEngineOptions,
   type RenderIsolationMode,
@@ -28,6 +30,7 @@ export {
   type RuntimeCombinedCharacterAsset,
   type RuntimeDebugSnapshot,
   type SpringBoneRuntimeSnapshot,
+  defaultProjectedShadowSettings,
 } from "./engine/Haruki3DEngine";
 export {
   loadRuntimePackageFromBaseUrl,

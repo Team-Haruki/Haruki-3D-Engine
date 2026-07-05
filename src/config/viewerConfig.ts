@@ -60,7 +60,7 @@ export const characterYawDegreesByMode: Record<CharacterYawMode, number> = {
 
 export const defaultRenderState: EngineRenderState = {
   materialBindingMode: "manifest",
-  hairShadowMode: "head_proximity",
+  hairShadowMode: "sekai_head_position",
   toonShadowSmoothMode: "auto",
   valueShadowInfluenceMode: "1",
   characterYawMode: "0",

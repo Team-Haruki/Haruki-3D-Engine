@@ -5,6 +5,7 @@ import {
   type HarukiCaptureRolePartsRequest,
   type HarukiCaptureRolePartsResult,
   type PjskCameraPreset,
+  type ProjectedShadowSettingsInput,
   type RenderIsolationMode,
 } from "./index";
 import {
@@ -44,6 +45,7 @@ type CaptureConfig = {
   springRuntimeMode: SpringRuntimeMode;
   cameraPreset: PjskCameraPreset;
   characterYawMode: CaptureCharacterYawMode | null;
+  projectedShadow: ProjectedShadowSettingsInput;
   utjTraceBones: string[];
   utjTraceMaxEvents: number;
 };
@@ -99,12 +101,42 @@ function readCaptureConfig(): CaptureConfig | null {
     springRuntimeMode: readSpringRuntimeMode(params),
     cameraPreset: readCameraPreset(params),
     characterYawMode: isCaptureCharacterYawMode(yawMode) ? yawMode : null,
+    projectedShadow: readProjectedShadowSettings(params),
     utjTraceBones: params
       .getAll("utjTraceBone")
       .flatMap((value) => value.split(","))
       .map((value) => value.trim())
       .filter(Boolean),
     utjTraceMaxEvents: Math.max(Math.trunc(Number.isFinite(traceMaxEvents) ? traceMaxEvents : 240), 1),
+  };
+}
+
+function readOptionalNumber(value: string | null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readOptionalBoolean(value: string | null) {
+  if (value === "true" || value === "1") {
+    return true;
+  }
+  if (value === "false" || value === "0") {
+    return false;
+  }
+  return undefined;
+}
+
+function readProjectedShadowSettings(params: URLSearchParams): ProjectedShadowSettingsInput {
+  return {
+    width: readOptionalNumber(params.get("projectedShadowWidth")),
+    height: readOptionalNumber(params.get("projectedShadowHeight")),
+    opacity: readOptionalNumber(params.get("projectedShadowOpacity")),
+    crossSize: readOptionalNumber(params.get("crossShadowSize")),
+    crossOpacity: readOptionalNumber(params.get("crossShadowOpacity")),
+    floorY: readOptionalNumber(params.get("projectedShadowFloorY")),
+    adjustShadow: readOptionalBoolean(params.get("projectedShadowAdjust")),
+    adjustAlpha: readOptionalBoolean(params.get("projectedShadowAdjustAlpha")),
+    invisibleHeight: readOptionalNumber(params.get("projectedShadowInvisibleHeight")),
   };
 }
 
@@ -291,6 +323,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       faceSdfEnabled: request.faceSdfEnabled ?? config.faceSdfEnabled,
       faceSdfDebugMode: request.faceSdfDebugMode ?? config.faceSdfDebugMode,
       faceSdfDebugLightMode: request.faceSdfDebugLightMode ?? config.faceSdfDebugLightMode,
+      projectedShadow: request.projectedShadow ?? config.projectedShadow,
     });
     const snapshots = {
       ...result.snapshots,
@@ -346,6 +379,7 @@ async function prepareCaptureFrame(config: CaptureConfig) {
     faceSdfEnabled: config.faceSdfEnabled,
     faceSdfDebugMode: config.faceSdfDebugMode,
     faceSdfDebugLightMode: config.faceSdfDebugLightMode,
+    projectedShadow: config.projectedShadow,
     renderIsolation: config.renderIsolation,
     cameraPreset: config.cameraPreset,
     animation: snapshots.animation,
