@@ -19,11 +19,14 @@ export type PartRegistryEntry = {
   costume3dGroupId?: number | null;
   modelAssetbundleName?: string | null;
   headCostume3dAssetbundleType?: string | null;
+  bundlePath?: string | null;
+  colorVariationBundlePath?: string | null;
   baseSourceKey?: string | null;
   sourceKey?: string | null;
   sourcePackagePath?: string | null;
   packagePath: string;
   status?: string;
+  warnings?: string[] | null;
 };
 
 export type Character3dIndexEntry = {
@@ -327,6 +330,39 @@ export function normalizeRuntimePartType(value: string): RuntimePartType {
   throw new Error(`Unsupported runtime part type: ${value}`);
 }
 
+export function runtimePartSlot(part: {
+  partType: RuntimePartType | string;
+  headCostume3dAssetbundleType?: string | null;
+}): RuntimePartType {
+  const slot = normalizeRuntimePartType(part.partType);
+  if (
+    (slot === "head" || slot === "head_optional") &&
+    isCompleteHeadCostumeType(part.headCostume3dAssetbundleType)
+  ) {
+    return "head";
+  }
+  return slot;
+}
+
+export function tryRuntimePartSlot(part: {
+  partType: RuntimePartType | string;
+  headCostume3dAssetbundleType?: string | null;
+}): RuntimePartType | null {
+  try {
+    return runtimePartSlot(part);
+  } catch {
+    return null;
+  }
+}
+
+function isCompleteHeadCostumeType(value: string | null | undefined) {
+  const type = (value ?? "").trim().toLowerCase();
+  return type === "head_and_hair" ||
+    type === "head_all" ||
+    type === "head_front" ||
+    type === "head_back";
+}
+
 export function tryNormalizeRuntimePartType(value: string): RuntimePartType | null {
   try {
     return normalizeRuntimePartType(value);
@@ -398,7 +434,7 @@ export function listSelectableParts(
   return partSet.registry
     .filter((entry) => entry.characterId === characterId)
     .filter((entry) => options.unit === undefined || sameUnit(entry.unit, options.unit))
-    .filter((entry) => tryNormalizeRuntimePartType(entry.partType) === partType)
+    .filter((entry) => tryRuntimePartSlot(entry) === partType)
     .filter(isUsableRegistryEntry)
     .filter((entry) => !options.loadedOnly || isEmptyHeadOptionalEntry(entry) || partSet.packages.has(entry.packagePath))
     .sort((left, right) => left.costume3dId - right.costume3dId);
@@ -464,7 +500,7 @@ function findFirstLoadedPart(
   unit?: string | null
 ) {
   return partSet.registry.find((entry) =>
-    tryNormalizeRuntimePartType(entry.partType) === partType &&
+    tryRuntimePartSlot(entry) === partType &&
     (characterId === undefined || entry.characterId === characterId) &&
     (unit === undefined || sameUnit(entry.unit, unit)) &&
     entry.status !== "missing" &&
@@ -539,9 +575,12 @@ function requirePart(
   partType: RuntimePartType,
   costume3dId: number
 ): PartRuntimePackage {
-  const entry = findLoadedPart(partSet, characterId, unit, partType, costume3dId);
+  const entry = findRegistryPart(partSet, characterId, unit, partType, costume3dId);
   if (!entry) {
-    throw new Error(`Missing loaded ${partType} package for role ${runtimeRoleId(characterId, unit)}, costume3dId ${costume3dId}.`);
+    throw new Error(`Missing ${partType} registry entry for role ${runtimeRoleId(characterId, unit)}, costume3dId ${costume3dId}.`);
+  }
+  if (!partSet.packages.has(entry.packagePath)) {
+    throw new Error(`Missing loaded ${partType} package for role ${runtimeRoleId(characterId, unit)}, ${partRegistryDiagnostic(entry)}.`);
   }
   const runtime = partSet.packages.get(entry.packagePath);
   return withRegistryEntryRuntimeMetadata(runtime!, entry);
@@ -560,7 +599,7 @@ function resolveHeadRuntime(
   );
   if (head) {
     if (!partSet.packages.has(head.packagePath)) {
-      throw new Error(`Missing loaded head package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headCostume3dId}.`);
+      throw new Error(`Missing loaded head package for role ${runtimeRoleId(selection.characterId, selection.unit)}, ${partRegistryDiagnostic(head)}.`);
     }
     return withRegistryEntryRuntimeMetadata(partSet.packages.get(head.packagePath)!, head);
   }
@@ -579,7 +618,7 @@ function resolveHeadRuntime(
     return null;
   }
   if (!partSet.packages.has(headOptional.packagePath)) {
-    throw new Error(`Missing loaded head_optional package for role ${runtimeRoleId(selection.characterId, selection.unit)}, costume3dId ${selection.headCostume3dId}.`);
+    throw new Error(`Missing loaded head package for role ${runtimeRoleId(selection.characterId, selection.unit)}, ${partRegistryDiagnostic(headOptional)}.`);
   }
   return withRegistryEntryRuntimeMetadata(partSet.packages.get(headOptional.packagePath)!, headOptional);
 }
@@ -609,11 +648,30 @@ function resolveOptionalHeadRuntime(
   return requirePart(partSet, selection.characterId, selection.unit, "head_optional", selection.headOptionalCostume3dId);
 }
 
+function partRegistryDiagnostic(entry: PartRegistryEntry) {
+  const details = [
+    `costume3dId ${entry.costume3dId}`,
+    `partType ${runtimePartSlot(entry)}`,
+    `packagePath ${entry.packagePath}`,
+  ];
+  if (entry.bundlePath) {
+    details.push(`bundlePath ${entry.bundlePath}`);
+  }
+  if (entry.colorVariationBundlePath) {
+    details.push(`colorVariationBundlePath ${entry.colorVariationBundlePath}`);
+  }
+  const firstWarning = entry.warnings?.[0];
+  if (firstWarning) {
+    details.push(`warning ${firstWarning}`);
+  }
+  return details.join(", ");
+}
+
 function withRegistryEntryRuntimeMetadata(
   runtime: PartRuntimePackage,
   entry: PartRegistryEntry
 ): PartRuntimePackage {
-  const partType = tryNormalizeRuntimePartType(entry.partType) ?? runtime.part.partType;
+  const partType = tryRuntimePartSlot(entry) ?? runtime.part.partType;
   const manifest = isRecord(runtime.manifest)
     ? cloneRecord(runtime.manifest)
     : runtime.manifest;
@@ -664,17 +722,6 @@ function assertPartRuntimeProxyMetadata(
   }
 }
 
-function findLoadedPart(
-  partSet: PartPackageSet,
-  characterId: number,
-  unit: string | null | undefined,
-  partType: RuntimePartType,
-  costume3dId: number
-) {
-  const entry = findRegistryPart(partSet, characterId, unit, partType, costume3dId);
-  return entry && partSet.packages.has(entry.packagePath) ? entry : undefined;
-}
-
 function findRegistryPart(
   partSet: PartPackageSet,
   characterId: number,
@@ -687,7 +734,7 @@ function findRegistryPart(
       candidate.characterId === characterId &&
       sameUnit(candidate.unit, unit) &&
       candidate.costume3dId === costume3dId &&
-      tryNormalizeRuntimePartType(candidate.partType) === partType &&
+      tryRuntimePartSlot(candidate) === partType &&
       isUsableRegistryEntry(candidate)
   );
 }
@@ -698,7 +745,7 @@ function isUsableRegistryEntry(entry: PartRegistryEntry) {
 
 function isEmptyHeadOptionalEntry(entry: PartRegistryEntry) {
   return entry.status === "empty" &&
-    tryNormalizeRuntimePartType(entry.partType) === "head_optional";
+    tryRuntimePartSlot(entry) === "head_optional";
 }
 
 function assertSameRole(characterId: number, unit: string | null | undefined, packages: PartRuntimePackage[]) {
@@ -812,7 +859,7 @@ function normalizeHeadManifestFromParts(
   selection: CustomPartSelection,
   resolveUrl: (path: string) => string
 ): HeadAssetManifest {
-  const head = runtimes.find((runtime) => normalizeRuntimePartType(runtime.part.partType) === "head") ?? runtimes[0];
+  const head = runtimes.find((runtime) => runtimePartSlot(runtime.part) === "head") ?? runtimes[0];
   const manifest = cloneRecord(head.manifest) as HeadAssetManifest;
   manifest.id = `head-${selection.headCostume3dId}-hair-${selection.hairCostume3dId}`;
   manifest.displayName = `Head ${selection.headCostume3dId} / Hair ${selection.hairCostume3dId}`;
@@ -909,7 +956,7 @@ function resolveHeadHairComposition(
     entry.hairCostume3dId === selection.hairCostume3dId &&
     (entry.headOptionalCostume3dId ?? null) === (selection.headOptionalCostume3dId ?? null)
   );
-  const head = runtimes.find((runtime) => normalizeRuntimePartType(runtime.part.partType) === "head");
+  const head = runtimes.find((runtime) => runtimePartSlot(runtime.part) === "head");
   if (
     exactPreset &&
     head &&
@@ -959,15 +1006,12 @@ function isRuntimeContributor(
   runtime: PartRuntimePackage,
   composition: HeadHairComposition
 ) {
-  return composition.activePartTypes.has(normalizeRuntimePartType(runtime.part.partType));
+  return composition.activePartTypes.has(runtimePartSlot(runtime.part));
 }
 
 function isCompleteHeadRuntime(runtime: PartRuntimePackage) {
   const type = readOptionalString(runtime.part.headCostume3dAssetbundleType);
-  if (
-    type &&
-    !["head_and_hair", "head_all", "head_front", "head_back"].includes(type)
-  ) {
+  if (type && !isCompleteHeadCostumeType(type)) {
     return false;
   }
   const rendererPaths = readRecordArray(runtime.nativeMeshes?.meshes)
@@ -1176,7 +1220,7 @@ function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {
 
 function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): RemappedRuntimePart {
   const setup = getPartRuntimeSetup(runtime);
-  const partType = normalizeRuntimePartType(runtime.part.partType);
+  const partType = runtimePartSlot(runtime.part);
   const selectedActiveRoots = selectRuntimePartActiveRoots(
     partType,
     readStringArray(setup.activeRootProfile?.activeRoots)
@@ -1710,7 +1754,7 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
   const optionalMeshKeys = new Set<string>();
   const headOptionalFaceId = resolveHeadOptionalFaceId(runtimes);
   for (const runtime of runtimes) {
-    const partType = normalizeRuntimePartType(runtime.part.partType);
+    const partType = runtimePartSlot(runtime.part);
     for (const mesh of readRecordArray(runtime.nativeMeshes?.meshes)) {
       if (partType !== "head_optional") {
         meshes.push(mesh);
@@ -1765,9 +1809,9 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
 
 function resolveHeadOptionalFaceId(runtimes: PartRuntimePackage[]) {
   const candidates = [
-    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) === "head"),
-    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) === "hair"),
-    ...runtimes.filter((runtime) => normalizeRuntimePartType(runtime.part.partType) !== "head_optional"),
+    ...runtimes.filter((runtime) => runtimePartSlot(runtime.part) === "head"),
+    ...runtimes.filter((runtime) => runtimePartSlot(runtime.part) === "hair"),
+    ...runtimes.filter((runtime) => runtimePartSlot(runtime.part) !== "head_optional"),
   ];
   for (const runtime of candidates) {
     const fromBundle = extractFaceIdFromBundlePath(readOptionalString(runtime.source?.bundlePath));

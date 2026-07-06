@@ -17,7 +17,7 @@ import {
   getCharacterIndexEntries,
   getDefaultCustomSelection,
   runtimeRoleId,
-  tryNormalizeRuntimePartType,
+  tryRuntimePartSlot,
   type Character3dIndex,
   type HeadHairCompatibility,
   type PartPackageSet,
@@ -517,7 +517,7 @@ function selectPartRuntimeCandidates(
   ) => registry.find((entry) =>
     entry.characterId === characterId &&
     entry.costume3dId === costume3dId &&
-    tryNormalizeRuntimePartType(entry.partType) === partType &&
+    tryRuntimePartSlot(entry) === partType &&
     (unit === undefined || entry.unit === unit) &&
     isUsableRegistryEntry(entry)
   );
@@ -547,7 +547,7 @@ function selectPartRuntimeCandidates(
     addEntry(registry
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
-        tryNormalizeRuntimePartType(entry.partType) === "body" &&
+        tryRuntimePartSlot(entry) === "body" &&
         isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId)[0]);
@@ -555,14 +555,14 @@ function selectPartRuntimeCandidates(
     const heads = registry
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
-        tryNormalizeRuntimePartType(entry.partType) === "head" &&
+        tryRuntimePartSlot(entry) === "head" &&
         isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId);
     const hairs = registry
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
-        tryNormalizeRuntimePartType(entry.partType) === "hair" &&
+        tryRuntimePartSlot(entry) === "hair" &&
         isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId);
@@ -606,7 +606,7 @@ function selectPartRuntimeCandidates(
       score:
         (preferredCharacterId !== null && entry.characterId === preferredCharacterId ? 0 : 1000000) +
         (preferredCostumeIds.has(entry.costume3dId) ? 0 : 10000) +
-        partTypePriority(entry.partType) +
+        partTypePriority(entry) +
         Math.min(entry.costume3dId, 9999),
     }))
     .sort((left, right) => left.score - right.score || left.index - right.index);
@@ -629,8 +629,9 @@ function hasUsableCustomPartSelection(
   baseUrl: string
 ) {
   const loadedTypes = new Set(
-    [...packages.values()]
-      .map((runtime) => tryNormalizeRuntimePartType(runtime.part.partType))
+    registry
+      .filter((entry) => packages.has(entry.packagePath))
+      .map((entry) => tryRuntimePartSlot(entry))
       .filter(Boolean)
   );
   if (!loadedTypes.has("body") || !loadedTypes.has("head") || !loadedTypes.has("hair")) {
@@ -671,8 +672,8 @@ function headHairCandidateKey(
   return `${unit ?? ""}|${headCostume3dId}|${hairCostume3dId}`;
 }
 
-function partTypePriority(partType: string) {
-  switch (tryNormalizeRuntimePartType(partType)) {
+function partTypePriority(entry: PartRegistryEntry) {
+  switch (tryRuntimePartSlot(entry)) {
     case "body":
       return 0;
     case "head":

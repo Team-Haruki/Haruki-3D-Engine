@@ -254,10 +254,10 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         float hMask = valueSample.b;
         float hAlpha = valueSample.a;
         float vertexOutlineIntensity = 1.0;
-        float vertexRimIntensity = 1.0;
+        float vertexRimMask = 1.0;
         #ifdef USE_COLOR
         vertexOutlineIntensity = clamp(vColor.r, 0.0, 1.0);
-        vertexRimIntensity = clamp(vColor.g, 0.0, 1.0);
+        vertexRimMask = clamp(vColor.g, 0.0, 1.0);
         #endif
 
         float halfNdl = clamp(ndl * 0.5 + 0.5, 0.0, 1.0);
@@ -302,7 +302,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
           } else if (uBodyDebugMode > 7.5 && uBodyDebugMode < 8.5) {
             debugValue = vertexOutlineIntensity;
           } else if (uBodyDebugMode > 8.5 && uBodyDebugMode < 9.5) {
-            debugValue = vertexRimIntensity;
+            debugValue = vertexRimMask;
           } else if (uBodyDebugMode > 9.5 && uBodyDebugMode < 10.5) {
             debugValue = shadowBand;
           } else if (uBodyDebugMode > 10.5 && uBodyDebugMode < 11.5) {
@@ -368,7 +368,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         float rimBase = viewFresnel * rimDirectionGate * rimViewGate;
         float rimThreshold = clamp(max(uRimThreshold, uControllerRimThreshold), 0.0, 0.95);
         float rim = smoothstep(0.0, rimFactorZ, rimBase - rimThreshold);
-        float rimMask = vertexRimIntensity;
+        float rimMask = vertexRimMask;
         vec3 controllerRimBase = mix(
           vec3(0.9, 0.93, 0.98),
           uControllerRimColor,

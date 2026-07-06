@@ -199,9 +199,20 @@ test("runtime part composer treats head_optional rows as official preset heads",
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
+  const loaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
+    "utf8"
+  );
 
   assert.ok(composerSource.includes("function hasLoadedHeadPart"));
   assert.ok(composerSource.includes('hasLoadedPart(partSet, characterId, unit, "head_optional", costume3dId)'));
+  assert.ok(composerSource.includes("export function runtimePartSlot"));
+  assert.ok(composerSource.includes("isCompleteHeadCostumeType(part.headCostume3dAssetbundleType)"));
+  assert.ok(composerSource.includes("const partType = runtimePartSlot(runtime.part);"));
+  assert.ok(composerSource.includes("partRegistryDiagnostic(entry)"));
+  assert.ok(composerSource.includes("bundlePath ${entry.bundlePath}"));
+  assert.ok(loaderSource.includes("tryRuntimePartSlot(entry) === partType"));
+  assert.ok(loaderSource.includes(".filter((entry) => packages.has(entry.packagePath))"));
 });
 
 test("engine outline shell follows the documented SekaiOutline render state", () => {
@@ -646,7 +657,8 @@ test("character shader keeps sssekai-verified C/S/H and vertex color channel sem
   assert.match(shaderSource, /float skinMask = \(uSkinTintEnabled > 0\.5 && uUseValueTex > 0\.5\) \? step\(0\.5, valueSample\.r\) : 0\.0;/);
   assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
   assert.match(shaderSource, /vertexOutlineIntensity = clamp\(vColor\.r, 0\.0, 1\.0\);/);
-  assert.match(shaderSource, /vertexRimIntensity = clamp\(vColor\.g, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /vertexRimMask = clamp\(vColor\.g, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /float rimMask = vertexRimMask;/);
   assert.match(shaderSource, /vFaceShadowUv = uv1;/);
   assert.match(shaderSource, /texture2D\(uFaceShadowTex, sdfUv\)/);
   assert.match(shaderSource, /sdfMask \*= sideGate \* rangeGate;/);
