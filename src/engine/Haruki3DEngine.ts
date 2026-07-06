@@ -412,6 +412,7 @@ export type RuntimeOutlineShellDebug = {
   meshName: string;
   outlineName: string;
   sourceMaterialKind: string | null;
+  sourceMaterialKinds: string[];
   sourceMaterialNames: string[];
   hasVertexColor: boolean;
   vertexColorRedMax: number | null;
@@ -1148,25 +1149,35 @@ function isEyeThroughHairPassAllowed(
   return true;
 }
 
-function getOutlineSourceMaterialKind(mesh: THREE.Mesh) {
+function getOutlineSourceMaterialKinds(mesh: THREE.Mesh) {
+  const kinds = new Set<string>();
   if (typeof mesh.userData.pjskMaterialKind === "string") {
-    return mesh.userData.pjskMaterialKind;
+    kinds.add(mesh.userData.pjskMaterialKind);
   }
-  const materialNames = (Array.isArray(mesh.material) ? mesh.material : [mesh.material])
-    .map((material) => material.name.toLowerCase());
+  const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+  for (const material of materials) {
+    if (typeof material?.userData.pjskMaterialKind === "string") {
+      kinds.add(material.userData.pjskMaterialKind);
+    }
+  }
+  const materialNames = materials.map((material) => material.name.toLowerCase());
   const meshName = mesh.name.toLowerCase();
   if (
     normalizeMeshSlotName(mesh.name) === "acc" ||
     meshName.includes("/acc") ||
     materialNames.some((name) => name.includes("_acc") || name.startsWith("mtl_acc"))
   ) {
-    return "accessory";
+    kinds.add("accessory");
   }
-  return null;
+  return [...kinds];
 }
 
-function shouldSkipOutlineMaterialKind(kind: unknown) {
-  return isFaceLayerMaterialKind(kind);
+function chooseOutlineSourceMaterialKind(kinds: string[]) {
+  return kinds.find((kind) => !isFaceLayerMaterialKind(kind)) ?? kinds[0] ?? null;
+}
+
+function shouldSkipOutlineMaterialKinds(kinds: unknown[]) {
+  return kinds.length > 0 && kinds.every(isFaceLayerMaterialKind);
 }
 
 function isOutlineHiddenByIsolation(kind: string, mode: RenderIsolationMode) {
@@ -6840,10 +6851,11 @@ export class Haruki3DEngine {
     });
 
     for (const mesh of targets) {
-      const sourceMaterialKind = getOutlineSourceMaterialKind(mesh);
-      if (shouldSkipOutlineMaterialKind(sourceMaterialKind)) {
+      const sourceMaterialKinds = getOutlineSourceMaterialKinds(mesh);
+      if (shouldSkipOutlineMaterialKinds(sourceMaterialKinds)) {
         continue;
       }
+      const sourceMaterialKind = chooseOutlineSourceMaterialKind(sourceMaterialKinds);
 
       const vertexColorRedMax = getVertexColorRedMax(mesh.geometry);
       if (vertexColorRedMax !== null && vertexColorRedMax <= 0.01) {
@@ -6883,6 +6895,7 @@ export class Haruki3DEngine {
         meshName: mesh.name,
         outlineName: outline.name,
         sourceMaterialKind,
+        sourceMaterialKinds,
         sourceMaterialNames,
         hasVertexColor: Boolean(mesh.geometry.getAttribute("color")),
         vertexColorRedMax,

@@ -210,9 +210,13 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
     "utf8"
   );
 
-  assert.ok(engineSource.includes("function shouldSkipOutlineMaterialKind"));
+  assert.ok(engineSource.includes("function shouldSkipOutlineMaterialKinds"));
+  assert.ok(engineSource.includes("function getOutlineSourceMaterialKinds"));
+  assert.ok(engineSource.includes("function chooseOutlineSourceMaterialKind"));
   assert.ok(!engineSource.includes('return kind === "accessory" || isFaceLayerMaterialKind(kind);'));
   assert.ok(!engineSource.includes("function getSekaiOutlineProfile"));
+  assert.match(engineSource, /return kinds\.length > 0 && kinds\.every\(isFaceLayerMaterialKind\);/);
+  assert.match(engineSource, /return kinds\.find\(\(kind\) => !isFaceLayerMaterialKind\(kind\)\) \?\? kinds\[0\] \?\? null;/);
   assert.ok(engineSource.includes('material.name = "pjsk_shell_outline";'));
   assert.ok(engineSource.includes("transparent: false"));
   assert.ok(engineSource.includes("depthWrite: true"));
