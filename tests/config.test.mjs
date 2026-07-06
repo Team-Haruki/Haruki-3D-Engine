@@ -188,9 +188,20 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
   assert.ok(loaderSource.includes("parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}"));
   assert.ok(loaderSource.includes("parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.json"));
   assert.ok(loaderSource.includes("ensureCompatibilityForSelection"));
+  assert.ok(loaderSource.includes("findRegistryEntry(entry.characterId, \"head_optional\", entry.headCostume3dId, entry.unit)"));
   assert.ok(wardrobeSource.includes("ensureCompatibility?: (selection: CustomPartSelection) => Promise<void>;"));
   assert.ok(captureHarnessSource.includes("captureRuntimePackageRoleId"));
   assert.ok(captureHarnessSource.includes("roleId,"));
+});
+
+test("runtime part composer treats head_optional rows as official preset heads", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.ok(composerSource.includes("function hasLoadedHeadPart"));
+  assert.ok(composerSource.includes('hasLoadedPart(partSet, characterId, unit, "head_optional", costume3dId)'));
 });
 
 test("capture runtime accepts part-registry role capture options", () => {

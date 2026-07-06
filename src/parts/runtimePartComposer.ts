@@ -347,7 +347,7 @@ export function getDefaultCustomSelection(partSet: PartPackageSet): CustomPartSe
   const preset = partSet.characterIndex.find((entry) =>
     hasCompletePresetParts(entry) &&
     hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "body", entry.bodyCostume3dId) &&
-    hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "head", entry.headCostume3dId) &&
+    hasLoadedHeadPart(partSet, entry.characterId, entry.unit ?? null, entry.headCostume3dId) &&
     hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "hair", entry.hairCostume3dId) &&
     (
       !entry.headOptionalCostume3dId ||
@@ -473,7 +473,11 @@ function findFirstLoadedPart(
 }
 
 function findFirstCompatibleLoadedHeadHair(partSet: PartPackageSet, characterId: number, unit: string | null) {
-  const heads = listSelectableParts(partSet, characterId, "head", { unit, loadedOnly: true });
+  const heads = [
+    ...listSelectableParts(partSet, characterId, "head", { unit, loadedOnly: true }),
+    ...listSelectableParts(partSet, characterId, "head_optional", { unit, loadedOnly: true })
+      .filter((entry) => !isEmptyHeadOptionalEntry(entry)),
+  ].sort((left, right) => left.costume3dId - right.costume3dId);
   const hairs = listSelectableParts(partSet, characterId, "hair", { unit, loadedOnly: true });
   for (const head of heads) {
     for (const hair of hairs) {
@@ -505,6 +509,16 @@ function hasLoadedPart(
 ) {
   const entry = findRegistryPart(partSet, characterId, unit, partType, costume3dId);
   return Boolean(entry && (isEmptyHeadOptionalEntry(entry) || partSet.packages.has(entry.packagePath)));
+}
+
+function hasLoadedHeadPart(
+  partSet: PartPackageSet,
+  characterId: number,
+  unit: string | null | undefined,
+  costume3dId: number
+) {
+  return hasLoadedPart(partSet, characterId, unit, "head", costume3dId) ||
+    hasLoadedPart(partSet, characterId, unit, "head_optional", costume3dId);
 }
 
 function hasCompletePresetParts(entry: Character3dIndexEntry): entry is Character3dIndexEntry & {
