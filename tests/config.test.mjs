@@ -204,6 +204,37 @@ test("runtime part composer treats head_optional rows as official preset heads",
   assert.ok(composerSource.includes('hasLoadedPart(partSet, characterId, unit, "head_optional", costume3dId)'));
 });
 
+test("engine outline shell follows the documented SekaiOutline render state", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.ok(engineSource.includes("function shouldSkipOutlineMaterialKind"));
+  assert.ok(!engineSource.includes('return kind === "accessory" || isFaceLayerMaterialKind(kind);'));
+  assert.ok(!engineSource.includes("function getSekaiOutlineProfile"));
+  assert.ok(engineSource.includes('material.name = "pjsk_shell_outline";'));
+  assert.ok(engineSource.includes("transparent: false"));
+  assert.ok(engineSource.includes("depthWrite: true"));
+  assert.ok(engineSource.includes("blending: THREE.NoBlending"));
+  assert.ok(engineSource.includes("shader.uniforms.uOutlineBaseWidth = { value: sourceOutlineWidth };"));
+  assert.ok(engineSource.includes("float outlineScale = outlineMask <= 0.01 ? 0.0 : outlineMask;"));
+});
+
+test("engine head material render order follows documented Sekai render queues", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /case "face_sdf":\s+case "face":\s+case "accessory":\s+case "body":\s+case "eyelight":\s+return 2000;/s);
+  assert.match(engineSource, /case "eyelash":\s+case "eyebrow":\s+return 2001;/s);
+  assert.match(engineSource, /case "eye":\s+return 2002;/);
+  assert.match(engineSource, /case "hair":\s+return 2451;/);
+  assert.match(engineSource, /case "eye_through_hair":\s+return 2452;/);
+  assert.match(engineSource, /case "eyelight_through_hair":\s+return 2455;/);
+});
+
 test("capture runtime accepts part-registry role capture options", () => {
   const options = parseArgs([
     "--input", "/tmp/input",

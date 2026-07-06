@@ -1166,20 +1166,7 @@ function getOutlineSourceMaterialKind(mesh: THREE.Mesh) {
 }
 
 function shouldSkipOutlineMaterialKind(kind: unknown) {
-  return kind === "accessory" || isFaceLayerMaterialKind(kind);
-}
-
-function getSekaiOutlineProfile(kind: unknown) {
-  if (kind === "hair") {
-    return { widthScale: 0.14, opacity: 0.36, minMaskScale: 0.18 };
-  }
-  if (kind === "face_sdf") {
-    return { widthScale: 0.24, opacity: 0.40, minMaskScale: 0.28 };
-  }
-  if (kind === "body") {
-    return { widthScale: 0.58, opacity: 0.44, minMaskScale: 0.42 };
-  }
-  return { widthScale: 0.92, opacity: 0.42, minMaskScale: 0.32 };
+  return isFaceLayerMaterialKind(kind);
 }
 
 function isOutlineHiddenByIsolation(kind: string, mode: RenderIsolationMode) {
@@ -1199,23 +1186,21 @@ function isOutlineHiddenByIsolation(kind: string, mode: RenderIsolationMode) {
 function createSekaiOutlineMaterial(
   useVertexColor: boolean,
   lighting?: MaterialLightingSettings,
-  materialKind?: unknown,
   useSecondNormal = false
 ) {
   const sourceOutlineWidth = lighting?.outlineWidth && lighting.outlineWidth > 0
     ? lighting.outlineWidth
     : 0.001;
-  const profile = getSekaiOutlineProfile(materialKind);
   const outlineClipOffset = THREE.MathUtils.clamp(lighting?.outlineOffset ?? 0, 0, 20) * 0.00008;
-  const outlineOpacity = profile.opacity;
   const outlineColor = new THREE.Color("#000000");
   const material = new THREE.MeshBasicMaterial({
     color: outlineColor,
     side: THREE.BackSide,
-    transparent: true,
-    opacity: outlineOpacity,
-    depthWrite: false,
+    transparent: false,
+    opacity: 1,
+    depthWrite: true,
     depthTest: true,
+    blending: THREE.NoBlending,
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
@@ -1223,11 +1208,10 @@ function createSekaiOutlineMaterial(
   });
   material.name = "pjsk_shell_outline";
   material.userData.pjskBaseOutlineColor = `#${outlineColor.getHexString()}`;
-  material.userData.pjskBaseOutlineOpacity = outlineOpacity;
+  material.userData.pjskBaseOutlineOpacity = 1;
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uOutlineBaseWidth = { value: sourceOutlineWidth * profile.widthScale };
+    shader.uniforms.uOutlineBaseWidth = { value: sourceOutlineWidth };
     shader.uniforms.uOutlineDistanceScaleReference = { value: 0.255 };
-    shader.uniforms.uOutlineMinMaskScale = { value: profile.minMaskScale };
     shader.uniforms.uOutlineClipOffset = { value: outlineClipOffset };
     shader.vertexShader = shader.vertexShader.replace(
       "#include <common>",
@@ -1236,7 +1220,6 @@ function createSekaiOutlineMaterial(
         "varying float vOutlineMask;",
         "uniform float uOutlineBaseWidth;",
         "uniform float uOutlineDistanceScaleReference;",
-        "uniform float uOutlineMinMaskScale;",
         "uniform float uOutlineClipOffset;",
         useSecondNormal ? "attribute vec4 tangent;" : "",
       ].join("\n")
@@ -1259,7 +1242,7 @@ function createSekaiOutlineMaterial(
         "#ifdef USE_COLOR",
         "float outlineMask = clamp(color.r, 0.0, 1.0);",
         "vOutlineMask = outlineMask;",
-        "float outlineScale = outlineMask <= 0.01 ? 0.0 : mix(uOutlineMinMaskScale, 1.0, outlineMask);",
+        "float outlineScale = outlineMask <= 0.01 ? 0.0 : outlineMask;",
         "#else",
         "float outlineScale = 1.0;",
         "vOutlineMask = 1.0;",
@@ -1762,33 +1745,33 @@ function getHeadLayerRenderOrder(kind: string) {
   switch (kind) {
     case "face_sdf":
     case "face":
-      return 10;
-    case "eye_stencil_prepass":
-      return 11;
-    case "eyelash_stencil_prepass":
-      return 11.1;
-    case "eyebrow_stencil_prepass":
-      return 11.2;
     case "accessory":
-    case "hair":
-      return 12;
-    case "eye":
-      return 20;
+    case "body":
+    case "eyelight":
+      return 2000;
+    case "eye_stencil_prepass":
+      return 2001;
+    case "eyelash_stencil_prepass":
+      return 2001.1;
+    case "eyebrow_stencil_prepass":
+      return 2001.2;
     case "eyelash":
     case "eyebrow":
-      return 24;
+      return 2001;
+    case "eye":
+      return 2002;
+    case "hair":
+      return 2451;
     case "eye_through_hair":
-      return 30;
+      return 2452;
     case "eyelash_through_hair":
-      return 31;
+      return 2453;
     case "eyebrow_through_hair":
-      return 32;
-    case "eyelight":
-      return 33;
+      return 2454;
     case "eyelight_through_hair":
-      return 34;
+      return 2455;
     default:
-      return 0;
+      return 2000;
   }
 }
 
@@ -6878,7 +6861,6 @@ export class Haruki3DEngine {
       const outlineMaterial = createSekaiOutlineMaterial(
         Boolean(mesh.geometry.getAttribute("color")),
         lighting,
-        sourceMaterialKind,
         useSecondNormal
       );
       this.applyLightControllerOutlineMaterial(outlineMaterial);
