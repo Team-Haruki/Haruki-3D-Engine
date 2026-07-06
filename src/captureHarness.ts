@@ -140,6 +140,7 @@ function readProjectedShadowSettings(params: URLSearchParams): ProjectedShadowSe
     adjustShadow: readOptionalBoolean(params.get("projectedShadowAdjust")),
     adjustAlpha: readOptionalBoolean(params.get("projectedShadowAdjustAlpha")),
     invisibleHeight: readOptionalNumber(params.get("projectedShadowInvisibleHeight")),
+    directionalShadow: readOptionalBoolean(params.get("projectedShadowDirectional")),
   };
 }
 

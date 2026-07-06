@@ -210,6 +210,7 @@ function validateCaptureRequest(input) {
       adjustShadow: readBool("adjustShadow", defaultProjectedShadow.adjustShadow),
       adjustAlpha: readBool("adjustAlpha", defaultProjectedShadow.adjustAlpha),
       invisibleHeight: readNumber("invisibleHeight", defaultProjectedShadow.invisibleHeight, 0.001),
+      directionalShadow: readBool("directionalShadow", defaultProjectedShadow.directionalShadow),
     };
   };
   const readTtlMs = (value) => {
@@ -643,6 +644,7 @@ class CaptureRuntimeSession {
       projectedShadowAdjust: defaultProjectedShadow.adjustShadow ? "true" : "false",
       projectedShadowAdjustAlpha: defaultProjectedShadow.adjustAlpha ? "true" : "false",
       projectedShadowInvisibleHeight: String(defaultProjectedShadow.invisibleHeight),
+      projectedShadowDirectional: defaultProjectedShadow.directionalShadow ? "true" : "false",
     });
     const pageUrl = `http://127.0.0.1:${port}/capture.html?${pageParams.toString()}`;
     this.chromium = spawn(chromiumPath, [

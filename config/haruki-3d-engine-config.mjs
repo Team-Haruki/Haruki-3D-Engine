@@ -11,7 +11,8 @@ export const defaultProjectedShadowSettings = {
   floorY: 0,
   adjustShadow: false,
   adjustAlpha: true,
-  invisibleHeight: 1.65,
+  invisibleHeight: 0.2,
+  directionalShadow: false,
 };
 
 export function loadEngineConfig(configPath = defaultEngineConfigPath) {
@@ -190,6 +191,8 @@ function projectedShadowSettings(capture, env = {}, override = undefined) {
       optionalNumber(input.invisibleHeight, env.HARUKI_CAPTURE_PROJECTED_SHADOW_INVISIBLE_HEIGHT, config.invisibleHeight, defaultProjectedShadowSettings.invisibleHeight),
       0.001
     ),
+    directionalShadow: boolValue(input.directionalShadow, env.HARUKI_CAPTURE_PROJECTED_SHADOW_DIRECTIONAL, config.directionalShadow) ??
+      defaultProjectedShadowSettings.directionalShadow,
   };
 }
 

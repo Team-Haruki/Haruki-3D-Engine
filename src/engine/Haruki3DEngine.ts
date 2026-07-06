@@ -82,6 +82,10 @@ const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = {
   zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
   zoomMoveValue: 0,
 } as const;
+const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR = 2.0;
+const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR = 6.0;
+const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE = 0.01 / 0.255;
+const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE = 0.6 / 0.255;
 const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
 const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(-15, 50, 0);
 const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
@@ -119,8 +123,10 @@ const EYELASH_THROUGH_HAIR_ALPHA = 0.55;
 const EYELASH_THROUGH_HAIR_ALPHA_CUTOFF = 0.25;
 const EYEBROW_THROUGH_HAIR_ALPHA = 0.55;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
-const PROJECTED_SHADOW_FLOOR_BIAS = 0.003;
-const CROSS_SHADOW_HEIGHT_LIMIT = 1.65;
+const PROJECTED_SHADOW_BONE_NAMES = ["Left_Toe", "Right_Toe"] as const;
+const PROJECTED_CROSS_SHADOW_OFFSET_FLOOR = 0.015;
+const PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR = 0.01;
+const PROJECTED_SHADOW_INVISIBLE_HEIGHT = 0.2;
 
 export type ProjectedShadowSettings = {
   width: number;
@@ -132,6 +138,7 @@ export type ProjectedShadowSettings = {
   adjustShadow: boolean;
   adjustAlpha: boolean;
   invisibleHeight: number;
+  directionalShadow: boolean;
 };
 
 export type ProjectedShadowSettingsInput = Partial<ProjectedShadowSettings>;
@@ -145,7 +152,8 @@ export const defaultProjectedShadowSettings: ProjectedShadowSettings = {
   floorY: 0,
   adjustShadow: false,
   adjustAlpha: true,
-  invisibleHeight: CROSS_SHADOW_HEIGHT_LIMIT,
+  invisibleHeight: PROJECTED_SHADOW_INVISIBLE_HEIGHT,
+  directionalShadow: false,
 };
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
@@ -470,6 +478,7 @@ export type RuntimeProjectedShadowDebug = {
   characterHeight: number;
   settings: ProjectedShadowSettings;
   targetPosition: { x: number; y: number; z: number };
+  targetPositions: Array<{ x: number; y: number; z: number }>;
   directional: {
     position: { x: number; y: number; z: number };
     forward: { x: number; y: number; z: number };
@@ -498,6 +507,7 @@ export type RuntimeDebugSnapshot = {
     materialKey: string;
     materialName?: string;
     materialKind?: string;
+    isAccessory?: boolean;
     valueTex?: string;
   }>;
   headMorphs: RuntimeHeadMorphDebug[];
@@ -1202,6 +1212,8 @@ function createSekaiOutlineMaterial(
   const sourceOutlineWidth = lighting?.outlineWidth && lighting.outlineWidth > 0
     ? lighting.outlineWidth
     : 0.001;
+  const outlineWidthMin = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE;
+  const outlineWidthMax = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE;
   const outlineClipOffset = THREE.MathUtils.clamp(lighting?.outlineOffset ?? 0, 0, 20) * 0.00008;
   const outlineColor = new THREE.Color("#000000");
   const material = new THREE.MeshBasicMaterial({
@@ -1221,16 +1233,23 @@ function createSekaiOutlineMaterial(
   material.userData.pjskBaseOutlineColor = `#${outlineColor.getHexString()}`;
   material.userData.pjskBaseOutlineOpacity = 1;
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.uOutlineBaseWidth = { value: sourceOutlineWidth };
-    shader.uniforms.uOutlineDistanceScaleReference = { value: 0.255 };
+    shader.uniforms.uSekaiOutlineWidth = {
+      value: new THREE.Vector2(outlineWidthMin, outlineWidthMax),
+    };
+    shader.uniforms.uSekaiOutlineFactor = {
+      value: new THREE.Vector3(
+        SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR,
+        1 / (SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR - SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR),
+        COSTUME_SHOP_CAMERA.fov / COSTUME_SHOP_CAMERA.fov
+      ),
+    };
     shader.uniforms.uOutlineClipOffset = { value: outlineClipOffset };
     shader.vertexShader = shader.vertexShader.replace(
       "#include <common>",
       [
         "#include <common>",
-        "varying float vOutlineMask;",
-        "uniform float uOutlineBaseWidth;",
-        "uniform float uOutlineDistanceScaleReference;",
+        "uniform vec2 uSekaiOutlineWidth;",
+        "uniform vec3 uSekaiOutlineFactor;",
         "uniform float uOutlineClipOffset;",
         useSecondNormal ? "attribute vec4 tangent;" : "",
       ].join("\n")
@@ -1240,23 +1259,17 @@ function createSekaiOutlineMaterial(
       [
         "#include <begin_vertex>",
         "vec4 outlineViewPosition = modelViewMatrix * vec4(position, 1.0);",
-        "float outlineFovDistance = (2.41400003 / projectionMatrix[1][1]) * max(-outlineViewPosition.z, 0.001);",
-        "float outlineNearMix = smoothstep(0.001, 2.0, outlineFovDistance);",
-        "float outlineFarMix = smoothstep(2.0, 6.0, outlineFovDistance);",
-        "float outlineDistanceScale = outlineFovDistance < 2.0",
-        "  ? mix(0.01, 0.245, outlineNearMix)",
-        "  : mix(0.245, 0.6, outlineFarMix);",
-        "float outlineWidth = uOutlineBaseWidth * outlineDistanceScale / max(uOutlineDistanceScaleReference, 0.001);",
+        "float outlineFovDistance = (2.41400003 / projectionMatrix[1][1]) * max(-outlineViewPosition.z, 0.001) * uSekaiOutlineFactor.z;",
+        "float distanceFovFactor = clamp((outlineFovDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);",
+        "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);",
         useSecondNormal
           ? "vec3 outlineDirection = normalize(tangent.xyz);"
           : "vec3 outlineDirection = objectNormal;",
         "#ifdef USE_COLOR",
         "float outlineMask = clamp(color.r, 0.0, 1.0);",
-        "vOutlineMask = outlineMask;",
-        "float outlineScale = outlineMask <= 0.01 ? 0.0 : outlineMask;",
+        "float outlineScale = outlineMask;",
         "#else",
         "float outlineScale = 1.0;",
-        "vOutlineMask = 1.0;",
         "#endif",
         "transformed += outlineDirection * outlineWidth * outlineScale;",
       ].join("\n")
@@ -1266,20 +1279,6 @@ function createSekaiOutlineMaterial(
       [
         "#include <project_vertex>",
         "gl_Position.z += gl_Position.w * uOutlineClipOffset;",
-      ].join("\n")
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <common>",
-      [
-        "#include <common>",
-        "varying float vOutlineMask;",
-      ].join("\n")
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <clipping_planes_fragment>",
-      [
-        "#include <clipping_planes_fragment>",
-        "if (vOutlineMask <= 0.01) discard;",
       ].join("\n")
     );
     shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", "");
@@ -1608,6 +1607,9 @@ function cloneBodyShaderMaterial(
     specularPower: params.lighting?.specularPower ?? source.uniforms.uSpecularPower.value,
     rimThreshold: params.lighting?.rimThreshold ?? source.uniforms.uRimThreshold.value,
     shadowTexWeight: params.lighting?.shadowTexWeight ?? source.uniforms.uShadowTexWeight.value,
+    fadeMode: params.lighting?.fadeMode ?? source.uniforms.uFadeMode?.value ?? 0,
+    hueSinAngle: params.lighting?.hueSinAngle ?? source.uniforms.uHueSinAngle?.value ?? 0,
+    hueCosAngle: params.lighting?.hueCosAngle ?? source.uniforms.uHueCosAngle?.value ?? 1,
     shadowWidth: params.lighting?.shadowWidth ?? source.uniforms.uShadowWidth.value,
     shadowWidthOverride:
       params.shadowWidthOverride ??
@@ -1628,6 +1630,8 @@ function cloneBodyShaderMaterial(
       params.headPosition ??
       source.uniforms.uHeadPosition?.value.clone(),
     saturation: params.lighting?.saturation ?? source.uniforms.uSaturation.value,
+    value: params.lighting?.value ?? source.uniforms.uValue?.value ?? 0.5,
+    contrast: params.lighting?.contrast ?? source.uniforms.uContrast?.value ?? 0.5,
     partsAmbientColor:
       params.lighting?.partsAmbientColor ??
       `#${source.uniforms.uPartsAmbientColor.value.getHexString()}`,
@@ -3916,10 +3920,20 @@ function createProjectedShadowTexture(size = 128) {
 }
 
 type CharacterProjectedShadowUpdate = {
-  targetWorldPosition: THREE.Vector3;
+  targetWorldPositions: THREE.Vector3[];
   lightWorldPosition: THREE.Vector3 | null;
   characterHeight: number;
   visible: boolean;
+};
+
+type ProjectedShadowPair = {
+  targetWorldPosition: THREE.Vector3;
+  initialToeHeight: number | null;
+  directionalAnchor: THREE.Group;
+  crossAnchor: THREE.Group;
+  directionalMaterial: THREE.MeshBasicMaterial;
+  crossMaterial: THREE.MeshBasicMaterial;
+  directionalAlpha: number;
 };
 
 function normalizeProjectedShadowSettings(
@@ -3940,6 +3954,7 @@ function normalizeProjectedShadowSettings(
     adjustShadow: input.adjustShadow ?? base.adjustShadow,
     adjustAlpha: input.adjustAlpha ?? base.adjustAlpha,
     invisibleHeight: positive(input.invisibleHeight, base.invisibleHeight, 0.001),
+    directionalShadow: input.directionalShadow ?? base.directionalShadow,
   };
 }
 
@@ -3947,117 +3962,129 @@ class CharacterProjectedShadowController {
   readonly group = new THREE.Group();
 
   private readonly defaultDirection = new THREE.Vector3(-0.35, 0, 0.94).normalize();
-  private readonly directionalAnchor = new THREE.Group();
-  private readonly crossAnchor = new THREE.Group();
-  private readonly directionalMaterial: THREE.MeshBasicMaterial;
-  private readonly crossMaterial: THREE.MeshBasicMaterial;
   private settings = { ...defaultProjectedShadowSettings };
-  private readonly targetWorldPosition = new THREE.Vector3();
-  private directionalAlpha = defaultProjectedShadowSettings.opacity;
+  private readonly pairs: ProjectedShadowPair[] = [];
 
   constructor() {
     const shadowTexture = createProjectedShadowTexture();
-    const directionalGeometry = new THREE.PlaneGeometry(1, 1);
-    const crossGeometry = new THREE.PlaneGeometry(1, 1);
-    this.directionalMaterial = new THREE.MeshBasicMaterial({
-      color: "#000000",
-      map: shadowTexture,
-      transparent: true,
-      opacity: this.settings.opacity,
-      depthWrite: false,
-      depthTest: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      side: THREE.DoubleSide,
-    });
-    this.crossMaterial = new THREE.MeshBasicMaterial({
-      color: "#000000",
-      map: shadowTexture,
-      transparent: true,
-      opacity: this.settings.crossOpacity,
-      depthWrite: false,
-      depthTest: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      side: THREE.DoubleSide,
-    });
+    for (const boneName of PROJECTED_SHADOW_BONE_NAMES) {
+      const directionalMaterial = this.createShadowMaterial(shadowTexture, this.settings.opacity);
+      const crossMaterial = this.createShadowMaterial(shadowTexture, this.settings.crossOpacity);
+      const directionalAnchor = new THREE.Group();
+      const crossAnchor = new THREE.Group();
 
-    const directionalMesh = new THREE.Mesh(directionalGeometry, this.directionalMaterial);
-    directionalMesh.name = "CharacterDirectionalShadow";
-    directionalMesh.rotation.x = -Math.PI / 2;
-    directionalMesh.renderOrder = -100;
-    directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
-    this.directionalAnchor.add(directionalMesh);
+      const directionalMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), directionalMaterial);
+      directionalMesh.name = `CharacterDirectionalShadow_${boneName}`;
+      directionalMesh.rotation.x = -Math.PI / 2;
+      directionalMesh.renderOrder = -100;
+      directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
+      directionalAnchor.add(directionalMesh);
 
-    const crossMesh = new THREE.Mesh(crossGeometry, this.crossMaterial);
-    crossMesh.name = "CharacterCrossShadow";
-    crossMesh.rotation.x = -Math.PI / 2;
-    crossMesh.renderOrder = -99;
-    crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
-    this.crossAnchor.add(crossMesh);
+      const crossMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), crossMaterial);
+      crossMesh.name = `CharacterCrossShadow_${boneName}`;
+      crossMesh.rotation.x = -Math.PI / 2;
+      crossMesh.renderOrder = -99;
+      crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
+      crossAnchor.add(crossMesh);
+
+      directionalAnchor.visible = this.settings.directionalShadow;
+      crossAnchor.visible = !this.settings.directionalShadow;
+      this.group.add(directionalAnchor);
+      this.group.add(crossAnchor);
+      this.pairs.push({
+        targetWorldPosition: new THREE.Vector3(),
+        initialToeHeight: null,
+        directionalAnchor,
+        crossAnchor,
+        directionalMaterial,
+        crossMaterial,
+        directionalAlpha: this.settings.opacity,
+      });
+    }
 
     this.group.name = "CharacterProjectedShadow";
-    this.group.add(this.directionalAnchor);
-    this.group.add(this.crossAnchor);
     this.group.visible = false;
+  }
+
+  private createShadowMaterial(shadowTexture: THREE.Texture, opacity: number) {
+    return new THREE.MeshBasicMaterial({
+      color: "#000000",
+      map: shadowTexture,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      depthTest: true,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      side: THREE.DoubleSide,
+    });
   }
 
   setSettings(input: ProjectedShadowSettingsInput = {}) {
     this.settings = normalizeProjectedShadowSettings(input, this.settings);
-    const directionalMesh = this.directionalAnchor.children[0];
-    if (directionalMesh) {
-      directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
-    }
-    const crossMesh = this.crossAnchor.children[0];
-    if (crossMesh) {
-      crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
+    for (const pair of this.pairs) {
+      const directionalMesh = pair.directionalAnchor.children[0];
+      if (directionalMesh) {
+        directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
+      }
+      const crossMesh = pair.crossAnchor.children[0];
+      if (crossMesh) {
+        crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
+      }
+      pair.directionalAnchor.visible = this.settings.directionalShadow;
+      pair.crossAnchor.visible = !this.settings.directionalShadow;
     }
   }
 
   update(state: CharacterProjectedShadowUpdate) {
-    this.group.visible = state.visible;
-    this.targetWorldPosition.copy(state.targetWorldPosition);
-    if (!state.visible) {
+    const targets = state.targetWorldPositions;
+    this.group.visible = state.visible && targets.length > 0;
+    if (!this.group.visible) {
+      for (const pair of this.pairs) {
+        pair.initialToeHeight = null;
+        pair.targetWorldPosition.set(0, 0, 0);
+      }
       return;
     }
 
-    const direction = this.resolveDirectionalShadowDirection(
-      state.targetWorldPosition,
-      state.lightWorldPosition
-    );
-    const effectiveHeight = Math.max(0.001, state.characterHeight);
-    const heightRatio = (state.targetWorldPosition.y - this.settings.floorY) / effectiveHeight;
-    const distanceToFloor = this.settings.height * heightRatio;
-    const directionalX = state.targetWorldPosition.x + direction.x * distanceToFloor;
-    const directionalZ = state.targetWorldPosition.z + direction.z * distanceToFloor;
-    this.directionalAnchor.position.set(
-      this.settings.adjustShadow ? state.targetWorldPosition.x : directionalX,
-      this.settings.floorY + PROJECTED_SHADOW_FLOOR_BIAS,
-      this.settings.adjustShadow ? state.targetWorldPosition.z : directionalZ
-    );
-    this.directionalAnchor.rotation.y = Math.atan2(direction.x, direction.z);
-    this.directionalAlpha = this.calculateShadowAlpha(state.targetWorldPosition.y);
-    this.directionalMaterial.opacity = this.directionalAlpha;
+    for (const [index, pair] of this.pairs.entries()) {
+      const target = targets[Math.min(index, targets.length - 1)];
+      pair.targetWorldPosition.copy(target);
+      pair.initialToeHeight ??= target.y;
+      pair.directionalAnchor.visible = this.settings.directionalShadow;
+      pair.crossAnchor.visible = !this.settings.directionalShadow;
 
-    const crossHeightRatio =
-      (state.targetWorldPosition.y - this.settings.floorY) / this.settings.invisibleHeight;
-    const crossAlpha =
-      crossHeightRatio < 0
-        ? 1
-        : 1 - Math.min(crossHeightRatio, 1);
-    this.crossAnchor.position.set(
-      state.targetWorldPosition.x,
-      this.settings.floorY + PROJECTED_SHADOW_FLOOR_BIAS * 1.5,
-      state.targetWorldPosition.z
-    );
-    this.crossMaterial.opacity = this.settings.crossOpacity * crossAlpha;
+      const direction = this.resolveDirectionalShadowDirection(target, state.lightWorldPosition);
+      const effectiveHeight = Math.max(0.001, state.characterHeight);
+      const heightRatio = (target.y - this.settings.floorY) / effectiveHeight;
+      const distanceToFloor = this.settings.height * heightRatio;
+      const directionalX = target.x + direction.x * distanceToFloor;
+      const directionalZ = target.z + direction.z * distanceToFloor;
+      pair.directionalAnchor.position.set(
+        this.settings.adjustShadow ? target.x : directionalX,
+        this.settings.floorY + PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR,
+        this.settings.adjustShadow ? target.z : directionalZ
+      );
+      pair.directionalAnchor.rotation.y = Math.atan2(direction.x, direction.z);
+      pair.directionalAlpha = this.calculateDirectionalShadowAlpha(pair, target.y);
+      pair.directionalMaterial.opacity = pair.directionalAlpha;
+
+      const crossHeightRatio = (target.y - this.settings.floorY) / this.settings.invisibleHeight;
+      const crossAlpha = crossHeightRatio < 0 ? 1 : 1 - Math.min(crossHeightRatio, 1);
+      pair.crossAnchor.position.set(
+        target.x,
+        this.settings.floorY + PROJECTED_CROSS_SHADOW_OFFSET_FLOOR,
+        target.z
+      );
+      pair.crossMaterial.opacity = this.settings.crossOpacity * crossAlpha;
+    }
   }
 
-  private calculateShadowAlpha(targetY: number) {
+  private calculateDirectionalShadowAlpha(pair: ProjectedShadowPair, targetY: number) {
     if (!this.settings.adjustAlpha) {
       return this.settings.opacity;
     }
-    const t = (targetY - this.settings.floorY) / this.settings.invisibleHeight;
+    const t = (targetY - (pair.initialToeHeight ?? this.settings.floorY)) / this.settings.invisibleHeight;
     const factor = t < 0 ? 1 : 1 - Math.min(t, 1);
     return this.settings.opacity * factor;
   }
@@ -4083,36 +4110,41 @@ class CharacterProjectedShadowController {
   getDebugSnapshot(
     characterHeight: number
   ): RuntimeProjectedShadowDebug {
-    this.directionalAnchor.updateMatrixWorld(true);
-    this.crossAnchor.updateMatrixWorld(true);
+    const pair = this.pairs[0];
+    pair.directionalAnchor.updateMatrixWorld(true);
+    pair.crossAnchor.updateMatrixWorld(true);
     const directionalForward = new THREE.Vector3(0, 0, 1)
-      .applyQuaternion(this.directionalAnchor.getWorldQuaternion(new THREE.Quaternion()))
+      .applyQuaternion(pair.directionalAnchor.getWorldQuaternion(new THREE.Quaternion()))
       .normalize();
+    const targetPosition = this.pairs
+      .reduce((sum, current) => sum.add(current.targetWorldPosition), new THREE.Vector3())
+      .multiplyScalar(1 / Math.max(this.pairs.length, 1));
     return {
       visible: this.group.visible,
       floorY: Number(this.settings.floorY.toFixed(4)),
       characterHeight: Number(characterHeight.toFixed(4)),
       settings: { ...this.settings },
-      targetPosition: vectorDebugSnapshot(this.targetWorldPosition),
+      targetPosition: vectorDebugSnapshot(targetPosition),
+      targetPositions: this.pairs.map((current) => vectorDebugSnapshot(current.targetWorldPosition)),
       directional: {
-        position: vectorDebugSnapshot(this.directionalAnchor.position),
+        position: vectorDebugSnapshot(pair.directionalAnchor.position),
         forward: vectorDebugSnapshot(directionalForward),
         scale: vectorDebugSnapshot(new THREE.Vector3(
           this.settings.width,
           1,
           this.settings.height
         )),
-        opacity: Number(this.directionalMaterial.opacity.toFixed(4)),
-        alpha: Number(this.directionalAlpha.toFixed(4)),
+        opacity: Number(pair.directionalMaterial.opacity.toFixed(4)),
+        alpha: Number(pair.directionalAlpha.toFixed(4)),
       },
       cross: {
-        position: vectorDebugSnapshot(this.crossAnchor.position),
+        position: vectorDebugSnapshot(pair.crossAnchor.position),
         scale: vectorDebugSnapshot(new THREE.Vector3(
           this.settings.crossSize,
           1,
           this.settings.crossSize
         )),
-        opacity: Number(this.crossMaterial.opacity.toFixed(4)),
+        opacity: Number(pair.crossMaterial.opacity.toFixed(4)),
       },
     };
   }
@@ -5035,6 +5067,7 @@ export class Haruki3DEngine {
         materialKey: slot.materialKey,
         materialName: slot.materialName,
         materialKind: slot.materialKind,
+        isAccessory: slot.isAccessory,
         valueTex: slot.valueTex,
       })) ?? [],
       nativeMeshes: this.lastNativeMeshInstallDiagnostics,
@@ -5432,7 +5465,7 @@ export class Haruki3DEngine {
   private updateProjectedShadows() {
     if (!this.currentBodyAsset) {
       this.projectedShadow.update({
-        targetWorldPosition: new THREE.Vector3(),
+        targetWorldPositions: [],
         lightWorldPosition: null,
         characterHeight: this.characterHeight,
         visible: false,
@@ -5443,16 +5476,23 @@ export class Haruki3DEngine {
     const lightPosition = new THREE.Vector3();
     this.directionalLight.getWorldPosition(lightPosition);
     this.projectedShadow.update({
-      targetWorldPosition: this.resolveProjectedShadowTargetWorldPosition(),
+      targetWorldPositions: this.resolveProjectedShadowTargetWorldPositions(),
       lightWorldPosition: lightPosition,
       characterHeight: this.characterHeight,
       visible: true,
     });
   }
 
-  private resolveProjectedShadowTargetWorldPosition() {
+  private resolveProjectedShadowTargetWorldPositions() {
     const root = this.currentBodyAnimationRoot ?? this.characterRoot;
     root.updateMatrixWorld(true);
+    const toePositions = PROJECTED_SHADOW_BONE_NAMES
+      .map((name) => this.findNodeByImportedName(root, name))
+      .filter((node): node is THREE.Object3D => node !== null)
+      .map((node) => node.getWorldPosition(new THREE.Vector3()));
+    if (toePositions.length > 0) {
+      return toePositions;
+    }
     const candidates = [
       this.findNodeByImportedName(root, "Position"),
       this.findNodeByImportedName(root, "Hip"),
@@ -5463,7 +5503,7 @@ export class Haruki3DEngine {
     const target = candidates.find((node): node is THREE.Object3D => node !== null) ?? root;
     const position = new THREE.Vector3();
     target.getWorldPosition(position);
-    return position;
+    return [position];
   }
 
   getCanvas() {
@@ -7163,6 +7203,7 @@ export class Haruki3DEngine {
       materialKey: string;
       materialName: string | null;
       materialKind: string;
+      isAccessory: boolean;
       mainTex: string | null;
       shadowTex: string | null;
       valueTex: string | null;
@@ -7190,6 +7231,7 @@ export class Haruki3DEngine {
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
       const faceShadowTex = await this.loadTexture(slot.faceShadowTex);
       const kind = normalizeHeadRuntimeMaterialKind(slot.materialKind ?? "face", slot.meshName, slot.materialName);
+      const isAccessory = Boolean(slot.isAccessory) || kind === "accessory";
       const lighting = tuneLightingForPreview(kind, slot.lighting);
       let material: THREE.Material;
       let topLayerMaterial: THREE.Material | null = null;
@@ -7423,11 +7465,13 @@ export class Haruki3DEngine {
       }
       material.userData.pjskLighting = lighting;
       material.userData.pjskMaterialKind = kind;
+      material.userData.pjskIsAccessory = isAccessory;
       material.userData.pjskMaterialKey = slot.materialKey;
       material.userData.pjskMaterialSlotIndex = slot.slotIndex;
       if (topLayerMaterial) {
         topLayerMaterial.userData.pjskLighting = lighting;
         topLayerMaterial.userData.pjskMaterialKind = kind;
+        topLayerMaterial.userData.pjskIsAccessory = isAccessory;
         topLayerMaterial.userData.pjskMaterialKey = slot.materialKey;
         topLayerMaterial.userData.pjskMaterialSlotIndex = slot.slotIndex;
       }
@@ -7437,6 +7481,7 @@ export class Haruki3DEngine {
         materialKey: slot.materialKey,
         materialName: slot.materialName?.toLowerCase() ?? null,
         materialKind: kind,
+        isAccessory,
         mainTex: slot.mainTex ?? null,
         shadowTex: slot.shadowTex ?? null,
         valueTex: slot.valueTex ?? null,

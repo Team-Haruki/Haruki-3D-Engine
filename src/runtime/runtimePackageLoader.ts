@@ -699,6 +699,10 @@ function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function readBoolean(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function readRequiredMaterialIdentity(slot: UnknownRecord, context: string) {
   const materialKey = readString(slot.materialKey ?? slot.MaterialKey);
   const materialFileId = slot.materialFileId ?? slot.MaterialFileId;
@@ -771,7 +775,12 @@ function readMaterialLighting(value: unknown): MaterialLightingSettings {
     specularPower: readNumber(record.specularPower ?? record.SpecularPower, 0),
     rimThreshold: readNumber(record.rimThreshold ?? record.RimThreshold, 0.2),
     shadowTexWeight: readNumber(record.shadowTexWeight ?? record.ShadowTexWeight, 1),
+    fadeMode: readNumber(record.fadeMode ?? record.FadeMode, 0),
+    hueSinAngle: readNumber(record.hueSinAngle ?? record.HueSinAngle, 0),
+    hueCosAngle: readNumber(record.hueCosAngle ?? record.HueCosAngle, 1),
     saturation: readNumber(record.saturation ?? record.Saturation, 0.5),
+    value: readNumber(record.value ?? record.Value, 0.5),
+    contrast: readNumber(record.contrast ?? record.Contrast, 0.5),
     partsAmbientColor: readString(record.partsAmbientColor ?? record.PartsAmbientColor, "#ffffff"),
     reflectionBlendColor: readString(record.reflectionBlendColor ?? record.ReflectionBlendColor, "#ffffff"),
     outlineWidth: readNumber(record.outlineWidth ?? record.OutlineWidth, 0.001),
@@ -1047,6 +1056,7 @@ function applyRuntimeMaterialSlots(
       valueTex: resolveOptionalPath(readString(slot.valueTex ?? slot.ValueTex), resolvePath),
       faceShadowTex: resolveOptionalPath(readString(slot.faceShadowTex ?? slot.FaceShadowTex), resolvePath),
       mode: headAsset.defaultFaceMode,
+      isAccessory: readBoolean(slot.isAccessory ?? slot.IsAccessory) || fallbackMaterialKind === "accessory" || undefined,
       lighting: readMaterialLighting(slot.lighting ?? slot.Lighting),
     };
   };

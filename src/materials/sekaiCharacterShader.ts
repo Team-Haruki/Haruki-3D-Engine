@@ -26,10 +26,15 @@ export type BodyMaterialUniforms = {
   specularPower?: number;
   rimThreshold?: number;
   shadowTexWeight?: number;
+  fadeMode?: number;
+  hueSinAngle?: number;
+  hueCosAngle?: number;
   hairShadowEnabled?: boolean;
   lambertEnabled?: boolean;
   headPosition?: THREE.Vector3;
   saturation?: number;
+  value?: number;
+  contrast?: number;
   partsAmbientColor?: THREE.ColorRepresentation;
   reflectionBlendColor?: THREE.ColorRepresentation;
   globalShadowColor?: THREE.ColorRepresentation;
@@ -98,12 +103,17 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uSpecularPower: { value: initial.specularPower ?? 0 },
       uRimThreshold: { value: initial.rimThreshold ?? 0.2 },
       uShadowTexWeight: { value: initial.shadowTexWeight ?? 1 },
+      uFadeMode: { value: initial.fadeMode ?? 0 },
+      uHueSinAngle: { value: initial.hueSinAngle ?? 0 },
+      uHueCosAngle: { value: initial.hueCosAngle ?? 1 },
       uHairShadowEnabled: { value: initial.hairShadowEnabled ? 1.0 : 0.0 },
       uLambertEnabled: { value: initial.lambertEnabled ? 1.0 : 0.0 },
       uHeadPosition: {
         value: (initial.headPosition ?? new THREE.Vector3()).clone(),
       },
       uSaturation: { value: initial.saturation ?? 0.5 },
+      uValue: { value: initial.value ?? 0.5 },
+      uContrast: { value: initial.contrast ?? 0.5 },
       uSkinTintEnabled: { value: initial.skinTintEnabled === false ? 0.0 : 1.0 },
       uAlphaCutoff: { value: initial.alphaCutoff ?? 0.0 },
     },
@@ -183,10 +193,15 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uniform float uSpecularPower;
       uniform float uRimThreshold;
       uniform float uShadowTexWeight;
+      uniform float uFadeMode;
+      uniform float uHueSinAngle;
+      uniform float uHueCosAngle;
       uniform float uHairShadowEnabled;
       uniform float uLambertEnabled;
       uniform vec3 uHeadPosition;
       uniform float uSaturation;
+      uniform float uValue;
+      uniform float uContrast;
       uniform float uSkinTintEnabled;
       uniform float uAlphaCutoff;
 
@@ -207,6 +222,20 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         float gray = dot(color, vec3(0.299, 0.587, 0.114));
         float amount = clamp(1.055 + (saturation - 0.5) * 0.35, 0.65, 1.35);
         return mix(vec3(gray), color, amount);
+      }
+
+      vec3 applyMaterialHue(vec3 color, float hueSin, float hueCos) {
+        vec3 k = vec3(0.57735027);
+        return color * hueCos + cross(k, color) * hueSin + k * dot(k, color) * (1.0 - hueCos);
+      }
+
+      vec3 applyMaterialHsvc(vec3 color) {
+        color = applyMaterialHue(color, uHueSinAngle, uHueCosAngle);
+        color = applyMaterialSaturation(color, uSaturation);
+        float contrast = max(uContrast * 2.0, 0.0);
+        color = (color - vec3(0.5)) * contrast + vec3(0.5);
+        color += vec3(uValue - 0.5);
+        return color;
       }
 
       float toonBand(float value, float threshold, float width) {
@@ -422,7 +451,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
 
         color *= mix(vec3(1.0), uPartsAmbientColor, 0.06);
         color *= vec3(1.024, 0.998, 0.986);
-        color = applyMaterialSaturation(color, uSaturation);
+        color = applyMaterialHsvc(color);
         gl_FragColor = vec4(outputColor(clamp(color, 0.0, 1.0)), 1.0);
       }
     `,
@@ -498,7 +527,22 @@ export function updateSekaiBodyMaterial(
   material.uniforms.uSpecularPower.value = next.specularPower ?? 0;
   material.uniforms.uRimThreshold.value = next.rimThreshold ?? 0.2;
   material.uniforms.uShadowTexWeight.value = next.shadowTexWeight ?? 1;
-  material.uniforms.uSaturation.value = next.saturation ?? 0.5;
+  if (material.uniforms.uFadeMode) {
+    material.uniforms.uFadeMode.value = next.fadeMode ?? material.uniforms.uFadeMode.value;
+  }
+  if (material.uniforms.uHueSinAngle) {
+    material.uniforms.uHueSinAngle.value = next.hueSinAngle ?? material.uniforms.uHueSinAngle.value;
+  }
+  if (material.uniforms.uHueCosAngle) {
+    material.uniforms.uHueCosAngle.value = next.hueCosAngle ?? material.uniforms.uHueCosAngle.value;
+  }
+  material.uniforms.uSaturation.value = next.saturation ?? material.uniforms.uSaturation.value;
+  if (material.uniforms.uValue) {
+    material.uniforms.uValue.value = next.value ?? material.uniforms.uValue.value;
+  }
+  if (material.uniforms.uContrast) {
+    material.uniforms.uContrast.value = next.contrast ?? material.uniforms.uContrast.value;
+  }
   material.uniforms.uSkinTintEnabled.value = next.skinTintEnabled === false ? 0.0 : 1.0;
 }
 

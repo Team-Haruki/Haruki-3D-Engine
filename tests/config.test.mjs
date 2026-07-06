@@ -38,7 +38,8 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
         floorY: -0.02,
         adjustShadow: true,
         adjustAlpha: false,
-        invisibleHeight: 1.8
+        invisibleHeight: 1.8,
+        directionalShadow: true
       },
       tempTtl: "30m",
       gcInterval: "15m",
@@ -87,6 +88,7 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
     adjustShadow: true,
     adjustAlpha: false,
     invisibleHeight: 1.8,
+    directionalShadow: true,
   });
   assert.equal(server.tempCaptureTtlMs, 30 * 60 * 1000);
   assert.equal(server.captureGCIntervalMs, 15 * 60 * 1000);
@@ -116,6 +118,7 @@ test("capture server accepts projected shadow env overrides", () => {
     HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST: "true",
     HARUKI_CAPTURE_PROJECTED_SHADOW_ADJUST_ALPHA: "false",
     HARUKI_CAPTURE_PROJECTED_SHADOW_INVISIBLE_HEIGHT: "2.1",
+    HARUKI_CAPTURE_PROJECTED_SHADOW_DIRECTIONAL: "true",
   });
 
   assert.deepEqual(server.defaultProjectedShadow, {
@@ -128,6 +131,7 @@ test("capture server accepts projected shadow env overrides", () => {
     adjustShadow: true,
     adjustAlpha: false,
     invisibleHeight: 2.1,
+    directionalShadow: true,
   });
 });
 
@@ -232,8 +236,12 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(engineSource.includes("transparent: false"));
   assert.ok(engineSource.includes("depthWrite: true"));
   assert.ok(engineSource.includes("blending: THREE.NoBlending"));
-  assert.ok(engineSource.includes("shader.uniforms.uOutlineBaseWidth = { value: sourceOutlineWidth };"));
-  assert.ok(engineSource.includes("float outlineScale = outlineMask <= 0.01 ? 0.0 : outlineMask;"));
+  assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineWidth = {"));
+  assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
+  assert.ok(engineSource.includes("float distanceFovFactor = clamp((outlineFovDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
+  assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);"));
+  assert.ok(engineSource.includes("float outlineScale = outlineMask;"));
+  assert.ok(!engineSource.includes("if (vOutlineMask <= 0.01) discard;"));
 });
 
 test("engine head material render order follows documented Sekai render queues", () => {
@@ -552,6 +560,12 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.doesNotMatch(shaderSource, /rangeLimit \* uShadowWeight/);
   assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
   assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /uniform float uFadeMode;/);
+  assert.match(shaderSource, /uniform float uHueSinAngle;/);
+  assert.match(shaderSource, /uniform float uHueCosAngle;/);
+  assert.match(shaderSource, /uniform float uValue;/);
+  assert.match(shaderSource, /uniform float uContrast;/);
+  assert.match(shaderSource, /vec3 applyMaterialHsvc\(vec3 color\)/);
   assert.match(engineSource, /if \(material\.uniforms\.uHeadPosition\) \{\s+material\.uniforms\.uHeadPosition\.value\.copy\(this\.hairHeadPosition\);\s+\}/s);
 });
 
@@ -673,9 +687,33 @@ test("projected character shadows are separate scene objects", () => {
   assert.match(engineSource, /class CharacterProjectedShadowController/);
   assert.match(engineSource, /CharacterDirectionalShadow/);
   assert.match(engineSource, /CharacterCrossShadow/);
+  assert.match(engineSource, /PROJECTED_SHADOW_BONE_NAMES = \["Left_Toe", "Right_Toe"\] as const/);
+  assert.match(engineSource, /PROJECTED_CROSS_SHADOW_OFFSET_FLOOR = 0\.015/);
+  assert.match(engineSource, /PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR = 0\.01/);
+  assert.match(engineSource, /PROJECTED_SHADOW_INVISIBLE_HEIGHT = 0\.2/);
+  assert.match(engineSource, /directionalShadow: false/);
+  assert.match(engineSource, /for \(const boneName of PROJECTED_SHADOW_BONE_NAMES\)/);
+  assert.match(engineSource, /pair\.directionalAnchor\.visible = this\.settings\.directionalShadow/);
+  assert.match(engineSource, /pair\.crossAnchor\.visible = !this\.settings\.directionalShadow/);
   assert.match(engineSource, /this\.scene\.add\(this\.projectedShadow\.group\)/);
   assert.match(engineSource, /distanceToFloor = this\.settings\.height \* heightRatio/);
   assert.match(engineSource, /setProjectedShadowSettings\(settings: ProjectedShadowSettingsInput/);
+});
+
+test("runtime accessory material slots carry the official accessory shader flag", () => {
+  const runtimeLoaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
+    "utf8"
+  );
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(runtimeLoaderSource, /isAccessory: readBoolean\(slot\.isAccessory \?\? slot\.IsAccessory\)/);
+  assert.match(runtimeLoaderSource, /fallbackMaterialKind === "accessory"/);
+  assert.match(engineSource, /const isAccessory = Boolean\(slot\.isAccessory\) \|\| kind === "accessory"/);
+  assert.match(engineSource, /material\.userData\.pjskIsAccessory = isAccessory/);
 });
 
 test("capture runtime parser allows config to replace built-in defaults", () => {

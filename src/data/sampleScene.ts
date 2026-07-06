@@ -97,7 +97,12 @@ export type MaterialLightingSettings = {
   specularPower: number;
   rimThreshold: number;
   shadowTexWeight: number;
+  fadeMode: number;
+  hueSinAngle: number;
+  hueCosAngle: number;
   saturation: number;
+  value: number;
+  contrast: number;
   partsAmbientColor: string;
   reflectionBlendColor: string;
   outlineWidth: number;
@@ -148,6 +153,7 @@ export type FaceMaterialSlot = {
   valueTex?: string;
   faceShadowTex?: string;
   mode: FaceMode;
+  isAccessory?: boolean;
   lighting?: MaterialLightingSettings;
 };
 
