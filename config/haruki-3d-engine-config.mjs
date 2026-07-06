@@ -85,6 +85,11 @@ export function resolveCaptureServerOptions(config, env = process.env) {
       env.HARUKI_CAMERA_PROFILE,
       capture.cameraProfile
     ),
+    defaultFaceSdfEnabled: boolValue(
+      env.HARUKI_CAPTURE_FACE_SDF_ENABLED,
+      env.HARUKI_FACE_SDF_ENABLED,
+      capture.faceSdfEnabled
+    ) ?? false,
     defaultProjectedShadow: projectedShadow,
     tempCaptureTtlMs: durationMsAtLeast(env.HARUKI_CAPTURE_TEMP_TTL, capture.tempTtl, "6h", 0),
     tempCaptureMaxBytes: sizeBytesAtLeast(env.HARUKI_CAPTURE_TEMP_MAX_BYTES, capture.tempMaxBytes, "2.5GB", 0),

@@ -100,8 +100,9 @@ const result = await engine.captureRoleParts(request);
 `captureRoleParts` fixes the capture defaults used by the current pipeline:
 
 - animation: `motion_loop` at phase `0.5`
-- camera: official CostumeShop perspective camera data, defaulting to the max-zoom `"full-body"` profile (`fov=25`, `zoomValue=0.35`, final `y=0.85`, `z=4.5`)
+- camera: official CostumeShop perspective camera data. The default `"full-body"` profile uses max zoom (`fov=25`, `zoomValue=0.35`, final `y=0.85`, `z=4.5`); `"official-default"` uses the decoded startup state (`cameraRootYaw=0`, `zoomValue=0`, `zoomMoveValue=1`, local camera `(0,1.25,2.3)`, local camera Y rotation `180deg`).
 - SpringBone: `unity-prefab`
+- FaceSDF: disabled for 3D previews by default while the face shadow formula remains under validation; pass `faceSdfEnabled: true` only for explicit research/debug captures.
 - output state: capture presentation mode
 
 ## Rendering And Capture
@@ -151,6 +152,7 @@ It writes `/data/captures/<imageId>.png` and serves it back from `GET /captures/
 Use `cacheMode: "temporary"` plus optional `ttlSeconds` for free-form combinations that should not enter the long-lived preview cache; temporary image ids are written with a `tmp_` prefix and are removed by the capture GC after the configured TTL.
 `width` and `height` control the capture framing in CSS pixels. `scale` controls output DPR from `1` to `2`; use `scale: 2` for thumbnails that will be inspected or resized by downstream UI.
 The service keeps one Chromium page and one engine instance warm, so repeated requests do not create per-request browser profile or cache directories. `/healthz` returns `ready` and `restarting` flags for startup and crash-recovery checks.
+FaceSDF is intentionally default-off for product 3D previews. The HTTP server defaults `faceSdfEnabled` to `false` unless `capture.faceSdfEnabled`, `HARUKI_CAPTURE_FACE_SDF_ENABLED`, or a per-request `faceSdfEnabled: true` override is provided.
 
 ## Camera And Background
 
@@ -164,6 +166,7 @@ engine.setPresentationMode("capture");
 ```
 
 Callers can read camera state from snapshots instead of duplicating OrbitControls math.
+Capture camera snapshots include the derived CostumeShop state so callers can verify whether a request used the official startup framing or the max-zoom full-body framing.
 
 ## Debug Snapshots
 

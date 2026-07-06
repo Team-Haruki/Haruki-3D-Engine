@@ -28,6 +28,7 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
       clip: "motion_loop",
       springRuntimeMode: "unity-prefab",
       cameraPreset: "capture",
+      faceSdfEnabled: true,
       projectedShadow: {
         width: 0.88,
         height: 1.22,
@@ -75,6 +76,7 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(server.defaultClip, "motion_loop");
   assert.equal(server.defaultSpringRuntimeMode, "unity-prefab");
   assert.equal(server.defaultCameraPreset, "capture");
+  assert.equal(server.defaultFaceSdfEnabled, true);
   assert.deepEqual(server.defaultProjectedShadow, {
     width: 0.88,
     height: 1.22,
@@ -135,6 +137,18 @@ test("capture server accepts idle shutdown duration env", () => {
   });
 
   assert.equal(server.idleShutdownMs, 30 * 60 * 1000);
+});
+
+test("capture server keeps FaceSDF off by default but allows explicit overrides", () => {
+  assert.equal(resolveCaptureServerOptions({}, {}).defaultFaceSdfEnabled, false);
+  assert.equal(resolveCaptureServerOptions({
+    capture: { faceSdfEnabled: true },
+  }, {}).defaultFaceSdfEnabled, true);
+  assert.equal(resolveCaptureServerOptions({
+    capture: { faceSdfEnabled: true },
+  }, {
+    HARUKI_CAPTURE_FACE_SDF_ENABLED: "false",
+  }).defaultFaceSdfEnabled, false);
 });
 
 test("capture server idle shutdown can be disabled", () => {
@@ -239,7 +253,7 @@ test("persistent capture server propagates config defaults into role parts captu
   assert.match(harnessSource, /characterYawMode: request\.characterYawMode \?\? config\.characterYawMode \?\? undefined/);
   assert.match(harnessSource, /faceSdfEnabled: request\.faceSdfEnabled \?\? config\.faceSdfEnabled/);
   assert.match(harnessSource, /faceSdfDebugMode: request\.faceSdfDebugMode \?\? config\.faceSdfDebugMode/);
-  assert.match(serverSource, /faceSdfEnabled: readBoolean\(input\.faceSdfEnabled\)/);
+  assert.match(serverSource, /faceSdfEnabled: input\.faceSdfEnabled === undefined\s+\? defaultFaceSdfEnabled\s+: readBoolean\(input\.faceSdfEnabled\)/);
   assert.match(serverSource, /faceSdfDebugMode: normalizeFaceSdfDebugMode\(input\.faceSdfDebugMode\)/);
   assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
   assert.match(engineSource, /cameraProfile\?: PjskCameraProfile/);
@@ -376,9 +390,14 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   assert.match(engineSource, /fov: 25/);
   assert.match(engineSource, /const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = \{/);
   assert.match(engineSource, /const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = \{/);
-  assert.match(engineSource, /zoomValue: 0/);
+  assert.match(
+    engineSource,
+    /const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = \{\s+cameraRootYawDegrees: 0,\s+zoomValue: 0,\s+zoomMoveValue: 1,/s
+  );
   assert.match(engineSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
   assert.match(engineSource, /zoomMoveValue: 0/);
+  assert.match(engineSource, /localCameraRotationYDegrees: 180/);
+  assert.match(engineSource, /costumeShopState:/);
   assert.match(engineSource, /getCostumeShopCameraState/);
   assert.match(engineSource, /calculateCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
@@ -719,6 +738,26 @@ test("custom selection mutations are serialized and skip exact resolved reimport
   assert.match(engineSource, /sameResolvedSelection[\s\S]*this\.resetAndSettleCurrentSpringRuntime\(\)/);
   assert.match(engineSource, /private async captureRolePartsInternal/);
   assert.doesNotMatch(engineSource, /await this\.setCustomSelection\(selection\)/);
+});
+
+test("runtime debug reports FUnit metadata without mixing it into UTJ spring runtime", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /export type RuntimeFUnitDebug = \{/);
+  assert.match(engineSource, /funit: RuntimeFUnitDebug/);
+  assert.match(engineSource, /function readRuntimeFUnitDebug/);
+  assert.match(engineSource, /setup\.funit \?\? setup\.FUnit/);
+  assert.match(engineSource, /metadata_only; do not merge with UTJ\/Sekai SpringBone runtime/);
+  assert.match(composerSource, /function mergeRuntimeFUnitSummaries/);
+  assert.match(composerSource, /funit: mergeRuntimeFUnitSummaries\(runtimes\)/);
+  assert.doesNotMatch(composerSource, /FUnit\.SpringBone/);
 });
 
 test("custom composer rejects stale part packages without material proxy metadata", () => {

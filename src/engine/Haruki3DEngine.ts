@@ -58,7 +58,7 @@ const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241)
 const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
 const DEFAULT_CAMERA_FOV = 35;
 type CostumeShopCameraState = {
-  rotationYDegrees: number;
+  cameraRootYawDegrees: number;
   zoomValue: number;
   zoomMoveValue: number;
 };
@@ -73,12 +73,12 @@ const COSTUME_SHOP_CAMERA = {
   fov: 25,
 } as const;
 const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = {
-  rotationYDegrees: 0,
+  cameraRootYawDegrees: 0,
   zoomValue: 0,
-  zoomMoveValue: 0,
+  zoomMoveValue: 1,
 } as const;
 const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = {
-  rotationYDegrees: 0,
+  cameraRootYawDegrees: 0,
   zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
   zoomMoveValue: 0,
 } as const;
@@ -422,6 +422,14 @@ export type RuntimeOutlineShellDebug = {
 export type RuntimeCameraDebug = {
   preset: PjskCameraPreset;
   profile: PjskCameraProfile | null;
+  costumeShopState: {
+    cameraRootYawDegrees: number;
+    zoomValue: number;
+    zoomMoveValue: number;
+    zoomRatio: number;
+    localCameraPosition: { x: number; y: number; z: number };
+    localCameraRotationYDegrees: number;
+  } | null;
   position: { x: number; y: number; z: number };
   target: { x: number; y: number; z: number };
   offset: { x: number; y: number; z: number };
@@ -480,6 +488,7 @@ export type RuntimeDebugSnapshot = {
   hairShadowMode: HairShadowMode;
   hairShadowOffset: { x: number; y: number; z: number };
   hairShadowWorldPosition: { x: number; y: number; z: number };
+  funit: RuntimeFUnitDebug;
   body: RuntimeMaterialDebug[];
   head: RuntimeMaterialDebug[];
   headMaterialSlots: Array<{
@@ -496,6 +505,18 @@ export type RuntimeDebugSnapshot = {
   faceLight?: RuntimeFaceLightDebug;
   projectedShadow?: RuntimeProjectedShadowDebug;
   constraints?: RuntimeConstraintDebug | null;
+};
+
+export type RuntimeFUnitDebug = {
+  present: boolean;
+  scriptCount: number;
+  springManagerCount: number;
+  springBoneCount: number;
+  sphereColliderCount: number;
+  capsuleColliderCount: number;
+  panelColliderCount: number;
+  detectedScripts: string[];
+  policy: string;
 };
 
 export type SpringBoneRuntimeSnapshot = {
@@ -1337,12 +1358,24 @@ function calculateCostumeShopCameraPose(
     COSTUME_SHOP_CAMERA.farZ,
     zoomRatio
   );
-  const rotationY = THREE.MathUtils.degToRad(state.rotationYDegrees);
-  const position = new THREE.Vector3(0, y, z)
+  const cameraRootYawDegrees = Number.isFinite(state.cameraRootYawDegrees)
+    ? state.cameraRootYawDegrees
+    : 0;
+  const rotationY = THREE.MathUtils.degToRad(cameraRootYawDegrees);
+  const localCameraPosition = new THREE.Vector3(0, y, z);
+  const position = localCameraPosition.clone()
     .applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
   return {
     target: new THREE.Vector3(0, y, 0),
     position,
+    state: {
+      cameraRootYawDegrees,
+      zoomValue,
+      zoomMoveValue: THREE.MathUtils.clamp(state.zoomMoveValue, 0, 1),
+      zoomRatio,
+      localCameraPosition,
+      localCameraRotationYDegrees: 180,
+    },
   };
 }
 
@@ -2105,6 +2138,40 @@ function readRuntimeUnitySetup0414ForGraph(extension: unknown): RuntimeUnitySetu
   ) as RuntimeUnitySetupSource;
   const version = setup.version;
   return version === "0414" || version === 414 ? setup : null;
+}
+
+function readRuntimeFUnitDebug(extension: unknown): RuntimeFUnitDebug {
+  const payload = asRuntimeRecord(extension);
+  const springBone = asRuntimeRecord(payload.pjskSpringBone ?? payload.PjskSpringBone);
+  const setup = asRuntimeRecord(
+    payload.runtimeUnitySetup ?? payload.RuntimeUnitySetup ??
+      springBone.runtimeUnitySetup ?? springBone.RuntimeUnitySetup
+  );
+  const funit = asRuntimeRecord(
+    payload.funit ?? payload.FUnit ??
+      springBone.funit ?? springBone.FUnit ??
+      setup.funit ?? setup.FUnit
+  );
+  const detectedScriptsValue = funit.detectedScripts ?? funit.DetectedScripts;
+  const detectedScripts = Array.isArray(detectedScriptsValue)
+    ? (detectedScriptsValue as unknown[])
+        .filter((value): value is string => typeof value === "string")
+    : [];
+  const readCount = (camel: string, pascal: string) =>
+    Math.max(Math.trunc(readRuntimeNumber(funit[camel] ?? funit[pascal]) ?? 0), 0);
+  return {
+    present: Boolean(funit.present ?? funit.Present),
+    scriptCount: readCount("scriptCount", "ScriptCount"),
+    springManagerCount: readCount("springManagerCount", "SpringManagerCount"),
+    springBoneCount: readCount("springBoneCount", "SpringBoneCount"),
+    sphereColliderCount: readCount("sphereColliderCount", "SphereColliderCount"),
+    capsuleColliderCount: readCount("capsuleColliderCount", "CapsuleColliderCount"),
+    panelColliderCount: readCount("panelColliderCount", "PanelColliderCount"),
+    detectedScripts,
+    policy: typeof (funit.policy ?? funit.Policy) === "string"
+      ? String(funit.policy ?? funit.Policy)
+      : "metadata_only; do not merge with UTJ/Sekai SpringBone runtime",
+  };
 }
 
 function readRuntimeNativeMeshSet0414(extension: unknown): RuntimeNativeMeshSetSource | null {
@@ -4175,6 +4242,7 @@ export class Haruki3DEngine {
     hairShadowMode: this.hairShadowMode,
     hairShadowOffset: vectorDebugSnapshot(this.currentHairOffset),
     hairShadowWorldPosition: vectorDebugSnapshot(this.hairHeadPosition),
+    funit: readRuntimeFUnitDebug(null),
     body: [],
     head: [],
     headMaterialSlots: [],
@@ -4977,6 +5045,7 @@ export class Haruki3DEngine {
       })) ?? [],
       nativeMeshes: this.lastNativeMeshInstallDiagnostics,
       constraints: this.lastConstraintSetupDiagnostics,
+      funit: readRuntimeFUnitDebug(this.currentRuntimeExtension),
       hairShadowOffset: vectorDebugSnapshot(this.currentHairOffset),
       hairShadowWorldPosition: vectorDebugSnapshot(this.hairHeadPosition),
       camera: this.getCameraDebugSnapshot(),
@@ -5092,9 +5161,26 @@ export class Haruki3DEngine {
     const target = this.controls.target;
     const offset = position.clone().sub(target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
+    const costumeShopPose = this.currentCameraPreset === "capture"
+      ? calculateCostumeShopCameraPose(getCostumeShopCameraState(this.currentCameraProfile ?? "full-body"))
+      : null;
     return {
       preset: this.currentCameraPreset,
       profile: this.currentCameraProfile,
+      costumeShopState: costumeShopPose === null
+        ? null
+        : {
+            cameraRootYawDegrees: Number(costumeShopPose.state.cameraRootYawDegrees.toFixed(3)),
+            zoomValue: Number(costumeShopPose.state.zoomValue.toFixed(4)),
+            zoomMoveValue: Number(costumeShopPose.state.zoomMoveValue.toFixed(4)),
+            zoomRatio: Number(costumeShopPose.state.zoomRatio.toFixed(4)),
+            localCameraPosition: {
+              x: Number(costumeShopPose.state.localCameraPosition.x.toFixed(4)),
+              y: Number(costumeShopPose.state.localCameraPosition.y.toFixed(4)),
+              z: Number(costumeShopPose.state.localCameraPosition.z.toFixed(4)),
+            },
+            localCameraRotationYDegrees: costumeShopPose.state.localCameraRotationYDegrees,
+          },
       position: {
         x: Number(position.x.toFixed(4)),
         y: Number(position.y.toFixed(4)),

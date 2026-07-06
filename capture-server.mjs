@@ -33,6 +33,7 @@ const {
   defaultSpringRuntimeMode,
   defaultCameraPreset,
   defaultCameraProfile,
+  defaultFaceSdfEnabled,
   defaultProjectedShadow,
   tempCaptureTtlMs,
   tempCaptureMaxBytes,
@@ -240,7 +241,9 @@ function validateCaptureRequest(input) {
     warmupFrames: Math.max(Math.trunc(Number(input.warmupFrames) || defaultWarmupFrames), 0),
     warmupMode: input.warmupMode === "runtime" ? "runtime" : defaultWarmupMode === "runtime" ? "runtime" : "animation",
     bodyDebugMode: normalizeBodyDebugMode(input.bodyDebugMode),
-    faceSdfEnabled: readBoolean(input.faceSdfEnabled),
+    faceSdfEnabled: input.faceSdfEnabled === undefined
+      ? defaultFaceSdfEnabled
+      : readBoolean(input.faceSdfEnabled),
     faceSdfDebugMode: normalizeFaceSdfDebugMode(input.faceSdfDebugMode),
     faceSdfDebugLightMode: normalizeFaceSdfDebugLightMode(input.faceSdfDebugLightMode),
     projectedShadow: readProjectedShadow(input.projectedShadow),

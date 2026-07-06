@@ -1073,6 +1073,7 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
       activeRoots: activeRoots.length ? activeRoots : ["body", "face"],
       inactiveRoots: [],
     },
+    funit: mergeRuntimeFUnitSummaries(runtimes),
     managers,
     bones,
     colliders,
@@ -1088,6 +1089,30 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     },
     managerColliderCaches,
     warnings,
+  };
+}
+
+function mergeRuntimeFUnitSummaries(runtimes: PartRuntimePackage[]) {
+  const summaries = runtimes
+    .map((runtime) => asRecord(runtime.springBone?.funit))
+    .filter((summary) => Object.keys(summary).length > 0);
+  const readCount = (summary: Record<string, unknown>, key: string) =>
+    typeof summary[key] === "number" && Number.isFinite(summary[key])
+      ? Math.max(Math.trunc(summary[key]), 0)
+      : 0;
+  const detectedScripts = uniqueStrings(summaries.flatMap((summary) =>
+    readStringArray(summary.detectedScripts)
+  )).sort((left, right) => left.localeCompare(right));
+  return {
+    present: summaries.some((summary) => summary.present === true),
+    scriptCount: summaries.reduce((total, summary) => total + readCount(summary, "scriptCount"), 0),
+    springManagerCount: summaries.reduce((total, summary) => total + readCount(summary, "springManagerCount"), 0),
+    springBoneCount: summaries.reduce((total, summary) => total + readCount(summary, "springBoneCount"), 0),
+    sphereColliderCount: summaries.reduce((total, summary) => total + readCount(summary, "sphereColliderCount"), 0),
+    capsuleColliderCount: summaries.reduce((total, summary) => total + readCount(summary, "capsuleColliderCount"), 0),
+    panelColliderCount: summaries.reduce((total, summary) => total + readCount(summary, "panelColliderCount"), 0),
+    detectedScripts,
+    policy: "metadata_only; do not merge with UTJ/Sekai SpringBone runtime",
   };
 }
 
@@ -1152,6 +1177,7 @@ function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {
     colliderBindings: springBone.colliderBindings as RuntimeColliderBinding[] | undefined,
     managerColliderCaches: springBone.managerColliderCaches as RuntimeManagerColliderCache[] | undefined,
     activeRootProfile: springBone.activeRootProfile as Record<string, unknown> | undefined,
+    funit: springBone.funit as Record<string, unknown> | undefined,
     bindingDecisions: springBone.bindingDecisions as RuntimeBindingDecision[] | undefined,
     constraintSetup: springBone.constraintSetup as RuntimeConstraintSetup | undefined,
   };
