@@ -302,7 +302,28 @@ type RuntimeBoneAxisSource =
   | "computed-rotation-tip"
   | "fallback-local-tip";
 
-type RuntimeForceProvider = RuntimeWindVolumeOneSelf;
+type RuntimeForceProvider = RuntimeForceVolume | RuntimeWindVolume | RuntimeWindVolumeOneSelf;
+
+type RuntimeForceVolume = {
+  kind: "ForceVolume";
+  sourcePathId: number | null;
+  node: THREE.Object3D;
+  springManagerPathId: number | null;
+  strength: number;
+};
+
+type RuntimeWindVolume = {
+  kind: "WindVolume";
+  sourcePathId: number | null;
+  node: THREE.Object3D;
+  springManagerPathId: number | null;
+  weight: number;
+  strength: number;
+  period: number;
+  positionalMultiplier: number;
+  timeFactor: number;
+  offsetVector: THREE.Vector3;
+};
 
 type RuntimeWindVolumeOneSelf = {
   kind: "WindVolumeOneSelf";
@@ -872,6 +893,9 @@ export class UtjSpringBoneRuntime {
     const providers = new Map<string, RuntimeWindVolumeOneSelf>();
     for (const bone of this.bones) {
       for (const provider of bone.forceProviders) {
+        if (provider.kind !== "WindVolumeOneSelf") {
+          continue;
+        }
         if (provider.springManagerPathId === null) {
           continue;
         }
@@ -1218,10 +1242,47 @@ export class UtjSpringBoneRuntime {
     bone: RuntimeBone,
     deltaTime: number
   ): THREE.Vector3 {
+    if (provider.kind === "ForceVolume") {
+      return this.computeForceVolume(provider);
+    }
+    if (provider.kind === "WindVolume") {
+      return this.computeWindVolume(provider, bone);
+    }
     if (provider.kind === "WindVolumeOneSelf") {
       return this.computeWindVolumeOneSelfForce(provider, bone, deltaTime);
     }
     return this.providerForce.set(0, 0, 0);
+  }
+
+  private computeForceVolume(provider: RuntimeForceVolume): THREE.Vector3 {
+    provider.node.updateMatrixWorld(true);
+    return this.providerForce
+      .set(0, 0, 1)
+      .transformDirection(provider.node.matrixWorld)
+      .multiplyScalar(provider.strength);
+  }
+
+  private computeWindVolume(provider: RuntimeWindVolume, bone: RuntimeBone): THREE.Vector3 {
+    const baseStrength = provider.weight * provider.strength;
+    if (baseStrength <= UNITY_MATHF_EPSILON || provider.period <= 0.001) {
+      return this.providerForce.set(0, 0, 0);
+    }
+
+    provider.node.updateMatrixWorld(true);
+    bone.node.getWorldPosition(this.localBonePosition).applyMatrix4(
+      provider.node.matrixWorld.clone().invert()
+    );
+    const wave = Math.sin(
+      provider.timeFactor +
+      Math.sin(this.localBonePosition.x * provider.positionalMultiplier) +
+      Math.cos(this.localBonePosition.z * provider.positionalMultiplier)
+    );
+    return this.providerForce
+      .set(0, 0, 1)
+      .transformDirection(provider.node.matrixWorld)
+      .addScaledVector(provider.offsetVector, wave)
+      .normalize()
+      .multiplyScalar(baseStrength * bone.windInfluence);
   }
 
   private computeWindVolumeOneSelfForce(
@@ -1856,7 +1917,11 @@ function createForceProvider(
   resolution: NodeResolution,
   provider: CandidateForceProvider
 ): RuntimeForceProvider | null {
-  if (!provider.scriptName?.endsWith("WindVolumeOneSelf")) {
+  const scriptName = provider.scriptName ?? "";
+  const isForceVolume = scriptName.endsWith("ForceVolume");
+  const isWindVolume = scriptName.endsWith("WindVolume");
+  const isWindVolumeOneSelf = scriptName.endsWith("WindVolumeOneSelf");
+  if (!isForceVolume && !isWindVolume && !isWindVolumeOneSelf) {
     return null;
   }
   const node = resolveNode(resolution, provider.nodePath, provider.nodeName);
@@ -1872,8 +1937,7 @@ function createForceProvider(
   }
   const dynamicRatio = readFiniteNumber(raw.dynamicRatio ?? raw.DynamicRatio);
   const simulationFrameRate = readFiniteNumber(raw.simulationFrameRate ?? raw.SimulationFrameRate);
-  return {
-    kind: "WindVolumeOneSelf",
+  const common = {
     sourcePathId: typeof provider.sourcePathId === "number" ? provider.sourcePathId : null,
     node,
     springManagerPathId: readFiniteNumber(provider.springManagerPathId) ??
@@ -1881,6 +1945,29 @@ function createForceProvider(
       readRawObjectPathId(raw, "_SpringManager_k__BackingField") ??
       readRawObjectPathId(raw, "SpringManager") ??
       readRawObjectPathId(raw, "springManager"),
+  };
+  if (isForceVolume && !isWindVolume) {
+    return {
+      kind: "ForceVolume",
+      ...common,
+      strength: readRawNumber(raw, "strength", 0),
+    };
+  }
+  if (isWindVolume && !isWindVolumeOneSelf) {
+    return {
+      kind: "WindVolume",
+      ...common,
+      weight: readRawNumber(raw, "weight", 0),
+      strength: readRawNumber(raw, "strength", 0),
+      period: readRawNumber(raw, "period", 0),
+      positionalMultiplier: readRawNumber(raw, "positionalMultiplier", 0),
+      timeFactor: readRawNumber(raw, "timeFactor", 0),
+      offsetVector: readRawVector(raw, "offsetVector"),
+    };
+  }
+  return {
+    kind: "WindVolumeOneSelf",
+    ...common,
     isActive: readRawBoolean(raw, "isActive", false),
     dynamicRatio: THREE.MathUtils.clamp(dynamicRatio ?? 0.5, 0, 1),
     simulationFrameRate: Math.max(0, simulationFrameRate ?? 60),
@@ -2045,10 +2132,7 @@ function resolveRuntimeColliderGroup(
       "v1"
     );
   }
-  const directColliders = bindingMode === "unityPrefab"
-    ? filterCollidersByManagerCache(group.colliders, managerCache)
-    : group.colliders;
-  const colliders = preferMatchingPoseColliders(directColliders, spring, joint);
+  const colliders = preferMatchingPoseColliders(group.colliders, spring, joint);
   return {
     colliders,
     diagnostic: buildColliderBindingDiagnostic(
@@ -2060,7 +2144,7 @@ function resolveRuntimeColliderGroup(
       null,
       null,
       bindingMode === "unityPrefab"
-        ? `direct collider group / manager cache constraint / pose root preference; ${managerCacheSummary(managerCache)}`
+        ? `direct serialized collider references / pose root preference; ${managerCacheSummary(managerCache)}`
         : "direct collider group / pose root preference",
       colliders
     ),
@@ -2751,6 +2835,17 @@ function vectorFromArray(values?: number[]): THREE.Vector3 {
 function readRawNumber(raw: JsonRecord, key: string, fallback: number): number {
   const value = raw[key] ?? raw[key[0].toUpperCase() + key.slice(1)];
   return typeof value === "number" ? value : fallback;
+}
+
+function readRawVector(raw: JsonRecord, key: string): THREE.Vector3 {
+  const value = raw[key] ?? raw[key[0].toUpperCase() + key.slice(1)];
+  if (Array.isArray(value)) {
+    return vectorFromRaw(value);
+  }
+  if (typeof value === "object" && value !== null) {
+    return vectorFromRaw(value as { X?: number; Y?: number; Z?: number; x?: number; y?: number; z?: number });
+  }
+  return new THREE.Vector3(0, 0, 0);
 }
 
 function readRawBoolean(raw: JsonRecord, key: string, fallback: boolean): boolean {

@@ -567,6 +567,12 @@ export type RuntimeCombinedCharacterAsset = {
   runtimeExtension?: unknown;
 };
 
+type CombinedCharacterImportOptions = {
+  preserveAnimation?: boolean;
+  disposeBeforeLoad?: boolean;
+  clearAnimationCache?: boolean;
+};
+
 export type AnimationPlaybackSnapshot = {
   selectedUrl: string | null;
   selectedLoopUrl: string | null;
@@ -1002,25 +1008,60 @@ function summarizeSpringBoneMetadata(
   };
 }
 
-function disposeObjectGeometry(root: THREE.Object3D) {
-  root.traverse((node) => {
-    const mesh = node as THREE.Mesh;
-    if (mesh.isMesh && !mesh.userData.pjskOutlineShell) {
-      mesh.geometry.dispose();
+function collectMaterialTextures(
+  value: unknown,
+  textures: Set<THREE.Texture>,
+  seen: Set<unknown> = new Set()
+) {
+  if (!value || typeof value !== "object" || seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+  if (value instanceof THREE.Texture) {
+    textures.add(value);
+    return;
+  }
+  if (
+    value instanceof THREE.Color ||
+    value instanceof THREE.Vector2 ||
+    value instanceof THREE.Vector3 ||
+    value instanceof THREE.Vector4 ||
+    value instanceof THREE.Matrix3 ||
+    value instanceof THREE.Matrix4 ||
+    ArrayBuffer.isView(value) ||
+    value instanceof ArrayBuffer
+  ) {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMaterialTextures(item, textures, seen);
     }
-  });
+    return;
+  }
+  for (const item of Object.values(value as Record<string, unknown>)) {
+    collectMaterialTextures(item, textures, seen);
+  }
 }
 
 function disposeMaterial(
   material: THREE.Material | THREE.Material[],
-  disposeTextures = true
+  disposeTextures = true,
+  preservedMaterials: ReadonlySet<THREE.Material> = new Set(),
+  disposedTextures: Set<THREE.Texture> = new Set()
 ) {
   const materials = Array.isArray(material) ? material : [material];
   for (const item of materials) {
+    if (preservedMaterials.has(item)) {
+      continue;
+    }
     if (disposeTextures) {
-      for (const value of Object.values(item as unknown as Record<string, unknown>)) {
-        if (value instanceof THREE.Texture) {
-          value.dispose();
+      const textures = new Set<THREE.Texture>();
+      collectMaterialTextures(item, textures);
+      for (const texture of textures) {
+        if (!disposedTextures.has(texture)) {
+          texture.dispose();
+          disposedTextures.add(texture);
         }
       }
     }
@@ -1040,9 +1081,37 @@ function disposeReplacedMaterials(
   }
 }
 
-function clearGroup(group: THREE.Group) {
+function disposeObjectResources(
+  root: THREE.Object3D,
+  preservedMaterials: ReadonlySet<THREE.Material> = new Set()
+) {
+  const disposedGeometries = new Set<THREE.BufferGeometry>();
+  const disposedTextures = new Set<THREE.Texture>();
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh) {
+      return;
+    }
+    if (
+      mesh.geometry &&
+      !mesh.userData.pjskOutlineShell &&
+      !disposedGeometries.has(mesh.geometry)
+    ) {
+      mesh.geometry.dispose();
+      disposedGeometries.add(mesh.geometry);
+    }
+    if (mesh.material) {
+      disposeMaterial(mesh.material, true, preservedMaterials, disposedTextures);
+    }
+  });
+}
+
+function clearGroup(
+  group: THREE.Group,
+  preservedMaterials: ReadonlySet<THREE.Material> = new Set()
+) {
   for (const child of [...group.children]) {
-    disposeObjectGeometry(child);
+    disposeObjectResources(child, preservedMaterials);
     group.remove(child);
   }
 }
@@ -4470,9 +4539,16 @@ export class Haruki3DEngine {
   }
 
   async importCombinedCharacter(
-    characterAsset: RuntimeCombinedCharacterAsset
+    characterAsset: RuntimeCombinedCharacterAsset,
+    options: CombinedCharacterImportOptions = {}
   ): Promise<PartImportSnapshot> {
     const revision = ++this.importRevision;
+    if (options.disposeBeforeLoad) {
+      this.releaseCurrentCharacterResources({
+        preserveAnimationSelection: options.preserveAnimation ?? false,
+        clearAnimationCache: options.clearAnimationCache ?? false,
+      });
+    }
     this.runtimeDebug.outlineShells = [];
     this.lastNativeMeshInstallDiagnostics = null;
     this.currentBodyAsset = characterAsset.bodyAsset;
@@ -4491,8 +4567,8 @@ export class Haruki3DEngine {
       };
     }
 
-    clearGroup(this.bodySlot);
-    clearGroup(this.headSlot);
+    this.clearCharacterSlot(this.bodySlot);
+    this.clearCharacterSlot(this.headSlot);
     this.resetSlotParents();
     this.currentRuntimeExtension = this.resolvePjskRuntimeExtension(
       loaded,
@@ -4584,7 +4660,11 @@ export class Haruki3DEngine {
         usingFallbackAttach: true,
       };
     }
-    await this.refreshAnimationPlayback();
+    if (options.preserveAnimation) {
+      this.resetCurrentSpringRuntimeState();
+    } else {
+      await this.refreshAnimationPlayback();
+    }
 
     const bodyStatus = {
       ...this.makeImportStatus(characterAsset.bodyAsset, loaded),
@@ -5361,16 +5441,20 @@ export class Haruki3DEngine {
       );
     }
     const isEnabled = this.isSpringRuntimeEnabled();
-    if (isEnabled) {
-      this.resetAndSettleCurrentSpringRuntime();
-    } else if (wasEnabled) {
+    if (isEnabled && !wasEnabled) {
+      this.resetAndSettleCurrentSpringRuntime(60);
+    } else if (!isEnabled && wasEnabled) {
       this.currentSpringRuntime?.resetPose();
     }
   }
 
-  private resetAndSettleCurrentSpringRuntime() {
+  private resetCurrentSpringRuntimeState() {
     this.currentSpringRuntime?.resetStateToCurrentPose();
-    this.currentSpringRuntime?.settleCurrentPose();
+  }
+
+  private resetAndSettleCurrentSpringRuntime(frameCount: number) {
+    this.resetCurrentSpringRuntimeState();
+    this.currentSpringRuntime?.settleCurrentPose(frameCount);
   }
 
   private isSpringRuntimeEnabled(): boolean {
@@ -5403,8 +5487,7 @@ export class Haruki3DEngine {
     this.currentFaceMotionTime = nextTime;
     this.applyCurrentFaceMotionFrame();
     this.syncLinkedHeadBones();
-    this.currentSpringRuntime?.resetStateToCurrentPose();
-    this.currentSpringRuntime?.settleCurrentPose();
+    this.resetCurrentSpringRuntimeState();
     this.applyAnimationPlaybackSettings();
   }
 
@@ -5537,6 +5620,15 @@ export class Haruki3DEngine {
   async loadRuntimePackage(
     request: HarukiRuntimePackageRequest
   ): Promise<RuntimePackageLoadResult> {
+    const previousRoleId = this.currentLoadedRuntimePackage?.wardrobe?.getActiveRoleId() ?? null;
+    const nextRoleId = request.roleId ?? null;
+    if (previousRoleId && nextRoleId && previousRoleId !== nextRoleId) {
+      this.releaseCurrentCharacterResources({
+        preserveAnimationSelection: false,
+        clearAnimationCache: true,
+      });
+      this.currentLoadedRuntimePackage = null;
+    }
     const loaded = await loadRuntimePackageFromBaseUrl(request.baseUrl, request);
     this.currentLoadedRuntimePackage = loaded;
     if (loaded.previewLight) {
@@ -5639,9 +5731,14 @@ export class Haruki3DEngine {
       previousCombinedId === combined.id &&
       this.currentImportIsCombined;
     if (!sameResolvedSelection) {
-      await this.importCombinedCharacter(combined);
+      // FUnit-style hot replacement keeps same-role motion state while the prefab/spring graph is rebuilt.
+      await this.importCombinedCharacter(combined, {
+        preserveAnimation: !roleChanged,
+        disposeBeforeLoad: true,
+        clearAnimationCache: roleChanged,
+      });
     } else {
-      this.resetAndSettleCurrentSpringRuntime();
+      this.resetCurrentSpringRuntimeState();
     }
     if (!roleChanged && previousAnimation.selection.motionUrl) {
       await this.continueAnimationPlaybackState(previousAnimation);
@@ -5670,13 +5767,20 @@ export class Haruki3DEngine {
     const activeRoleId = wardrobe.getActiveRoleId();
     const nextRoleId = runtimeRoleId(role.characterId, role.unit);
     const partSet = wardrobe.getPartPackageSet();
-    if (partSet) {
-      await ensureRoleRuntimePackage(partSet, role.characterId, role.unit);
-    }
-    if (activeRoleId !== nextRoleId) {
+    const roleChanged = activeRoleId !== nextRoleId;
+    if (roleChanged) {
+      partSet?.packages.clear();
+      partSet?.roleRuntimes.clear();
+      this.releaseCurrentCharacterResources({
+        preserveAnimationSelection: false,
+        clearAnimationCache: true,
+      });
       wardrobe.selectRole(role.characterId, role.unit);
       await this.setAnimationSelection(null);
       this.setFaceMotionSet(null, null, null);
+    }
+    if (partSet) {
+      await ensureRoleRuntimePackage(partSet, role.characterId, role.unit);
     }
     const selection: CustomPartSelection = {
       characterId: role.characterId,
@@ -6337,7 +6441,10 @@ export class Haruki3DEngine {
 
   destroy() {
     cancelAnimationFrame(this.animationFrame);
-    this.stopAnimationPlayback();
+    this.releaseCurrentCharacterResources({
+      preserveAnimationSelection: false,
+      clearAnimationCache: true,
+    });
     if (this.manageResize) {
       window.removeEventListener("resize", this.handleResize);
     }
@@ -6420,6 +6527,64 @@ export class Haruki3DEngine {
     this.headSlot.parent?.remove(this.headSlot);
     this.characterRoot.add(this.bodySlot);
     this.characterRoot.add(this.headSlot);
+  }
+
+  private getPersistentCharacterMaterials(): ReadonlySet<THREE.Material> {
+    return new Set([
+      this.bodyMaterial,
+      this.hairMaterial,
+      this.faceMaterial,
+    ]);
+  }
+
+  private clearCharacterSlot(slot: THREE.Group) {
+    clearGroup(slot, this.getPersistentCharacterMaterials());
+  }
+
+  private releaseCurrentCharacterResources(
+    options: {
+      preserveAnimationSelection?: boolean;
+      clearAnimationCache?: boolean;
+    } = {}
+  ) {
+    this.stopAnimationPlayback();
+    if (!options.preserveAnimationSelection) {
+      this.currentAnimationUrl = null;
+      this.currentAnimationKind = null;
+      this.currentAnimationLoopUrl = null;
+      this.currentAnimationLoopKind = null;
+      this.currentFaceMotionSet = null;
+      this.currentFaceMotionClip = null;
+      this.currentFaceMotionLoopClip = null;
+      this.currentFaceMotionTime = 0;
+      this.currentFaceMotionError = null;
+    }
+    if (options.clearAnimationCache) {
+      this.animationClipCache.clear();
+    }
+    this.currentSpringRuntime?.resetPose();
+    this.currentSpringRuntime = null;
+    this.currentExtraBoneRuntime = null;
+    this.currentVrmSpringBoneManager = null;
+    this.currentRuntimeExtension = null;
+    this.currentBodyAttachNode = null;
+    this.currentHeadAttachOriginNode = null;
+    this.currentBodyAnimationRoot = null;
+    this.currentPrefabSourceGraph = null;
+    this.currentPrefabHeadFollowConstraint = null;
+    this.currentPrefabHeadFollowDebug = {
+      active: false,
+      sourcePath: null,
+      targetPath: null,
+      reason: "not initialized",
+    };
+    this.currentHeadMorphRuntimes.length = 0;
+    this.runtimeDebug.headMorphs = [];
+    this.clearCharacterSlot(this.bodySlot);
+    this.clearCharacterSlot(this.headSlot);
+    this.resetSlotParents();
+    this.renderer.renderLists.dispose();
+    this.renderer.info.reset();
   }
 
   private findNodeByName(
@@ -7947,7 +8112,7 @@ export class Haruki3DEngine {
     loaded: LoadedPartResult
   ) {
     this.resetSlotParents();
-    clearGroup(this.bodySlot);
+    this.clearCharacterSlot(this.bodySlot);
     this.currentRuntimeExtension = null;
     this.currentVrmSpringBoneManager = loaded.springBoneManager ?? null;
     this.currentBodyAttachNode = null;
@@ -8046,7 +8211,7 @@ export class Haruki3DEngine {
     loaded: LoadedPartResult
   ) {
     this.resetSlotParents();
-    clearGroup(this.headSlot);
+    this.clearCharacterSlot(this.headSlot);
     this.currentVrmSpringBoneManager =
       loaded.springBoneManager ?? this.currentVrmSpringBoneManager;
     this.currentHeadAttachOriginNode = null;
@@ -8606,8 +8771,7 @@ export class Haruki3DEngine {
     if (!this.currentAnimationUrl || !this.currentBodyAnimationRoot) {
       this.syncLinkedHeadBones();
       this.currentExtraBoneRuntime?.update();
-      this.currentSpringRuntime?.resetStateToCurrentPose();
-      this.currentSpringRuntime?.settleCurrentPose();
+      this.resetCurrentSpringRuntimeState();
       return;
     }
 
@@ -8767,8 +8931,7 @@ export class Haruki3DEngine {
     this.currentAnimationMixer.update(0);
     this.syncLinkedHeadBones();
     this.currentExtraBoneRuntime?.update();
-    this.currentSpringRuntime?.resetStateToCurrentPose();
-    this.currentSpringRuntime?.settleCurrentPose();
+    this.resetCurrentSpringRuntimeState();
   }
 
   private activateQueuedLoopForSeek() {

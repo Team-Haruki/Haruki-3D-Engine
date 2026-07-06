@@ -1314,8 +1314,9 @@ function resolveColliderBinding(
     };
   }
 
+  const bindingKind = decision?.sourceKind ?? binding?.sourceKind ?? "direct";
   const candidateRoots = buildCandidateRootMap(decision?.candidateRoots ?? binding?.collidersByRoot, colliderByIndex);
-  if (candidateRoots.size > 0) {
+  if (bindingKind === "colliderFlag" && candidateRoots.size > 0) {
     const constrainedRoots = constrainColliderRootsByManagerCache(candidateRoots, managerCache);
     const selection = selectUnityColliderRoot(setup, manager, bone, decision, binding, constrainedRoots);
     const colliders = selection.root ? constrainedRoots.get(selection.root) ?? [] : [];
@@ -1342,7 +1343,7 @@ function resolveColliderBinding(
     .map((index) => colliderByIndex.get(index))
     .filter((collider): collider is RuntimeCollider => Boolean(collider));
   const colliders = preferMatchingPoseColliders(
-    filterCollidersByManagerCache(directColliders, managerCache),
+    directColliders,
     manager,
     bone
   );
@@ -1356,7 +1357,7 @@ function resolveColliderBinding(
       null,
       decision?.defaultRoot ?? binding?.defaultRoot,
       null,
-      `${decision?.selectedColliderIndexes ? "bindingDecision.selectedColliderIndexes" : binding?.colliders ? "colliderBinding.colliders" : "no direct collider indexes"} / manager cache constraint / pose root preference; ${managerCacheSummary(managerCache)}`,
+      `${decision?.selectedColliderIndexes ? "bindingDecision.selectedColliderIndexes" : binding?.colliders ? "colliderBinding.colliders" : "no direct collider indexes"} / direct serialized collider references / pose root preference; ${managerCacheSummary(managerCache)}`,
       colliders
     )],
   };

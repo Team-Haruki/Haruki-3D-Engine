@@ -153,12 +153,17 @@ export type ComposePartAssetInput = {
 type RuntimeSetup = {
   version?: string;
   prefabGraphs?: unknown[];
+  raw?: {
+    body?: { extraBones?: RuntimeExtraBone[] };
+    head?: { extraBones?: RuntimeExtraBone[] };
+  };
   rootSelectionProfile?: Record<string, unknown>;
   setupPlan?: Record<string, unknown>;
   activeRootProfile?: Record<string, unknown>;
   bindingDecisions?: RuntimeBindingDecision[];
   managers?: RuntimeManager[];
   bones?: RuntimeBone[];
+  extraBones?: RuntimeExtraBone[];
   colliders?: RuntimeCollider[];
   colliderBindings?: RuntimeColliderBinding[];
   managerColliderCaches?: RuntimeManagerColliderCache[];
@@ -216,6 +221,24 @@ type RuntimeBone = Record<string, unknown> & {
   poseRoot?: string | null;
   colliderFlag?: number;
   directColliderPathIds?: number[];
+};
+
+type RuntimeObjectRef = Record<string, unknown> & {
+  pathId?: number;
+  PathId?: number;
+  transformPath?: string | null;
+  TransformPath?: string | null;
+};
+
+type RuntimeExtraBone = Record<string, unknown> & {
+  pathId?: number;
+  PathId?: number;
+  gameObject?: RuntimeObjectRef | null;
+  GameObject?: RuntimeObjectRef | null;
+  referenceBone?: RuntimeObjectRef | null;
+  ReferenceBone?: RuntimeObjectRef | null;
+  nodePath?: string | null;
+  poseRoot?: string | null;
 };
 
 type RuntimeCollider = Record<string, unknown> & {
@@ -307,6 +330,7 @@ type RemappedRuntimePart = RuntimePartWithIndex & {
   prefabGraph: RuntimePrefabGraph | null;
   managers: RuntimeManager[];
   bones: RuntimeBone[];
+  extraBones: RuntimeExtraBone[];
   colliders: RuntimeCollider[];
   colliderBindings: RuntimeColliderBinding[];
   managerColliderCaches: RuntimeManagerColliderCache[];
@@ -1053,6 +1077,7 @@ function composeRuntimeExtension(
     motionPackage: roleRuntime?.motionPackage ?? null,
     morphChannelBindings: headAsset.morphChannelBindings ?? [],
     pjskSpringBone: {
+      raw: runtimeSetup.raw,
       runtimeUnitySetup: runtimeSetup,
     },
     warnings: [
@@ -1075,6 +1100,7 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
   const activeRoots = uniqueStrings(remappedParts.flatMap((part) => part.activeRoots));
   const managers = remappedParts.flatMap((part) => part.managers);
   const bones = remappedParts.flatMap((part) => part.bones);
+  const extraBones = remappedParts.flatMap((part) => part.extraBones);
   const colliders = remappedParts.flatMap((part) => part.colliders);
   const constraints = remappedParts.flatMap((part) => part.constraints);
   const colliderBindings = rebuildColliderBindings(remappedParts);
@@ -1091,11 +1117,12 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     },
     setupPlan: {
       discoveryMode: "viewer_composed_part_runtime_package",
-      rootPolicy: "active_custom_parts",
+      rootPolicy: "active_custom_parts; manager ownership is rebuilt from composed hierarchy",
       orderedSteps: [
         "load active part packages",
         "merge part native meshes",
         "merge active part springbone records",
+        "rebuild SpringManager ownership from composed hierarchy",
         "repair constraints after composition",
         "rebind colliderFlag springs to current body colliders",
         "reset spring runtime",
@@ -1109,8 +1136,10 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
       inactiveRoots: [],
     },
     funit: mergeRuntimeFUnitSummaries(runtimes),
+    raw: mergeRuntimeRawSpringBone(remappedParts),
     managers,
     bones,
+    extraBones,
     colliders,
     colliderBindings,
     bindingDecisions,
@@ -1148,6 +1177,19 @@ function mergeRuntimeFUnitSummaries(runtimes: PartRuntimePackage[]) {
     panelColliderCount: summaries.reduce((total, summary) => total + readCount(summary, "panelColliderCount"), 0),
     detectedScripts,
     policy: "metadata_only; do not merge with UTJ/Sekai SpringBone runtime",
+  };
+}
+
+function mergeRuntimeRawSpringBone(parts: RemappedRuntimePart[]) {
+  const bodyExtraBones = parts
+    .filter((part) => part.partType === "body")
+    .flatMap((part) => part.extraBones);
+  const headExtraBones = parts
+    .filter((part) => part.partType === "head" || part.partType === "hair" || part.partType === "head_optional")
+    .flatMap((part) => part.extraBones);
+  return {
+    body: { extraBones: bodyExtraBones },
+    head: { extraBones: headExtraBones },
   };
 }
 
@@ -1208,6 +1250,7 @@ function getPartRuntimeSetup(runtime: PartRuntimePackage): RuntimeSetup {
   return {
     managers: springBone.managers as RuntimeManager[] | undefined,
     bones: springBone.bones as RuntimeBone[] | undefined,
+    extraBones: springBone.extraBones as RuntimeExtraBone[] | undefined,
     colliders: springBone.colliders as RuntimeCollider[] | undefined,
     colliderBindings: springBone.colliderBindings as RuntimeColliderBinding[] | undefined,
     managerColliderCaches: springBone.managerColliderCaches as RuntimeManagerColliderCache[] | undefined,
@@ -1231,6 +1274,10 @@ function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): Remap
   );
   const bones = filterRuntimeRecordsByActiveRoots(
     cloneArrayWithPartPrefix(setup.bones, partIndex, partType) as RuntimeBone[],
+    selectedActiveRoots
+  );
+  const extraBones = filterRuntimeRecordsByActiveRoots(
+    remapRuntimeExtraBones(setup.extraBones, partIndex, partType),
     selectedActiveRoots
   );
   const colliders = filterRuntimeRecordsByActiveRoots(
@@ -1259,6 +1306,7 @@ function remapRuntimePart(runtime: PartRuntimePackage, partIndex: number): Remap
     prefabGraph: remapPrefabGraph(runtime.springBone?.prefabGraph, partIndex),
     managers,
     bones,
+    extraBones,
     colliders,
     colliderBindings,
     managerColliderCaches,
@@ -1289,6 +1337,42 @@ function filterRuntimeRecordsByActiveRoots<T extends { nodePath?: string | null;
     const root = normalizeRootName(firstPathSegment(record.nodePath) ?? record.poseRoot);
     return roots.has(root);
   });
+}
+
+function remapRuntimeExtraBones(
+  value: unknown,
+  partIndex: number,
+  partType: RuntimePartType
+): RuntimeExtraBone[] {
+  return cloneArrayWithPartPrefix(value, partIndex, partType).map((entry) => {
+    const extraBone = entry as RuntimeExtraBone;
+    const gameObject = remapRuntimeObjectRef(extraBone.gameObject ?? extraBone.GameObject, partIndex);
+    const referenceBone = remapRuntimeObjectRef(extraBone.referenceBone ?? extraBone.ReferenceBone, partIndex);
+    extraBone.gameObject = gameObject;
+    extraBone.GameObject = gameObject;
+    extraBone.referenceBone = referenceBone;
+    extraBone.ReferenceBone = referenceBone;
+    extraBone.nodePath = gameObject?.transformPath ?? gameObject?.TransformPath ?? null;
+    extraBone.poseRoot = firstPathSegment(extraBone.nodePath) ?? null;
+    return extraBone;
+  });
+}
+
+function remapRuntimeObjectRef(
+  value: RuntimeObjectRef | null | undefined,
+  partIndex: number
+): RuntimeObjectRef | null | undefined {
+  if (!isRecord(value)) {
+    return value;
+  }
+  const cloned = { ...value } as RuntimeObjectRef;
+  if (typeof cloned.pathId === "number") {
+    cloned.pathId = remapNumericId(cloned.pathId, partIndex);
+  }
+  if (typeof cloned.PathId === "number") {
+    cloned.PathId = remapNumericId(cloned.PathId, partIndex);
+  }
+  return cloned;
 }
 
 function filterColliderBindingsByActiveBones(
@@ -1362,6 +1446,9 @@ function remapPrefabGraph(value: unknown, partIndex: number): RuntimePrefabGraph
     if (typeof cloned.pathId === "number") {
       cloned.pathId = remapNumericId(cloned.pathId, partIndex);
     }
+    if (typeof cloned.PathId === "number") {
+      cloned.PathId = remapNumericId(cloned.PathId, partIndex);
+    }
     if (typeof cloned.parentPathId === "number") {
       cloned.parentPathId = remapNumericId(cloned.parentPathId, partIndex);
     }
@@ -1397,18 +1484,13 @@ function withInferredSpringManagerBoneRefs(
     if (!inferredBonePathIds.length) {
       continue;
     }
-    if (!Array.isArray(manager.bonePathIds) || manager.bonePathIds.length === 0) {
-      manager.bonePathIds = inferredBonePathIds;
-    }
+    manager.bonePathIds = inferredBonePathIds;
     if (typeof manager.pathId === "number") {
       bonesByManagerPathId.set(manager.pathId, inferredBonePathIds);
     }
   }
 
   for (const cache of managerColliderCaches) {
-    if (Array.isArray(cache.springBonePathIds) && cache.springBonePathIds.length > 0) {
-      continue;
-    }
     const inferredBonePathIds = typeof cache.managerPathId === "number"
       ? bonesByManagerPathId.get(cache.managerPathId)
       : undefined;

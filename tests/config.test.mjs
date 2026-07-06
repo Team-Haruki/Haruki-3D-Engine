@@ -358,7 +358,8 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
 
   assert.match(serverSource, /warmupFrames:\s*Math\.max\(Math\.trunc\(Number\(input\.warmupFrames\)/);
   assert.match(serverSource, /warmupMode:\s*input\.warmupMode === "runtime" \? "runtime" : defaultWarmupMode === "runtime" \? "runtime" : "animation"/);
-  assert.match(harnessSource, /warmupFrames:\s*request\.warmupFrames \?\? config\.warmupFrames/);
+  assert.match(harnessSource, /const requestedWarmupFrames = request\.warmupFrames \?\? config\.warmupFrames/);
+  assert.match(harnessSource, /warmupFrames,\s*warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
   assert.match(harnessSource, /warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
   assert.match(engineSource, /warmupFrames\?: number/);
   assert.match(engineSource, /warmupMode\?: "animation" \| "runtime"/);
@@ -842,10 +843,44 @@ test("custom selection mutations are serialized and skip exact resolved reimport
   assert.match(engineSource, /this\.customSelectionQueue\.then\(operation, operation\)/);
   assert.match(engineSource, /private async applyCustomSelection/);
   assert.match(engineSource, /previousCombinedId === combined\.id/);
-  assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined\)/);
-  assert.match(engineSource, /sameResolvedSelection[\s\S]*this\.resetAndSettleCurrentSpringRuntime\(\)/);
+  assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
+  assert.match(engineSource, /preserveAnimation:\s*!roleChanged/);
+  assert.match(engineSource, /clearAnimationCache:\s*roleChanged/);
+  assert.match(engineSource, /sameResolvedSelection[\s\S]*this\.resetCurrentSpringRuntimeState\(\)/);
+  assert.match(engineSource, /if \(isEnabled && !wasEnabled\) \{\s*this\.resetAndSettleCurrentSpringRuntime\(60\);/);
+  assert.doesNotMatch(engineSource, /settleCurrentPose\(\)/);
   assert.match(engineSource, /private async captureRolePartsInternal/);
+  assert.match(engineSource, /activeRoleId !== nextRoleId[\s\S]*this\.releaseCurrentCharacterResources\(\{/);
+  assert.match(engineSource, /partSet\?\.packages\.clear\(\)/);
+  assert.match(engineSource, /partSet\?\.roleRuntimes\.clear\(\)/);
   assert.doesNotMatch(engineSource, /await this\.setCustomSelection\(selection\)/);
+});
+
+test("engine releases old role WebGL resources before cross-role capture growth", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /function collectMaterialTextures/);
+  assert.match(engineSource, /disposeObjectResources/);
+  assert.match(engineSource, /disposeMaterial\(mesh\.material,\s*true,\s*preservedMaterials,\s*disposedTextures\)/);
+  assert.match(engineSource, /private releaseCurrentCharacterResources/);
+  assert.match(engineSource, /this\.renderer\.renderLists\.dispose\(\)/);
+  assert.match(engineSource, /this\.renderer\.info\.reset\(\)/);
+});
+
+test("capture harness only forces spring entry warmup for the first image in a role sequence", () => {
+  const captureHarnessSource = fs.readFileSync(
+    path.join(repoRoot, "src/captureHarness.ts"),
+    "utf8"
+  );
+
+  assert.match(captureHarnessSource, /const ROLE_ENTRY_WARMUP_FRAMES = 60;/);
+  assert.match(captureHarnessSource, /let settledCaptureRoleId: string \| null = null;/);
+  assert.match(captureHarnessSource, /const requestedWarmupFrames = request\.warmupFrames \?\? config\.warmupFrames;/);
+  assert.match(captureHarnessSource, /settledCaptureRoleId === request\.roleId\s+\?\s+requestedWarmupFrames\s+:\s+Math\.max\(requestedWarmupFrames, ROLE_ENTRY_WARMUP_FRAMES\)/);
+  assert.match(captureHarnessSource, /settledCaptureRoleId = request\.roleId;/);
 });
 
 test("runtime debug reports FUnit metadata without mixing it into UTJ spring runtime", () => {
@@ -887,6 +922,11 @@ test("custom composer narrows SpringBone records to the active root for each par
 
   assert.match(composerSource, /selectRuntimePartActiveRoots/);
   assert.match(composerSource, /filterRuntimeRecordsByActiveRoots/);
+  assert.match(composerSource, /extraBones: springBone\.extraBones as RuntimeExtraBone\[\] \| undefined/);
+  assert.match(composerSource, /remapRuntimeExtraBones/);
+  assert.match(composerSource, /raw: mergeRuntimeRawSpringBone\(remappedParts\)/);
+  assert.match(composerSource, /pjskSpringBone:\s*\{\s*raw: runtimeSetup\.raw,\s*runtimeUnitySetup: runtimeSetup,/);
+  assert.match(composerSource, /extraBones,\s+colliders,/);
   assert.match(composerSource, /filterColliderBindingsByActiveBones/);
   assert.match(composerSource, /filterManagerColliderCachesByActiveManagers/);
   assert.match(composerSource, /partType === "body" && activeRoots\.includes\("body"\)/);
@@ -894,6 +934,10 @@ test("custom composer narrows SpringBone records to the active root for each par
   assert.match(composerSource, /activeRoots\.includes\("face"\)/);
   assert.match(composerSource, /selectedActiveRoots/);
   assert.match(composerSource, /activeRoots: selectedActiveRoots/);
+  assert.match(composerSource, /manager\.bonePathIds = inferredBonePathIds/);
+  assert.doesNotMatch(composerSource, /manager\.bonePathIds\.length === 0/);
+  assert.match(composerSource, /cache\.springBonePathIds = inferredBonePathIds/);
+  assert.match(composerSource, /rebuild SpringManager ownership from composed hierarchy/);
 });
 
 test("custom composer rebinds head colliderFlag springs to active body colliders", () => {
@@ -929,6 +973,38 @@ test("custom capture exposes SpringBone trace and named offset diagnostics", () 
   assert.match(engineSource, /getSnapshots\(\{\s+springDebugBones: request\.springDebugBones/s);
   assert.match(springSource, /debugOffsets/);
   assert.match(springSource, /springDebugAllOffsets/);
+});
+
+test("unity-prefab SpringBone keeps direct serialized colliders out of manager-cache filtering", () => {
+  const prefabSpringSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
+    "utf8"
+  );
+  const utjSpringSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/utjSpringBoneRuntimeAdapter.ts"),
+    "utf8"
+  );
+
+  assert.match(prefabSpringSource, /bindingKind === "colliderFlag" && candidateRoots\.size > 0/);
+  assert.doesNotMatch(prefabSpringSource, /filterCollidersByManagerCache\(directColliders/);
+  assert.match(prefabSpringSource, /direct serialized collider references \/ pose root preference/);
+  assert.doesNotMatch(utjSpringSource, /filterCollidersByManagerCache\(group\.colliders/);
+  assert.match(utjSpringSource, /direct serialized collider references \/ pose root preference/);
+});
+
+test("utj SpringBone runtime includes official force provider variants", () => {
+  const utjSpringSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/utjSpringBoneRuntimeAdapter.ts"),
+    "utf8"
+  );
+
+  assert.match(utjSpringSource, /type RuntimeForceProvider = RuntimeForceVolume \| RuntimeWindVolume \| RuntimeWindVolumeOneSelf/);
+  assert.match(utjSpringSource, /kind: "ForceVolume"/);
+  assert.match(utjSpringSource, /kind: "WindVolume"/);
+  assert.match(utjSpringSource, /computeForceVolume/);
+  assert.match(utjSpringSource, /computeWindVolume/);
+  assert.match(utjSpringSource, /positionalMultiplier/);
+  assert.match(utjSpringSource, /offsetVector/);
 });
 
 test("docker runtime image includes capture server config module", () => {
@@ -1067,6 +1143,9 @@ test("Sekai ExtraBone runtime follows official rotation order and coefficient di
   assert.match(extraBoneSource, /const sign = entry\.coefficient > 0 \? -1 : entry\.coefficient < 0 \? 1 : 0/);
   assert.match(extraBoneSource, /entry\.node\.quaternion\.copy\(entry\.defaultQuaternion\)\.slerp/);
   assert.match(extraBoneSource, /Math\.abs\(entry\.coefficient\)/);
+  assert.match(extraBoneSource, /function readExtraBoneEntries/);
+  assert.match(extraBoneSource, /partRecord\?\.extraBones \?\? partRecord\?\.ExtraBones/);
+  assert.doesNotMatch(extraBoneSource, /EX_/);
 });
 
 test("part runtime loader preserves registry package path on loaded packages", () => {

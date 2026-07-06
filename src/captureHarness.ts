@@ -67,8 +67,10 @@ const engine = new Haruki3DEngine({
   manageResize: false,
 });
 
+const ROLE_ENTRY_WARMUP_FRAMES = 60;
 let captureRuntimePackagePromise: Promise<void> | null = null;
 let captureRuntimePackageRoleId: string | null = null;
+let settledCaptureRoleId: string | null = null;
 
 function getCaptureWindow() {
   return window as CaptureWindow;
@@ -324,10 +326,14 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
     document.body.dataset.captureError = "";
     await ensureCaptureRuntimePackage(config, request.roleId);
     engine.setViewportSize(root.clientWidth, root.clientHeight);
+    const requestedWarmupFrames = request.warmupFrames ?? config.warmupFrames;
+    const warmupFrames = settledCaptureRoleId === request.roleId
+      ? requestedWarmupFrames
+      : Math.max(requestedWarmupFrames, ROLE_ENTRY_WARMUP_FRAMES);
     const result = await engine.captureRoleParts({
       ...request,
       phase: request.phase ?? config.phase,
-      warmupFrames: request.warmupFrames ?? config.warmupFrames,
+      warmupFrames,
       warmupMode: request.warmupMode ?? config.warmupMode,
       cameraPreset: request.cameraPreset ?? config.cameraPreset,
       cameraProfile: request.cameraProfile ?? config.cameraProfile,
@@ -338,6 +344,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       faceSdfDebugLightMode: request.faceSdfDebugLightMode ?? config.faceSdfDebugLightMode,
       projectedShadow: request.projectedShadow ?? config.projectedShadow,
     });
+    settledCaptureRoleId = request.roleId;
     const snapshots = {
       ...result.snapshots,
       utjSpringBoneTrace: engine.getUtjSpringBoneTraceSnapshot(),
