@@ -723,13 +723,9 @@ function assertHeadHairCompatible(
     return;
   }
   const key = compatibilityKey(selection.unit, selection.headCostume3dId, selection.hairCostume3dId);
-  const { availableKeys, deniedKeys, availableHeadKeys } = buildCompatibilityKeys(compatibility);
+  const deniedKeys = buildDeniedCompatibilityKeys(compatibility);
   if (deniedKeys.has(key)) {
     throw new Error(`Head ${selection.headCostume3dId} and hair ${selection.hairCostume3dId} are not available together.`);
-  }
-  const availableHeadKey = compatibilityHeadKey(selection.unit, selection.headCostume3dId);
-  if (availableHeadKeys.has(availableHeadKey) && !availableKeys.has(key)) {
-    throw new Error(`Head ${selection.headCostume3dId} and hair ${selection.hairCostume3dId} are not in the available pattern list for unit ${selection.unit ?? ""}.`);
   }
 }
 
@@ -747,27 +743,8 @@ function buildDeniedCompatibilityKeys(compatibility: HeadHairCompatibility | nul
   );
 }
 
-function buildCompatibilityKeys(compatibility: HeadHairCompatibility) {
-  const availableKeys = new Set<string>();
-  const availableHeadKeys = new Set<string>();
-  const deniedKeys = buildDeniedCompatibilityKeys(compatibility);
-  const availableEntries = [
-    ...(compatibility.allowed ?? []),
-    ...(compatibility.rules ?? []).filter((entry) => entry.state === "available"),
-  ];
-  for (const entry of availableEntries) {
-    availableKeys.add(compatibilityKey(entry.unit, entry.headCostume3dId, entry.hairCostume3dId));
-    availableHeadKeys.add(compatibilityHeadKey(entry.unit, entry.headCostume3dId));
-  }
-  return { availableKeys, availableHeadKeys, deniedKeys };
-}
-
 function compatibilityKey(unit: string | null | undefined, headCostume3dId: number, hairCostume3dId: number) {
   return `${normalizeUnit(unit)}|${headCostume3dId}|${hairCostume3dId}`;
-}
-
-function compatibilityHeadKey(unit: string | null | undefined, headCostume3dId: number) {
-  return `${normalizeUnit(unit)}|${headCostume3dId}`;
 }
 
 function normalizeUnit(unit: string | null | undefined) {

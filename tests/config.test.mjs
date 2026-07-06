@@ -560,6 +560,18 @@ test("head material binding normalizes old runtime hair and accessory kinds befo
   assert.match(engineSource, /const kind = normalizeHeadRuntimeMaterialKind\(slot\.materialKind \?\? "face", slot\.meshName, slot\.materialName\);/);
 });
 
+test("head hair compatibility uses not-available patterns as a blacklist", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+
+  assert.match(composerSource, /buildDeniedCompatibilityKeys/);
+  assert.match(composerSource, /entry\.state === "not_available"/);
+  assert.doesNotMatch(composerSource, /availableHeadKeys/);
+  assert.doesNotMatch(composerSource, /not in the available pattern list/);
+});
+
 test("skin colors drive face skin tint while body and face shadow controls stay separate", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
