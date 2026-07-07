@@ -1,3 +1,5 @@
+import brotliWasm from "brotli-wasm";
+import { decode as decodeMessagePack } from "@msgpack/msgpack";
 import {
   characterHeightMetersById,
   previewLightDefaults,
@@ -444,6 +446,21 @@ function withPartRuntimePackagePath(
 }
 
 async function fetchRuntimeJson(url: string) {
+  const messagePackBrotliUrl = runtimeMessagePackBrotliUrl(url);
+  let messagePackBrotliError: Error | null = null;
+  if (messagePackBrotliUrl) {
+    const messagePackBrotliResponse = await fetch(messagePackBrotliUrl, { cache: "no-store" });
+    if (messagePackBrotliResponse.ok) {
+      try {
+        return await readMessagePackBrotliRuntime(messagePackBrotliResponse, messagePackBrotliUrl);
+      } catch (error) {
+        messagePackBrotliError = error instanceof Error
+          ? error
+          : new Error(`Failed to decode ${messagePackBrotliUrl}: ${String(error)}`);
+      }
+    }
+  }
+
   const gzipUrl = `${url}.gz`;
   const gzipResponse = await fetch(gzipUrl, { cache: "no-store" });
   let gzipError: Error | null = null;
@@ -459,12 +476,33 @@ async function fetchRuntimeJson(url: string) {
 
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
+    if (messagePackBrotliError) {
+      throw messagePackBrotliError;
+    }
     if (gzipError) {
       throw gzipError;
     }
     throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
   }
   return response.json();
+}
+
+function runtimeMessagePackBrotliUrl(url: string) {
+  return url.endsWith(".json")
+    ? `${url.slice(0, -".json".length)}.msgpack.br`
+    : null;
+}
+
+async function readMessagePackBrotliRuntime(response: Response, url: string) {
+  try {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const brotli = await brotliWasm;
+    return decodeMessagePack(brotli.decompress(bytes));
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error(`Failed to decode ${url}: ${String(error)}`);
+  }
 }
 
 async function readGzipRuntimeJson(response: Response, url: string) {
