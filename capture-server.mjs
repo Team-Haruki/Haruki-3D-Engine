@@ -56,6 +56,14 @@ const mimeByExtension = new Map([
   [".wasm", "application/wasm"],
 ]);
 
+function contentTypeForPath(filePath) {
+  if (filePath.endsWith(".msgpack.br")) {
+    return "application/msgpack";
+  }
+  return mimeByExtension.get(path.extname(filePath).toLowerCase()) ??
+    "application/octet-stream";
+}
+
 let queue = Promise.resolve();
 
 function enqueue(task) {
@@ -92,8 +100,7 @@ function serveResolvedFile(filePath, req, res, extraHeaders = {}) {
       return;
     }
     const headers = {
-      "content-type": mimeByExtension.get(path.extname(filePath).toLowerCase()) ??
-        "application/octet-stream",
+      "content-type": contentTypeForPath(filePath),
       "content-length": String(stat.size),
       "cache-control": "no-store",
       "access-control-allow-origin": "*",

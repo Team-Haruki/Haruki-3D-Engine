@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ensureRoleRuntimePackage,
+  fetchRuntimeJson,
   loadRuntimePackageFromBaseUrl,
   type RuntimePackageLoadOptions,
   type RuntimePackageLoadResult,
@@ -3431,11 +3432,7 @@ function unityMotionTrackToThreeTrack(track: UnityMotionTrack0414): THREE.Keyfra
 }
 
 async function loadUnityMotionClips(url: string): Promise<THREE.AnimationClip[]> {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) {
-    throw new Error(`Failed to load Unity motion JSON ${url}: ${response.status} ${response.statusText}`);
-  }
-  const runtime = readUnityMotionRuntime0414(await response.json());
+  const runtime = readUnityMotionRuntime0414(await fetchRuntimeJson(url));
   return runtime.clips.map((clip) => {
     const tracks = clip.tracks.map(unityMotionTrackToThreeTrack);
     const duration = tracks

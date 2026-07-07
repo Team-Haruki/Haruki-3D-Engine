@@ -445,7 +445,7 @@ function withPartRuntimePackagePath(
   };
 }
 
-async function fetchRuntimeJson(url: string) {
+export async function fetchRuntimeJson(url: string) {
   const messagePackBrotliUrl = runtimeMessagePackBrotliUrl(url);
   let messagePackBrotliError: Error | null = null;
   if (messagePackBrotliUrl) {

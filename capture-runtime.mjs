@@ -20,6 +20,7 @@ const mimeByExtension = new Map([
   [".js", "text/javascript; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".json", "application/json; charset=utf-8"],
+  [".msgpack", "application/msgpack"],
   [".png", "image/png"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
@@ -28,6 +29,14 @@ const mimeByExtension = new Map([
   [".vrm", "model/gltf-binary"],
   [".wasm", "application/wasm"],
 ]);
+
+function contentTypeForPath(filePath) {
+  if (filePath.endsWith(".msgpack.br")) {
+    return "application/msgpack";
+  }
+  return mimeByExtension.get(path.extname(filePath).toLowerCase()) ??
+    "application/octet-stream";
+}
 
 export function parseArgs(argv) {
   const options = {
@@ -309,9 +318,13 @@ Options:
 
 function assertConverterPackage(inputDir) {
   const runtimePath = path.join(inputDir, "pjsk-sekai-runtime.extension.json");
-  if (!fs.existsSync(runtimePath)) {
+  if (
+    !fs.existsSync(runtimePath) &&
+    !fs.existsSync(`${runtimePath}.gz`) &&
+    !fs.existsSync(runtimePath.replace(/\.json$/, ".msgpack.br"))
+  ) {
     throw new Error(
-      `Capture requires a full runtime package: missing ${runtimePath}`
+      `Capture requires a full runtime package: missing ${runtimePath}, ${runtimePath}.gz, or ${runtimePath.replace(/\.json$/, ".msgpack.br")}`
     );
   }
 }
@@ -320,9 +333,14 @@ function assertPartRegistryPackage(inputDir) {
   const registryPath = path.join(inputDir, "parts", "part-registry.json");
   const characterIndexPath = path.join(inputDir, "character3d-index.json");
   for (const filePath of [registryPath, characterIndexPath]) {
-    if (!fs.existsSync(filePath) && !fs.existsSync(`${filePath}.gz`)) {
+    const messagePackBrotliPath = filePath.replace(/\.json$/, ".msgpack.br");
+    if (
+      !fs.existsSync(filePath) &&
+      !fs.existsSync(`${filePath}.gz`) &&
+      !fs.existsSync(messagePackBrotliPath)
+    ) {
       throw new Error(
-        `Part-registry capture requires ${filePath} or ${filePath}.gz`
+        `Part-registry capture requires ${filePath}, ${filePath}.gz, or ${messagePackBrotliPath}`
       );
     }
   }
@@ -360,8 +378,7 @@ function serveFile(filePath, req, res) {
       return;
     }
     const headers = {
-      "content-type": mimeByExtension.get(path.extname(filePath).toLowerCase()) ??
-        "application/octet-stream",
+      "content-type": contentTypeForPath(filePath),
       "content-length": String(stat.size),
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
