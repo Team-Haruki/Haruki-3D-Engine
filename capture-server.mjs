@@ -186,6 +186,10 @@ function validateCaptureRequest(input) {
   if (!/^\d+(?::[A-Za-z0-9_/-]+)?$/.test(roleId)) {
     throw new Error("roleId must be '<characterId>:<unit>' or '<characterId>'.");
   }
+  const region = String(input.region ?? "").trim();
+  if (region !== "" && !/^[A-Za-z0-9_-]+$/.test(region)) {
+    throw new Error("region must match /^[A-Za-z0-9_-]+$/.");
+  }
   const readId = (name) => {
     const value = Number(input[name]);
     if (!Number.isInteger(value) || value <= 0) {
@@ -234,6 +238,8 @@ function validateCaptureRequest(input) {
     imageId,
     cacheMode,
     ttlMs: cacheMode === "temporary" ? readTtlMs(input.ttlSeconds) : 0,
+    runtimeBaseUrl: region === "" ? "/runtime/" : `/runtime/${region}/`,
+    region: region || null,
     roleId,
     bodyCostume3dId: readId("bodyCostume3dId"),
     headCostume3dId: readId("headCostume3dId"),

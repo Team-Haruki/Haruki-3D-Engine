@@ -194,7 +194,8 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
   assert.ok(loaderSource.includes("ensureCompatibilityForSelection"));
   assert.ok(loaderSource.includes("findRegistryEntry(entry.characterId, \"head_optional\", entry.headCostume3dId, entry.unit)"));
   assert.ok(wardrobeSource.includes("ensureCompatibility?: (selection: CustomPartSelection) => Promise<void>;"));
-  assert.ok(captureHarnessSource.includes("captureRuntimePackageRoleId"));
+  assert.ok(captureHarnessSource.includes("captureRuntimePackageKey"));
+  assert.ok(captureHarnessSource.includes("const packageKey = `${baseUrl}|${roleId}`;"));
   assert.ok(captureHarnessSource.includes("roleId,"));
 });
 
@@ -332,6 +333,9 @@ test("persistent capture server propagates config defaults into role parts captu
 test("docker runtime image includes capture server support modules", () => {
   const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
 
+  assert.match(dockerfile, /ARG CHROMIUM_DEBIAN_VERSION=147\.0\.7727\.137-1~deb12u1/);
+  assert.match(dockerfile, /chromium=\$\{CHROMIUM_DEBIAN_VERSION\}/);
+  assert.match(dockerfile, /chromium-common=\$\{CHROMIUM_DEBIAN_VERSION\}/);
   assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);
   assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
   assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1400/);

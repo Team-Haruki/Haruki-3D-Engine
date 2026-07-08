@@ -69,7 +69,7 @@ const engine = new Haruki3DEngine({
 
 const ROLE_ENTRY_WARMUP_FRAMES = 60;
 let captureRuntimePackagePromise: Promise<void> | null = null;
-let captureRuntimePackageRoleId: string | null = null;
+let captureRuntimePackageKey: string | null = null;
 let settledCaptureRoleId: string | null = null;
 
 function getCaptureWindow() {
@@ -289,15 +289,16 @@ function setCaptureError(error: unknown) {
   getCaptureWindow().__PJSK_CAPTURE_ERROR__ = message;
 }
 
-async function ensureCaptureRuntimePackage(config: CaptureConfig, roleId: string) {
-  if (captureRuntimePackagePromise && captureRuntimePackageRoleId !== roleId) {
+async function ensureCaptureRuntimePackage(config: CaptureConfig, roleId: string, baseUrl = config.baseUrl) {
+  const packageKey = `${baseUrl}|${roleId}`;
+  if (captureRuntimePackagePromise && captureRuntimePackageKey !== packageKey) {
     captureRuntimePackagePromise = null;
-    captureRuntimePackageRoleId = null;
+    captureRuntimePackageKey = null;
   }
   if (!captureRuntimePackagePromise) {
-    captureRuntimePackageRoleId = roleId;
+    captureRuntimePackageKey = packageKey;
     captureRuntimePackagePromise = engine.loadRuntimePackage({
-      baseUrl: config.baseUrl,
+      baseUrl,
       fullRuntimeOnly: config.fullRuntimeOnly,
       deferDefaultSelection: !config.fullRuntimeOnly,
       roleId,
@@ -305,7 +306,7 @@ async function ensureCaptureRuntimePackage(config: CaptureConfig, roleId: string
       applyFaceMotion: config.fullRuntimeOnly,
     }).then(() => undefined, (error) => {
       captureRuntimePackagePromise = null;
-      captureRuntimePackageRoleId = null;
+      captureRuntimePackageKey = null;
       throw error;
     });
   }
@@ -324,7 +325,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
     getCaptureWindow().__PJSK_CAPTURE_ERROR__ = "";
     document.body.dataset.captureReady = "false";
     document.body.dataset.captureError = "";
-    await ensureCaptureRuntimePackage(config, request.roleId);
+    await ensureCaptureRuntimePackage(config, request.roleId, request.runtimeBaseUrl);
     engine.setViewportSize(root.clientWidth, root.clientHeight);
     const requestedWarmupFrames = request.warmupFrames ?? config.warmupFrames;
     const warmupFrames = settledCaptureRoleId === request.roleId

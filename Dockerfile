@@ -8,8 +8,13 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 
+ARG CHROMIUM_DEBIAN_VERSION=147.0.7727.137-1~deb12u1
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends chromium fonts-noto-cjk ca-certificates \
+  && apt-get install -y --no-install-recommends \
+    chromium=${CHROMIUM_DEBIAN_VERSION} \
+    chromium-common=${CHROMIUM_DEBIAN_VERSION} \
+    fonts-noto-cjk \
+    ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

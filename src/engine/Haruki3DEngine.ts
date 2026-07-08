@@ -183,6 +183,8 @@ export type HarukiRuntimePackageRequest = RuntimePackageLoadOptions & {
 };
 
 export type HarukiCaptureRolePartsRequest = {
+  runtimeBaseUrl?: string;
+  region?: string | null;
   roleId: string;
   bodyCostume3dId: number;
   headCostume3dId: number;
