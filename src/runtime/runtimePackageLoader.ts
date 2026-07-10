@@ -113,10 +113,15 @@ export function resolveRuntimePackageUrl(baseUrl: string, relativePath: string) 
   if (!base.pathname.endsWith("/")) {
     base.pathname = `${base.pathname}/`;
   }
-  const normalized = relativePath
+  const parts = relativePath
     .replace(/\\/g, "/")
     .replace(/^\/+/, "")
     .split("/")
+    .filter((part) => part.length > 0);
+  if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
+    throw new Error(`Invalid runtime package relative path: ${relativePath}`);
+  }
+  const normalized = parts
     .map((part) => encodeURIComponent(part))
     .join("/");
   return new URL(normalized, base).toString();
@@ -635,8 +640,7 @@ function selectPartRuntimeCandidates(
   const scored = registry
     .filter(isLoadableRegistryEntry)
     .filter((entry) => {
-      const key = `${entry.characterId}|${entry.partType}|${entry.costume3dId}|${entry.packagePath}`;
-      return !seen.has(key);
+      return !seen.has(entry.packagePath);
     })
     .map((entry, index) => ({
       entry,

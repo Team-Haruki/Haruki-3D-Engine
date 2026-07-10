@@ -65,11 +65,24 @@ function contentTypeForPath(filePath) {
 }
 
 let queue = Promise.resolve();
+const MAX_PENDING_CAPTURES = 16;
+const MAX_CAPTURE_DIMENSION = 2048;
+const MAX_CAPTURE_WARMUP_MS = 300000;
+const MAX_CAPTURE_WARMUP_FRAMES = 600;
+const MAX_CAPTURE_TIMEOUT_MS = 300000;
+const MAX_TRACE_EVENTS = 10000;
+let pendingCaptureCount = 0;
 
 function enqueue(task) {
+  if (pendingCaptureCount >= MAX_PENDING_CAPTURES) {
+    throw new Error("Capture queue is full.");
+  }
+  pendingCaptureCount += 1;
   const run = queue.then(task, task);
   queue = run.catch(() => {});
-  return run;
+  return run.finally(() => {
+    pendingCaptureCount -= 1;
+  });
 }
 
 function sendJson(res, status, body) {
@@ -112,7 +125,16 @@ function serveResolvedFile(filePath, req, res, extraHeaders = {}) {
       return;
     }
     res.writeHead(200, headers);
-    fs.createReadStream(filePath).pipe(res);
+    const stream = fs.createReadStream(filePath);
+    stream.on("error", (error) => {
+      if (res.headersSent) {
+        res.destroy(error);
+        return;
+      }
+      res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+      res.end("failed to read file");
+    });
+    stream.pipe(res);
   });
 }
 
@@ -171,6 +193,15 @@ function readRequestJson(req) {
 }
 
 function validateCaptureRequest(input) {
+  const readNumber = (value, fallback) => {
+    if (value === undefined || value === null || value === "") {
+      return fallback;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const readIntInRange = (value, fallback, min, max) =>
+    Math.min(Math.max(Math.trunc(readNumber(value, fallback)), min), max);
   const cacheMode = input.cacheMode === "temporary" ? "temporary" : "persistent";
   let imageId = String(input.imageId ?? "");
   if (imageId === "") {
@@ -248,12 +279,17 @@ function validateCaptureRequest(input) {
       optionalHeadOptional === undefined || optionalHeadOptional === null
         ? null
         : readId("headOptionalCostume3dId"),
-    phase: Number(input.phase) || defaultPhase,
+    phase: Math.min(Math.max(readNumber(input.phase, defaultPhase), 0), 1),
     cameraPreset: normalizeCameraPreset(input.cameraPreset, defaultCameraPreset),
     cameraProfile: normalizeCameraProfile(input.cameraProfile, defaultCameraProfile),
     characterYawMode: normalizeCharacterYawMode(input.characterYawMode, null),
-    warmupMs: Math.max(Math.trunc(Number(input.warmupMs) || defaultWarmupMs), 0),
-    warmupFrames: Math.max(Math.trunc(Number(input.warmupFrames) || defaultWarmupFrames), 0),
+    warmupMs: readIntInRange(input.warmupMs, defaultWarmupMs, 0, MAX_CAPTURE_WARMUP_MS),
+    warmupFrames: readIntInRange(
+      input.warmupFrames,
+      defaultWarmupFrames,
+      0,
+      MAX_CAPTURE_WARMUP_FRAMES
+    ),
     warmupMode: input.warmupMode === "runtime" ? "runtime" : defaultWarmupMode === "runtime" ? "runtime" : "animation",
     bodyDebugMode: normalizeBodyDebugMode(input.bodyDebugMode),
     faceSdfEnabled: input.faceSdfEnabled === undefined
@@ -262,14 +298,17 @@ function validateCaptureRequest(input) {
     faceSdfDebugMode: normalizeFaceSdfDebugMode(input.faceSdfDebugMode),
     faceSdfDebugLightMode: normalizeFaceSdfDebugLightMode(input.faceSdfDebugLightMode),
     projectedShadow: readProjectedShadow(input.projectedShadow),
-    width: Math.max(Math.trunc(Number(input.width) || defaultWidth), 320),
-    height: Math.max(Math.trunc(Number(input.height) || defaultHeight), 320),
-    scale: Math.min(Math.max(Number(input.scale) || defaultScale, 1), 2),
-    timeoutMs: Math.max(Math.trunc(Number(input.timeoutMs) || defaultTimeoutMs), 5000),
+    width: readIntInRange(input.width, defaultWidth, 320, MAX_CAPTURE_DIMENSION),
+    height: readIntInRange(input.height, defaultHeight, 320, MAX_CAPTURE_DIMENSION),
+    scale: Math.min(Math.max(readNumber(input.scale, defaultScale), 1), 2),
+    timeoutMs: readIntInRange(input.timeoutMs, defaultTimeoutMs, 5000, MAX_CAPTURE_TIMEOUT_MS),
     traceUtjBones: readStringList(input.traceUtjBones, input.traceUtjBone),
-    traceUtjMaxEvents: Math.max(
-      Math.trunc(Number.isFinite(traceMaxEvents) ? traceMaxEvents : 240),
-      1
+    traceUtjMaxEvents: Math.min(
+      Math.max(
+        Math.trunc(Number.isFinite(traceMaxEvents) ? traceMaxEvents : 240),
+        1
+      ),
+      MAX_TRACE_EVENTS
     ),
     springDebugBones: readStringList(input.springDebugBones, input.springDebugBone),
     springDebugAllOffsets: readBoolean(input.springDebugAllOffsets),
@@ -465,7 +504,8 @@ class DevToolsSocket {
       socket.on("data", onHandshakeData);
       socket.once("error", reject);
       socket.once("close", () => {
-        for (const { reject: rejectPending } of this.pending.values()) {
+        for (const { reject: rejectPending, timer } of this.pending.values()) {
+          clearTimeout(timer);
           rejectPending(new Error("DevTools socket closed."));
         }
         this.pending.clear();
@@ -473,13 +513,18 @@ class DevToolsSocket {
     });
   }
 
-  send(method, params = {}) {
+  send(method, params = {}, timeoutMs = defaultTimeoutMs) {
     const id = this.nextId;
     this.nextId += 1;
     const payload = JSON.stringify({ id, method, params });
-    this.socket.write(this.encodeFrame(Buffer.from(payload, "utf8")));
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`DevTools command timed out: ${method}`));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id, { resolve, reject, timer });
+      this.socket.write(this.encodeFrame(Buffer.from(payload, "utf8")));
     });
   }
 
@@ -567,6 +612,7 @@ class DevToolsSocket {
       return;
     }
     this.pending.delete(parsed.id);
+    clearTimeout(pending.timer);
     if (parsed.error) {
       pending.reject(new Error(parsed.error.message ?? JSON.stringify(parsed.error)));
     } else {
@@ -586,7 +632,7 @@ async function waitForRuntimeReady(client, timeoutMs) {
           : window.__PJSK_CAPTURE_ERROR__ || document.body?.dataset?.captureError || ""
       }))()`,
       returnByValue: true,
-    });
+    }, Math.max(deadline - Date.now(), 1));
     const value = result.result?.value;
     if (value?.error) {
       throw new Error(value.error);
@@ -695,15 +741,15 @@ class CaptureRuntimeSession {
       const target = await waitForPageTarget(debugPort, timeoutMs);
       this.client = new DevToolsSocket(target.webSocketDebuggerUrl);
       await this.client.connect();
-      await this.client.send("Page.enable");
-      await this.client.send("Runtime.enable");
+      await this.client.send("Page.enable", {}, timeoutMs);
+      await this.client.send("Runtime.enable", {}, timeoutMs);
       await this.client.send("Emulation.setDeviceMetricsOverride", {
         width: defaultWidth,
         height: defaultHeight,
         deviceScaleFactor: defaultScale,
         mobile: false,
-      });
-      await this.client.send("Page.navigate", { url: pageUrl });
+      }, timeoutMs);
+      await this.client.send("Page.navigate", { url: pageUrl }, timeoutMs);
       await waitForRuntimeReady(this.client, timeoutMs);
       this.ready = true;
     } catch (error) {
@@ -728,6 +774,8 @@ class CaptureRuntimeSession {
     this.client = null;
     const chromium = this.chromium;
     this.chromium = null;
+    const oldTempRoot = this.tempRoot;
+    this.tempRoot = "";
     if (chromium) {
       chromium.kill("SIGTERM");
       await new Promise((resolve) => {
@@ -741,9 +789,7 @@ class CaptureRuntimeSession {
         });
       });
     }
-    if (this.tempRoot) {
-      const oldTempRoot = this.tempRoot;
-      this.tempRoot = "";
+    if (oldTempRoot) {
       await removePathWithRetry(oldTempRoot);
     }
   }
@@ -755,23 +801,23 @@ class CaptureRuntimeSession {
       height: request.height,
       deviceScaleFactor: request.scale,
       mobile: false,
-    });
+    }, request.timeoutMs);
     const result = await this.client.send("Runtime.evaluate", {
       expression: `window.__HARUKI_CAPTURE_REQUEST__(${JSON.stringify(request)})`,
       awaitPromise: true,
       returnByValue: true,
-    });
+    }, request.timeoutMs);
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.text ?? "Capture request failed.");
     }
     await this.client.send("Runtime.evaluate", {
       expression: "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
       awaitPromise: true,
-    });
+    }, request.timeoutMs);
     const image = await this.client.send("Page.captureScreenshot", {
       format: "png",
       fromSurface: true,
-    });
+    }, request.timeoutMs);
     return {
       png: Buffer.from(image.data, "base64"),
       snapshots: result.result?.value?.snapshots ?? null,
@@ -808,7 +854,10 @@ async function captureRoleParts(input) {
   const request = validateCaptureRequest(input);
   fs.mkdirSync(captureOutputDir, { recursive: true });
   const outputPath = path.join(captureOutputDir, `${request.imageId}.png`);
-  const tempOutputPath = path.join(captureOutputDir, `.${request.imageId}.${process.pid}.tmp`);
+  const tempOutputPath = path.join(
+    captureOutputDir,
+    `.${request.imageId}.${process.pid}.${crypto.randomUUID()}.tmp`
+  );
   try {
     let result;
     try {
@@ -817,7 +866,7 @@ async function captureRoleParts(input) {
       await captureSession.restart(request.timeoutMs);
       result = await captureSession.capture(request);
     }
-    fs.writeFileSync(tempOutputPath, ensurePngRgba(result.png));
+    fs.writeFileSync(tempOutputPath, ensurePngRgba(result.png), { flag: "wx" });
     fs.renameSync(tempOutputPath, outputPath);
     if (request.cacheMode === "temporary" && request.ttlMs > 0) {
       const expiresAt = Date.now() + request.ttlMs;

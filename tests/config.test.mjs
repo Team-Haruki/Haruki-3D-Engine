@@ -360,9 +360,11 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
     "utf8"
   );
 
-  assert.match(serverSource, /warmupFrames:\s*Math\.max\(Math\.trunc\(Number\(input\.warmupFrames\)/);
+  assert.match(serverSource, /warmupFrames:\s*readIntInRange\(\s*input\.warmupFrames/);
+  assert.match(serverSource, /warmupMs:\s*readIntInRange\(input\.warmupMs/);
   assert.match(serverSource, /warmupMode:\s*input\.warmupMode === "runtime" \? "runtime" : defaultWarmupMode === "runtime" \? "runtime" : "animation"/);
   assert.match(harnessSource, /const requestedWarmupFrames = request\.warmupFrames \?\? config\.warmupFrames/);
+  assert.match(harnessSource, /warmupMs:\s*request\.warmupMs \?\? config\.warmupMs/);
   assert.match(harnessSource, /warmupFrames,\s*warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
   assert.match(harnessSource, /warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
   assert.match(engineSource, /warmupFrames\?: number/);
@@ -850,7 +852,11 @@ test("custom selection mutations are serialized and skip exact resolved reimport
   assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
   assert.match(engineSource, /preserveAnimation:\s*!roleChanged/);
   assert.match(engineSource, /clearAnimationCache:\s*roleChanged/);
-  assert.match(engineSource, /sameResolvedSelection[\s\S]*this\.resetCurrentSpringRuntimeState\(\)/);
+  const sameSelectionBranch = engineSource.slice(
+    engineSource.indexOf("const sameResolvedSelection"),
+    engineSource.indexOf("if (!roleChanged && previousAnimation.selection.motionUrl)")
+  );
+  assert.doesNotMatch(sameSelectionBranch, /resetCurrentSpringRuntimeState/);
   assert.match(engineSource, /if \(isEnabled && !wasEnabled\) \{\s*this\.resetAndSettleCurrentSpringRuntime\(60\);/);
   assert.doesNotMatch(engineSource, /settleCurrentPose\(\)/);
   assert.match(engineSource, /private async captureRolePartsInternal/);
@@ -874,17 +880,18 @@ test("engine releases old role WebGL resources before cross-role capture growth"
   assert.match(engineSource, /this\.renderer\.info\.reset\(\)/);
 });
 
-test("capture harness only forces spring entry warmup for the first image in a role sequence", () => {
+test("capture harness forces spring entry warmup once per runtime region and role", () => {
   const captureHarnessSource = fs.readFileSync(
     path.join(repoRoot, "src/captureHarness.ts"),
     "utf8"
   );
 
   assert.match(captureHarnessSource, /const ROLE_ENTRY_WARMUP_FRAMES = 60;/);
-  assert.match(captureHarnessSource, /let settledCaptureRoleId: string \| null = null;/);
+  assert.match(captureHarnessSource, /let settledCapturePackageKey: string \| null = null;/);
+  assert.match(captureHarnessSource, /const packageKey = `\$\{baseUrl\}\|\$\{request\.roleId\}`;/);
   assert.match(captureHarnessSource, /const requestedWarmupFrames = request\.warmupFrames \?\? config\.warmupFrames;/);
-  assert.match(captureHarnessSource, /settledCaptureRoleId === request\.roleId\s+\?\s+requestedWarmupFrames\s+:\s+Math\.max\(requestedWarmupFrames, ROLE_ENTRY_WARMUP_FRAMES\)/);
-  assert.match(captureHarnessSource, /settledCaptureRoleId = request\.roleId;/);
+  assert.match(captureHarnessSource, /settledCapturePackageKey === packageKey\s+\?\s+requestedWarmupFrames\s+:\s+Math\.max\(requestedWarmupFrames, ROLE_ENTRY_WARMUP_FRAMES\)/);
+  assert.match(captureHarnessSource, /settledCapturePackageKey = packageKey;/);
 });
 
 test("runtime debug reports FUnit metadata without mixing it into UTJ spring runtime", () => {

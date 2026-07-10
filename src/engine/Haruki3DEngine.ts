@@ -192,6 +192,7 @@ export type HarukiCaptureRolePartsRequest = {
   headOptionalCostume3dId?: number | null;
   imageId?: string;
   phase?: number;
+  warmupMs?: number;
   warmupFrames?: number;
   warmupMode?: "animation" | "runtime";
   cameraPreset?: PjskCameraPreset;
@@ -5736,8 +5737,6 @@ export class Haruki3DEngine {
         disposeBeforeLoad: true,
         clearAnimationCache: roleChanged,
       });
-    } else {
-      this.resetCurrentSpringRuntimeState();
     }
     if (!roleChanged && previousAnimation.selection.motionUrl) {
       await this.continueAnimationPlaybackState(previousAnimation);
@@ -5794,6 +5793,7 @@ export class Haruki3DEngine {
     await this.prepareCaptureFrame({
       phase: request.phase,
       clip: "motion_loop",
+      warmupMs: request.warmupMs,
       warmupFrames: request.warmupFrames,
       warmupMode: request.warmupMode,
       cameraPreset: request.cameraPreset,
