@@ -12,6 +12,8 @@ import {
   resolveCaptureServerOptions,
 } from "./config/haruki-3d-engine-config.mjs";
 import { ensurePngRgba } from "./png-rgba.mjs";
+import { applyRouteRegion, resolveRegionRoute } from "./region-routing.mjs";
+import { decodeMsgpackBrotliAsJSON } from "./runtime-codec.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -163,6 +165,24 @@ function serveRuntimeFile(root, relativePath, req, res) {
         "content-type": "application/json; charset=utf-8",
         "content-encoding": "gzip",
       });
+      return;
+    }
+    const msgpackBrotliPath = filePath.replace(/\.json$/i, ".msgpack.br");
+    if (fs.existsSync(msgpackBrotliPath)) {
+      try {
+        const payload = decodeMsgpackBrotliAsJSON(fs.readFileSync(msgpackBrotliPath));
+        const headers = {
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(Buffer.byteLength(payload)),
+          "cache-control": "no-store",
+          "access-control-allow-origin": "*",
+        };
+        res.writeHead(200, headers);
+        res.end(req.method === "HEAD" ? undefined : payload);
+      } catch {
+        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
+        res.end("failed to decode runtime registry");
+      }
       return;
     }
   }
@@ -889,13 +909,20 @@ async function captureRoleParts(input) {
 const server = http.createServer(async (req, res) => {
   try {
     const requestUrl = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-    if (req.method === "GET" && requestUrl.pathname === "/healthz") {
+    const route = resolveRegionRoute(requestUrl.pathname, runtimeRoot);
+    if (!route) {
+      res.writeHead(404);
+      res.end("not found");
+      return;
+    }
+    const requestPath = route.pathname;
+    if (req.method === "GET" && requestPath === "/healthz") {
       sendJson(res, 200, { ok: true, ...captureSession.status() });
       return;
     }
-    if (req.method === "POST" && requestUrl.pathname === "/capture") {
+    if (req.method === "POST" && requestPath === "/capture") {
       clearIdleShutdownTimer();
-      const body = await readRequestJson(req);
+      const body = applyRouteRegion(await readRequestJson(req), route.region);
       const result = await enqueue(async () => {
         clearIdleShutdownTimer();
         try {
@@ -907,16 +934,16 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, 200, result);
       return;
     }
-    if ((req.method === "GET" || req.method === "HEAD") && requestUrl.pathname.startsWith("/captures/")) {
-      serveFile(captureOutputDir, requestUrl.pathname.slice("/captures/".length), req, res);
+    if ((req.method === "GET" || req.method === "HEAD") && requestPath.startsWith("/captures/")) {
+      serveFile(captureOutputDir, requestPath.slice("/captures/".length), req, res);
       return;
     }
-    if ((req.method === "GET" || req.method === "HEAD") && requestUrl.pathname.startsWith("/runtime/")) {
-      serveRuntimeFile(runtimeRoot, requestUrl.pathname.slice("/runtime/".length), req, res);
+    if ((req.method === "GET" || req.method === "HEAD") && requestPath.startsWith("/runtime/")) {
+      serveRuntimeFile(route.runtimeRoot, requestPath.slice("/runtime/".length), req, res);
       return;
     }
     if (req.method === "GET" || req.method === "HEAD") {
-      const relativePath = requestUrl.pathname === "/" ? "capture.html" : requestUrl.pathname;
+      const relativePath = requestPath === "/" ? "capture.html" : requestPath;
       serveFile(distDir, relativePath, req, res);
       return;
     }

@@ -3338,7 +3338,7 @@ function prepareRuntimeAnimationClip(
 }
 
 function isUnityMotionJsonUrl(url: string) {
-  return /(?:^|\/)unity-motion\.json(?:$|[?#])/i.test(url);
+  return /(?:^|\/)unity-motion\.(?:json|msgpack\.br)(?:$|[?#])/i.test(url);
 }
 
 function inferBodyAnimationKind(

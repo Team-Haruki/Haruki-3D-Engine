@@ -365,6 +365,12 @@ export function runtimePartSlot(part: {
   ) {
     return "head";
   }
+  if (
+    slot === "head" &&
+    isAccessoryHeadCostumeType(part.headCostume3dAssetbundleType)
+  ) {
+    return "head_optional";
+  }
   return slot;
 }
 
@@ -381,7 +387,12 @@ export function tryRuntimePartSlot(part: {
 
 function isCompleteHeadCostumeType(value: string | null | undefined) {
   const type = (value ?? "").trim().toLowerCase();
-  return type === "head_and_hair" ||
+  return type === "head_and_hair";
+}
+
+function isAccessoryHeadCostumeType(value: string | null | undefined) {
+  const type = (value ?? "").trim().toLowerCase();
+  return type === "head_only" ||
     type === "head_all" ||
     type === "head_front" ||
     type === "head_back";
@@ -476,17 +487,19 @@ export function composeRuntimeCombinedCharacterAsset(
   }
 
   const body = requirePart(partSet, selection.characterId, selection.unit, "body", selection.bodyCostume3dId);
-  const head = resolveHeadRuntime(partSet, selection);
   const hair = requirePart(partSet, selection.characterId, selection.unit, "hair", selection.hairCostume3dId);
+  const selectedHead = resolveHeadRuntime(partSet, selection);
+  const head = selectedHead && runtimePartSlot(selectedHead.part) === "head" ? selectedHead : hair;
+  const accessory = selectedHead && runtimePartSlot(selectedHead.part) === "head_optional" ? selectedHead : null;
   const optional = resolveOptionalHeadRuntime(partSet, selection);
 
   assertPartRuntimeProxyMetadata(body, "body");
   if (head) {
     assertPartRuntimeProxyMetadata(head, "head");
   }
-  assertSameRole(selection.characterId, selection.unit, [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[]);
+  assertSameRole(selection.characterId, selection.unit, [body, head, accessory, optional].filter(Boolean) as PartRuntimePackage[]);
   assertHeadHairCompatible(partSet.compatibility, selection);
-  const allRuntimes = [body, head, hair, optional].filter(Boolean) as PartRuntimePackage[];
+  const allRuntimes = [body, head, accessory, optional].filter(Boolean) as PartRuntimePackage[];
   const headHairComposition = resolveHeadHairComposition(partSet, selection, allRuntimes);
   const contributingRuntimes = filterRuntimeContributors(allRuntimes, headHairComposition);
 
@@ -494,7 +507,7 @@ export function composeRuntimeCombinedCharacterAsset(
   const bodyManifest = normalizeBodyManifestFromPart(body, resolveUrl);
   applyRoleRuntimeMotion(bodyManifest, roleRuntime);
   const headManifest = normalizeHeadManifestFromParts(
-    filterRuntimeContributors([head, hair, optional].filter(Boolean) as PartRuntimePackage[], headHairComposition),
+    filterRuntimeContributors([head, accessory, optional].filter(Boolean) as PartRuntimePackage[], headHairComposition),
     selection,
     resolveUrl
   );

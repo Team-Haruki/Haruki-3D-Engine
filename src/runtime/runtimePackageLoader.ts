@@ -493,6 +493,9 @@ export async function fetchRuntimeJson(url: string) {
 }
 
 function runtimeMessagePackBrotliUrl(url: string) {
+  if (url.endsWith(".msgpack.br")) {
+    return url;
+  }
   return url.endsWith(".json")
     ? `${url.slice(0, -".json".length)}.msgpack.br`
     : null;

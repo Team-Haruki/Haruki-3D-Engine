@@ -201,6 +201,25 @@ test("exact repeated selections preserve spring state", () => {
   assert.doesNotMatch(branch, /resetCurrentSpringRuntimeState/);
 });
 
+test("only head_and_hair replaces the face while split head types stay accessories", () => {
+  const composerSource = readSource("src/parts/runtimePartComposer.ts");
+  const classifier = sourceSlice(
+    composerSource,
+    "function isCompleteHeadCostumeType",
+    "function isAccessoryHeadCostumeType"
+  );
+  const assembly = sourceSlice(
+    composerSource,
+    "const selectedHead = resolveHeadRuntime",
+    "assertPartRuntimeProxyMetadata(body"
+  );
+
+  assert.match(classifier, /return type === "head_and_hair";/);
+  assert.doesNotMatch(classifier, /head_all|head_front|head_back/);
+  assert.match(assembly, /runtimePartSlot\(selectedHead\.part\) === "head" \? selectedHead : hair/);
+  assert.match(assembly, /runtimePartSlot\(selectedHead\.part\) === "head_optional" \? selectedHead : null/);
+});
+
 test("capture output and idle cleanup use request-owned paths", () => {
   const serverSource = readSource("capture-server.mjs");
 

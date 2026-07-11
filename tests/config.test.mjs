@@ -175,6 +175,24 @@ test("runtime package loader prefers gzip JSON packages with plain JSON fallback
   assert.ok(loaderSource.includes('const response = await fetch(url, { cache: "no-store" })'));
 });
 
+test("runtime package loader decodes role runtime paths already stored as MessagePack Brotli", () => {
+  const loaderSource = fs.readFileSync(
+    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
+    "utf8"
+  );
+
+  assert.match(loaderSource, /if \(url\.endsWith\("\.msgpack\.br"\)\) \{\s+return url;\s+\}/);
+});
+
+test("engine recognizes compressed Unity motion URLs", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(engineSource, /unity-motion\\\.\(\?:json\|msgpack\\\.br\)/);
+});
+
 test("runtime package loader supports role-scoped registries and lazy compatibility", () => {
   const loaderSource = fs.readFileSync(
     path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),

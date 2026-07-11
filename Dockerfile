@@ -34,10 +34,13 @@ ENV NODE_ENV=production \
   HARUKI_CAPTURE_CAMERA_PRESET=capture \
   PORT=8080
 
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY config ./config
 COPY capture-server.mjs ./capture-server.mjs
 COPY png-rgba.mjs ./png-rgba.mjs
+COPY region-routing.mjs runtime-codec.mjs ./
 
 EXPOSE 8080
 CMD ["node", "capture-server.mjs"]

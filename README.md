@@ -148,6 +148,13 @@ curl -X POST http://localhost:8080/capture \
   }'
 ```
 
+For a runtime root containing region directories such as `/data/runtime/jp` and
+`/data/runtime/tw`, prefix any route with `/regions/<region>`. For example,
+`/regions/jp/capture` uses the JP runtime and
+`/regions/jp/runtime/character3d-index.json` serves its registry. Existing
+unprefixed routes remain unchanged. JSON registry requests also transparently
+read compressed `.msgpack.br` registries when a JSON file is not present.
+
 The service starts one persistent headless Chromium page and keeps the engine loaded. Requests reuse that page, write only the final `/data/captures/<imageId>.png`, and atomically replace an existing file with the same id. `width` and `height` control CSS framing; `scale` controls output DPR, so `700x500` with `scale: 2` writes a `1400x1000` PNG. The service-owned Chromium profile/cache directory is removed on shutdown or session restart. Open `http://localhost:8080/capture.html` only when inspecting the harness manually.
 
 ## Development Notes
