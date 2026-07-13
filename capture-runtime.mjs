@@ -67,6 +67,7 @@ export function parseArgs(argv) {
     roleId: "",
     bodyCostume3dId: undefined,
     headCostume3dId: undefined,
+    headPackagePath: "",
     hairCostume3dId: undefined,
     headOptionalCostume3dId: undefined,
     build: false,
@@ -152,6 +153,8 @@ export function parseArgs(argv) {
       options.bodyCostume3dId = Number(readValue());
     } else if (arg === "--head-costume3d-id") {
       options.headCostume3dId = Number(readValue());
+    } else if (arg === "--head-package-path") {
+      options.headPackagePath = readValue();
     } else if (arg === "--hair-costume3d-id") {
       options.hairCostume3dId = Number(readValue());
     } else if (arg === "--head-optional-costume3d-id") {
@@ -234,6 +237,7 @@ export function parseArgs(argv) {
     options.roleId,
     options.bodyCostume3dId,
     options.headCostume3dId,
+    options.headPackagePath,
     options.hairCostume3dId,
     options.headOptionalCostume3dId,
   ];
@@ -308,6 +312,8 @@ Options:
                        Part-registry body costume3d id
   --head-costume3d-id <id>
                        Part-registry head costume3d id
+  --head-package-path <path>
+                       Exact registry packagePath when a raw head id has multiple sources
   --hair-costume3d-id <id>
                        Part-registry hair costume3d id
   --head-optional-costume3d-id <id>
@@ -708,6 +714,7 @@ async function evaluateCaptureRequest(client, options) {
     roleId: options.roleId,
     bodyCostume3dId: options.bodyCostume3dId,
     headCostume3dId: options.headCostume3dId,
+    headPackagePath: options.headPackagePath || null,
     hairCostume3dId: options.hairCostume3dId,
     headOptionalCostume3dId: options.headOptionalCostume3dId ?? null,
     imageId: options.imageId || undefined,

@@ -72,6 +72,7 @@ await engine.setCustomSelection({
   unit: "light_sound",
   bodyCostume3dId: 1001,
   headCostume3dId: 1001,
+  headPackagePath: "parts/_sources/head_optional/example/",
   hairCostume3dId: 1001,
   headOptionalCostume3dId: null,
   origin: "custom",
@@ -79,6 +80,7 @@ await engine.setCustomSelection({
 ```
 
 Custom selection is only valid inside the currently loaded role. The role key is `characterId:unit`; this matters for Miku because each unit variant is a separate role with separate availability rules. Same-role part switching preserves animation playback state and rebuilds SpringBone. Cross-role switching should call `captureRoleParts` or explicitly select/reload the role before applying parts.
+When a raw head ID has more than one independent registry source, pass that entry's exact `packagePath` as `headPackagePath`; omitting it is treated as an ambiguity, never as permission to choose one source.
 
 ## Role Capture API
 
@@ -90,6 +92,7 @@ const request: HarukiCaptureRolePartsRequest = {
   roleId: "21:light_sound",
   bodyCostume3dId: 1001,
   headCostume3dId: 1001,
+  headPackagePath: "parts/_sources/head_optional/example/",
   hairCostume3dId: 1001,
   headOptionalCostume3dId: null,
 };
@@ -139,6 +142,7 @@ content-type: application/json
   "roleId": "21:light_sound",
   "bodyCostume3dId": 1001,
   "headCostume3dId": 1001,
+  "headPackagePath": "parts/_sources/head_optional/example/",
   "hairCostume3dId": 1001,
   "headOptionalCostume3dId": null,
   "width": 700,
@@ -147,6 +151,8 @@ content-type: application/json
   "cacheMode": "persistent"
 }
 ```
+
+When more than one independent head or accessory source shares the same raw `headCostume3dId`, `headPackagePath` is required and selects the exact registry package. The engine rejects an ambiguous raw ID instead of preferring one source. Registry entries from different original sources therefore remain independent even when their raw IDs match.
 
 It writes `/data/captures/<imageId>.png` and serves it back from `GET /captures/<imageId>.png`.
 Use `cacheMode: "temporary"` plus optional `ttlSeconds` for free-form combinations that should not enter the long-lived preview cache; temporary image ids are written with a `tmp_` prefix and are removed by the capture GC after the configured TTL.

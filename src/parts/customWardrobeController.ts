@@ -3,6 +3,8 @@ import {
   composeRuntimeCombinedCharacterAsset,
   getDefaultCustomSelection,
   listSelectableParts,
+  resolveHeadRegistryEntry,
+  resolveOptionalHeadRegistryEntry,
   runtimeRoleId,
   type CustomPartSelection,
   type PartPackageSet,
@@ -96,12 +98,13 @@ export class CustomWardrobeController {
     if (!this.partSet) {
       throw new Error("No custom part package set is loaded.");
     }
-    this.assertSameActiveCharacter(selection);
-    this.activeRoleId ??= runtimeRoleId(selection.characterId, selection.unit);
-    await this.ensureSelectionPackages(selection);
-    await this.options.ensureCompatibility?.(selection);
-    const combined = this.compose(selection);
-    this.selection = { ...selection };
+    const resolvedSelection = this.resolveHeadSource(selection);
+    this.assertSameActiveCharacter(resolvedSelection);
+    this.activeRoleId ??= runtimeRoleId(resolvedSelection.characterId, resolvedSelection.unit);
+    await this.ensureSelectionPackages(resolvedSelection);
+    await this.options.ensureCompatibility?.(resolvedSelection);
+    const combined = this.compose(resolvedSelection);
+    this.selection = { ...resolvedSelection };
     this.combined = combined;
     return combined;
   }
@@ -121,6 +124,9 @@ export class CustomWardrobeController {
       headCostume3dId: partType === "head" && costume3dId !== null
         ? costume3dId
         : this.selection.headCostume3dId,
+      headPackagePath: partType === "head" && costume3dId !== null
+        ? null
+        : this.selection.headPackagePath,
       hairCostume3dId: partType === "hair" && costume3dId !== null
         ? costume3dId
         : this.selection.hairCostume3dId,
@@ -132,10 +138,19 @@ export class CustomWardrobeController {
   }
 
   async composeCustomCharacter(selection: CustomPartSelection): Promise<RuntimeCombinedCharacterAsset> {
-    this.assertSameActiveCharacter(selection);
-    await this.ensureSelectionPackages(selection);
-    await this.options.ensureCompatibility?.(selection);
-    return this.compose(selection);
+    const resolvedSelection = this.resolveHeadSource(selection);
+    this.assertSameActiveCharacter(resolvedSelection);
+    await this.ensureSelectionPackages(resolvedSelection);
+    await this.options.ensureCompatibility?.(resolvedSelection);
+    return this.compose(resolvedSelection);
+  }
+
+  private resolveHeadSource(selection: CustomPartSelection): CustomPartSelection {
+    if (!this.partSet) {
+      throw new Error("No custom part package set is loaded.");
+    }
+    const entry = resolveHeadRegistryEntry(this.partSet, selection);
+    return { ...selection, headPackagePath: entry.packagePath };
   }
 
   private assertSameActiveCharacter(selection: CustomPartSelection): void {
@@ -153,11 +168,9 @@ export class CustomWardrobeController {
     }
     const entries = [
       this.findRegistryEntry(selection, "body", selection.bodyCostume3dId),
-      this.findHeadRegistryEntry(selection),
+      resolveHeadRegistryEntry(this.partSet, selection),
       this.findRegistryEntry(selection, "hair", selection.hairCostume3dId),
-      selection.headOptionalCostume3dId
-        ? this.findRegistryEntry(selection, "head_optional", selection.headOptionalCostume3dId)
-        : null,
+      resolveOptionalHeadRegistryEntry(this.partSet, selection),
     ].filter((entry): entry is PartRegistryEntry =>
       entry !== null && entry.status !== "empty"
     );
@@ -171,14 +184,6 @@ export class CustomWardrobeController {
         throw new Error(`Failed to load ${entry.partType} package ${entry.packagePath}.`);
       }
     }));
-  }
-
-  private findHeadRegistryEntry(selection: CustomPartSelection): PartRegistryEntry {
-    try {
-      return this.findRegistryEntry(selection, "head", selection.headCostume3dId);
-    } catch {
-      return this.findRegistryEntry(selection, "head_optional", selection.headCostume3dId);
-    }
   }
 
   private findRegistryEntry(

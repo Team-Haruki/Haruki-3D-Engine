@@ -18,6 +18,7 @@
     "build:lib": "vite build",
     "build:capture": "vite build --config vite.capture.config.ts",
     "preview:capture": "vite preview --config vite.capture.config.ts",
+    "test": "node --test tests/*.test.mjs",
     "test:config": "node --test tests/config.test.mjs",
     "capture:runtime": "node capture-runtime.mjs",
     "capture:server": "node capture-server.mjs"

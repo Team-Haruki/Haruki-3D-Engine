@@ -33,3 +33,6 @@ jobs:
 
       - name: Build engine
         run: npm run build
+
+      - name: Test engine
+        run: npm test

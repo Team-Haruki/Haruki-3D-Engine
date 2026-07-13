@@ -87,6 +87,69 @@ test("capture request preserves explicit zero values", () => {
   assert.equal(request.warmupFrames, 0);
 });
 
+test("capture request preserves an exact independent head source", () => {
+  const validateCaptureRequest = loadCaptureRequestValidator();
+  const request = validateCaptureRequest(validCaptureRequest({
+    headPackagePath: "  parts/_sources/head_optional/shared  ",
+  }));
+
+  assert.equal(request.headPackagePath, "parts/_sources/head_optional/shared");
+  assert.throws(
+    () => validateCaptureRequest(validCaptureRequest({ headPackagePath: 123 })),
+    /headPackagePath must be a string or null/
+  );
+  assert.throws(
+    () => validateCaptureRequest(validCaptureRequest({ headPackagePath: " " })),
+    /headPackagePath must be a non-empty string/
+  );
+  assert.throws(
+    () => validateCaptureRequest(validCaptureRequest({ headPackagePath: "bad\0path" })),
+    /without NUL bytes/
+  );
+});
+
+test("capture runtime forwards the exact head source into the browser", async () => {
+  const source = readSource("capture-server.mjs");
+  const snippet = sourceSlice(
+    source,
+    "class CaptureRuntimeSession",
+    "const captureSession"
+  );
+  const context = vm.createContext({ Buffer, clearTimeout, setTimeout });
+  vm.runInContext(snippet, context);
+  const CaptureRuntimeSession = vm.runInContext("CaptureRuntimeSession", context);
+  const session = new CaptureRuntimeSession();
+  let browserRequest = null;
+  session.ensureStarted = async () => {};
+  session.client = {
+    send: async (method, params) => {
+      if (method === "Runtime.evaluate" && params.expression.startsWith("window.__HARUKI_CAPTURE_REQUEST__(")) {
+        const serialized = params.expression.slice(
+          "window.__HARUKI_CAPTURE_REQUEST__(".length,
+          -1
+        );
+        browserRequest = JSON.parse(serialized);
+        return { result: { value: { snapshots: null } } };
+      }
+      if (method === "Page.captureScreenshot") {
+        return { data: Buffer.from("png").toString("base64") };
+      }
+      return {};
+    },
+  };
+
+  await session.capture({
+    ...validCaptureRequest(),
+    headPackagePath: "parts/_sources/head/exclusive",
+    width: 700,
+    height: 500,
+    scale: 2,
+    timeoutMs: 45000,
+  });
+
+  assert.equal(browserRequest.headPackagePath, "parts/_sources/head/exclusive");
+});
+
 test("capture request bounds renderer work supplied by callers", () => {
   const validateCaptureRequest = loadCaptureRequestValidator();
   const request = validateCaptureRequest(validCaptureRequest({
@@ -218,6 +281,33 @@ test("only head_and_hair replaces the face while split head types stay accessori
   assert.doesNotMatch(classifier, /head_all|head_front|head_back/);
   assert.match(assembly, /runtimePartSlot\(selectedHead\.part\) === "head" \? selectedHead : hair/);
   assert.match(assembly, /runtimePartSlot\(selectedHead\.part\) === "head_optional" \? selectedHead : null/);
+});
+
+test("same raw head id requires an exact package instead of slot priority", () => {
+  const composerSource = readSource("src/parts/runtimePartComposer.ts");
+  const resolver = sourceSlice(
+    composerSource,
+    "export function resolveHeadRegistryEntry",
+    "function resolveHeadRuntime"
+  );
+  const resolveRuntime = sourceSlice(
+    composerSource,
+    "function resolveHeadRuntime",
+    "function resolveOptionalHeadRuntime"
+  );
+  const wardrobeSource = readSource("src/parts/customWardrobeController.ts");
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+
+  assert.match(resolver, /candidate\.packagePath === requestedPackagePath/);
+  assert.match(resolver, /identities\.size > 1/);
+  assert.match(resolver, /specify headPackagePath/);
+  assert.match(resolveRuntime, /resolveHeadRegistryEntry\(partSet, selection\)/);
+  assert.doesNotMatch(resolveRuntime, /findRegistryPart/);
+  assert.match(wardrobeSource, /resolveHeadRegistryEntry\(this\.partSet, selection\)/);
+  assert.doesNotMatch(wardrobeSource, /findHeadRegistryEntry/);
+  assert.match(composerSource, /headPackagePath: selectedHeadEntry\.packagePath/);
+  assert.match(composerSource, /encodeURIComponent\(resolvedSelection\.headPackagePath\)/);
+  assert.match(engineSource, /headPackagePath: request\.headPackagePath \?\? null/);
 });
 
 test("capture output and idle cleanup use request-owned paths", () => {

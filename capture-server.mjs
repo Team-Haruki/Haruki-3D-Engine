@@ -285,6 +285,17 @@ function validateCaptureRequest(input) {
   };
   const traceMaxEvents = Number(input.traceUtjMaxEvents);
   const optionalHeadOptional = input.headOptionalCostume3dId;
+  const optionalHeadPackagePath = input.headPackagePath;
+  let headPackagePath = null;
+  if (optionalHeadPackagePath !== undefined && optionalHeadPackagePath !== null) {
+    if (typeof optionalHeadPackagePath !== "string") {
+      throw new Error("headPackagePath must be a string or null.");
+    }
+    headPackagePath = optionalHeadPackagePath.trim();
+    if (headPackagePath === "" || headPackagePath.length > 1024 || headPackagePath.includes("\0")) {
+      throw new Error("headPackagePath must be a non-empty string of at most 1024 characters without NUL bytes.");
+    }
+  }
   return {
     imageId,
     cacheMode,
@@ -294,6 +305,7 @@ function validateCaptureRequest(input) {
     roleId,
     bodyCostume3dId: readId("bodyCostume3dId"),
     headCostume3dId: readId("headCostume3dId"),
+    headPackagePath,
     hairCostume3dId: readId("hairCostume3dId"),
     headOptionalCostume3dId:
       optionalHeadOptional === undefined || optionalHeadOptional === null

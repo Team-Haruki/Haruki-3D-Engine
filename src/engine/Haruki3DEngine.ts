@@ -188,6 +188,7 @@ export type HarukiCaptureRolePartsRequest = {
   roleId: string;
   bodyCostume3dId: number;
   headCostume3dId: number;
+  headPackagePath?: string | null;
   hairCostume3dId: number;
   headOptionalCostume3dId?: number | null;
   imageId?: string;
@@ -5696,6 +5697,9 @@ export class Haruki3DEngine {
         headCostume3dId: partType === "head" && costume3dId !== null
           ? costume3dId
           : selection.headCostume3dId,
+        headPackagePath: partType === "head" && costume3dId !== null
+          ? null
+          : selection.headPackagePath,
         hairCostume3dId: partType === "hair" && costume3dId !== null
           ? costume3dId
           : selection.hairCostume3dId,
@@ -5785,6 +5789,7 @@ export class Haruki3DEngine {
       unit: role.unit,
       bodyCostume3dId: request.bodyCostume3dId,
       headCostume3dId: request.headCostume3dId,
+      headPackagePath: request.headPackagePath ?? null,
       hairCostume3dId: request.hairCostume3dId,
       headOptionalCostume3dId: request.headOptionalCostume3dId ?? null,
       origin: "custom",

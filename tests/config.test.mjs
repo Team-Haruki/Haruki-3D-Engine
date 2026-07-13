@@ -210,7 +210,8 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
   assert.ok(loaderSource.includes("parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}"));
   assert.ok(loaderSource.includes("parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.json"));
   assert.ok(loaderSource.includes("ensureCompatibilityForSelection"));
-  assert.ok(loaderSource.includes("findRegistryEntry(entry.characterId, \"head_optional\", entry.headCostume3dId, entry.unit)"));
+  assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit))'));
+  assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit))'));
   assert.ok(wardrobeSource.includes("ensureCompatibility?: (selection: CustomPartSelection) => Promise<void>;"));
   assert.ok(captureHarnessSource.includes("captureRuntimePackageKey"));
   assert.ok(captureHarnessSource.includes("const packageKey = `${baseUrl}|${roleId}`;"));
@@ -236,6 +237,8 @@ test("runtime part composer treats head_optional rows as official preset heads",
   assert.ok(composerSource.includes("bundlePath ${entry.bundlePath}"));
   assert.ok(loaderSource.includes("tryRuntimePartSlot(entry) === partType"));
   assert.ok(loaderSource.includes(".filter((entry) => packages.has(entry.packagePath))"));
+  assert.ok(loaderSource.includes('(!loadedTypes.has("head") && !loadedTypes.has("head_optional"))'));
+  assert.match(loaderSource, /tryRuntimePartSlot\(head\) !== "head"\s+&&\s+deniedHeadHairKeys\.has/);
 });
 
 test("engine outline shell follows the documented SekaiOutline render state", () => {
@@ -284,6 +287,7 @@ test("capture runtime accepts part-registry role capture options", () => {
     "--role-id", "5:light_sound",
     "--body-costume3d-id", "2",
     "--head-costume3d-id", "3",
+    "--head-package-path", "parts/_sources/head_optional/shared",
     "--hair-costume3d-id", "4",
     "--head-optional-costume3d-id", "9",
   ]);
@@ -292,6 +296,7 @@ test("capture runtime accepts part-registry role capture options", () => {
   assert.equal(options.roleId, "5:light_sound");
   assert.equal(options.bodyCostume3dId, 2);
   assert.equal(options.headCostume3dId, 3);
+  assert.equal(options.headPackagePath, "parts/_sources/head_optional/shared");
   assert.equal(options.hairCostume3dId, 4);
   assert.equal(options.headOptionalCostume3dId, 9);
 });

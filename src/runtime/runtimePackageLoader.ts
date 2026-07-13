@@ -578,10 +578,8 @@ function selectPartRuntimeCandidates(
         addEntry(findRegistryEntry(entry.characterId, "body", entry.bodyCostume3dId, entry.unit));
       }
       if (typeof entry.headCostume3dId === "number") {
-        addEntry(
-          findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit) ??
-          findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit)
-        );
+        addEntry(findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit));
+        addEntry(findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit));
       }
       if (typeof entry.hairCostume3dId === "number") {
         addEntry(findRegistryEntry(entry.characterId, "hair", entry.hairCostume3dId, entry.unit));
@@ -601,7 +599,7 @@ function selectPartRuntimeCandidates(
     const heads = registry
       .filter((entry) =>
         entry.characterId === preferredCharacterId &&
-        tryRuntimePartSlot(entry) === "head" &&
+        ["head", "head_optional"].includes(tryRuntimePartSlot(entry) ?? "") &&
         isUsableRegistryEntry(entry)
       )
       .sort((left, right) => left.costume3dId - right.costume3dId);
@@ -614,7 +612,10 @@ function selectPartRuntimeCandidates(
       .sort((left, right) => left.costume3dId - right.costume3dId);
     for (const head of heads) {
       for (const hair of hairs) {
-        if (deniedHeadHairKeys.has(headHairCandidateKey(head.unit ?? hair.unit, head.costume3dId, hair.costume3dId))) {
+        if (
+          tryRuntimePartSlot(head) !== "head" &&
+          deniedHeadHairKeys.has(headHairCandidateKey(head.unit ?? hair.unit, head.costume3dId, hair.costume3dId))
+        ) {
           continue;
         }
         addEntry(head);
@@ -679,7 +680,11 @@ function hasUsableCustomPartSelection(
       .map((entry) => tryRuntimePartSlot(entry))
       .filter(Boolean)
   );
-  if (!loadedTypes.has("body") || !loadedTypes.has("head") || !loadedTypes.has("hair")) {
+  if (
+    !loadedTypes.has("body") ||
+    (!loadedTypes.has("head") && !loadedTypes.has("head_optional")) ||
+    !loadedTypes.has("hair")
+  ) {
     return false;
   }
   const partSet = {
