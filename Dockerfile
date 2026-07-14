@@ -40,7 +40,7 @@ COPY --from=build /app/dist ./dist
 COPY config ./config
 COPY capture-server.mjs ./capture-server.mjs
 COPY png-rgba.mjs ./png-rgba.mjs
-COPY region-routing.mjs runtime-codec.mjs ./
+COPY region-routing.mjs runtime-codec.mjs runtime-binary-codec.mjs ./
 
 EXPOSE 8080
 CMD ["node", "capture-server.mjs"]

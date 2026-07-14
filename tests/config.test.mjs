@@ -366,6 +366,7 @@ test("docker runtime image includes capture server support modules", () => {
   assert.match(dockerfile, /chromium-common=\$\{CHROMIUM_DEBIAN_VERSION\}/);
   assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);
   assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
+  assert.match(dockerfile, /runtime-binary-codec\.mjs/);
   assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1400/);
   assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1000/);
   assert.match(dockerfile, /HARUKI_CAPTURE_SCALE=2/);
