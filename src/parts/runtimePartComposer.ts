@@ -80,6 +80,7 @@ const deniedHeadHairCompatibilityKeys = new WeakMap<HeadHairCompatibility, Reado
 
 export type PartRuntimePackage = {
   version: string;
+  corePath?: string;
   packagePath?: string;
   part: {
     costume3dId: number;

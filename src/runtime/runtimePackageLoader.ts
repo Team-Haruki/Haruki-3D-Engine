@@ -1,5 +1,6 @@
 import brotliWasm from "brotli-wasm";
 import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
+import { mergePartRuntimeCore } from "../../part-runtime-core.mjs";
 import {
   characterHeightMetersById,
   previewLightDefaults,
@@ -247,9 +248,7 @@ async function loadPartPackageSetFromBaseUrl(
     const batch = candidates.slice(offset, offset + batchSize);
     const results = await Promise.all(batch.map(async (entry) => ({
       entry,
-      runtime: await fetchOptionalJson<PartRuntimePackage>(
-        resolveRuntimePackageUrl(baseUrl, `${entry.packagePath}/part-runtime.json`)
-      ),
+      runtime: await fetchOptionalPartRuntime(baseUrl, entry),
     })));
     for (const result of results) {
       if (result.runtime) {
@@ -393,12 +392,29 @@ async function loadPartRuntimePackage(
   if (cached) {
     return cached;
   }
-  const runtime = await fetchRuntimeJson(
-    resolveRuntimePackageUrl(baseUrl, `${entry.packagePath}/part-runtime.json`)
-  ) as PartRuntimePackage;
+  const runtime = await fetchPartRuntime(baseUrl, entry);
   const normalized = withPartRuntimePackagePath(runtime, entry);
   partSet.packages.set(entry.packagePath, normalized);
   return normalized;
+}
+
+async function fetchPartRuntime(baseUrl: string, entry: PartRegistryEntry) {
+  const runtime = await fetchRuntimeJson(
+    resolveRuntimePackageUrl(baseUrl, `${entry.packagePath}/part-runtime.json`)
+  ) as PartRuntimePackage;
+  if (!runtime.corePath) {
+    return runtime;
+  }
+  const core = await fetchRuntimeJson(resolveRuntimePackageUrl(baseUrl, runtime.corePath)) as Record<string, unknown>;
+  return mergePartRuntimeCore(runtime, core) as PartRuntimePackage;
+}
+
+async function fetchOptionalPartRuntime(baseUrl: string, entry: PartRegistryEntry) {
+  try {
+    return await fetchPartRuntime(baseUrl, entry);
+  } catch {
+    return null;
+  }
 }
 
 async function ensureCompatibilityForSelection(

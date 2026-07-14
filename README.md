@@ -12,6 +12,7 @@ The engine does not parse Unity bundles. It loads offline Haruki runtime package
 - `motion/*.json` or `motion/*.glb`, when present
 - `character/textures/**`
 - `parts/part-registry.json` plus `parts/**/part-runtime.json`, for role-aware custom assembly
+- `parts/_cores/**/part-runtime-core.json`, when a light part delta shares heavy mesh/SpringBone data
 
 ## Quick Start
 
@@ -160,6 +161,10 @@ typed arrays emitted by newer exporters.
 When rolling out binary-array packages, deploy this Engine image first and only
 then run the newer Exporter. Old packages remain readable, so this order keeps a
 mixed-version runtime safe during the rollout.
+
+The same Engine-first order applies to core+delta part packages. The loader
+continues to accept legacy self-contained part runtimes, while new deltas fetch
+and merge their declared `corePath` before composition.
 
 The service starts one persistent headless Chromium page and keeps the engine loaded. Requests reuse that page, write only the final `/data/captures/<imageId>.png`, and atomically replace an existing file with the same id. `width` and `height` control CSS framing; `scale` controls output DPR, so `700x500` with `scale: 2` writes a `1400x1000` PNG. The service-owned Chromium profile/cache directory is removed on shutdown or session restart. Open `http://localhost:8080/capture.html` only when inspecting the harness manually.
 
