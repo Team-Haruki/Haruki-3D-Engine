@@ -361,7 +361,7 @@ test("persistent capture server propagates config defaults into role parts captu
 test("docker runtime image includes capture server support modules", () => {
   const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf8");
 
-  assert.match(dockerfile, /ARG CHROMIUM_DEBIAN_VERSION=147\.0\.7727\.137-1~deb12u1/);
+  assert.match(dockerfile, /ARG CHROMIUM_DEBIAN_VERSION=150\.0\.7871\.100-1~deb12u1/);
   assert.match(dockerfile, /chromium=\$\{CHROMIUM_DEBIAN_VERSION\}/);
   assert.match(dockerfile, /chromium-common=\$\{CHROMIUM_DEBIAN_VERSION\}/);
   assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);

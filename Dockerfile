@@ -8,7 +8,7 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 
-ARG CHROMIUM_DEBIAN_VERSION=147.0.7727.137-1~deb12u1
+ARG CHROMIUM_DEBIAN_VERSION=150.0.7871.100-1~deb12u1
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     chromium=${CHROMIUM_DEBIAN_VERSION} \
