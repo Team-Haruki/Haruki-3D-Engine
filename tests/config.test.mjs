@@ -173,6 +173,9 @@ test("runtime package loader prefers gzip JSON packages with plain JSON fallback
   assert.ok(loaderSource.includes('new DecompressionStream("gzip")'));
   assert.ok(loaderSource.includes("JSON.parse(await readGzipRuntimeJson"));
   assert.ok(loaderSource.includes('const response = await fetch(url, { cache: "no-store" })'));
+  assert.ok(loaderSource.includes('response.headers.get("x-haruki-file-version")'));
+  assert.ok(loaderSource.includes("isCacheableRuntimeMetadataUrl"));
+  assert.ok(loaderSource.includes("parsedRuntimeMetadataLimit = 16"));
 });
 
 test("runtime package loader decodes role runtime paths already stored as MessagePack Brotli", () => {
@@ -191,6 +194,8 @@ test("engine recognizes compressed Unity motion URLs", () => {
   );
 
   assert.match(engineSource, /unity-motion\\\.\(\?:json\|msgpack\\\.br\)/);
+  assert.match(engineSource, /value\.every\(\(entry\) => typeof entry === "number" && Number\.isFinite\(entry\)\)/);
+  assert.match(engineSource, /return value as number\[\]/);
 });
 
 test("runtime package loader supports role-scoped registries and lazy compatibility", () => {
@@ -393,7 +398,24 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
   assert.match(engineSource, /warmupFrames\?: number/);
   assert.match(engineSource, /warmupMode\?: "animation" \| "runtime"/);
   assert.match(engineSource, /for \(let index = 0; index < warmupFrames; index \+= 1\)/);
-  assert.match(engineSource, /this\.stepCaptureFrame\(1 \/ 60, advanceWarmupAnimation\)/);
+  assert.match(engineSource, /this\.stepCharacterDynamics\(1 \/ 60, advanceWarmupAnimation\)/);
+  assert.match(engineSource, /this\.stepCharacterDynamics\(1 \/ 60, advanceWarmupAnimation\);\s*this\.updateProjectedShadows\(\)/);
+  const dynamicsBody = engineSource.match(
+    /private stepCharacterDynamics\([^]*?\n  \}\n\n  stepCaptureFrame/
+  )?.[0] ?? "";
+  const captureStepBody = engineSource.match(
+    /stepCaptureFrame\([^]*?\n  \}\n\n  getCharacterRoot/
+  )?.[0] ?? "";
+  assert.match(dynamicsBody, /currentAnimationMixer\?\.update/);
+  assert.match(dynamicsBody, /updateFaceMotion/);
+  assert.match(dynamicsBody, /syncLinkedHeadBones/);
+  assert.match(dynamicsBody, /currentExtraBoneRuntime\?\.update/);
+  assert.match(dynamicsBody, /currentSpringRuntime\?\.update/);
+  assert.doesNotMatch(dynamicsBody, /updateShaderCameraPositions|updateShaderFaceBasis/);
+  assert.match(captureStepBody, /this\.stepCharacterDynamics\(delta, advanceAnimation\)/);
+  assert.match(captureStepBody, /updateProjectedShadows/);
+  assert.match(captureStepBody, /updateShaderCameraPositions/);
+  assert.match(captureStepBody, /updateShaderFaceBasis/);
 });
 
 test("capture server supports temporary cache mode and GC configuration", () => {
@@ -621,7 +643,7 @@ test("head hair compatibility uses not-available patterns as a blacklist", () =>
     "utf8"
   );
 
-  assert.match(composerSource, /buildDeniedCompatibilityKeys/);
+  assert.match(composerSource, /getDeniedHeadHairCompatibilityKeys/);
   assert.match(composerSource, /entry\.state === "not_available"/);
   assert.doesNotMatch(composerSource, /availableHeadKeys/);
   assert.doesNotMatch(composerSource, /not in the available pattern list/);
@@ -861,7 +883,7 @@ test("custom composer emits preset-shaped grouped material slots", () => {
   assert.doesNotMatch(composerSource, /materialSlots:\s*contributorRuntimes\.flatMap/);
 });
 
-test("custom selection mutations are serialized and skip exact resolved reimports", () => {
+test("custom selection mutations use the official full-character update path", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -873,19 +895,21 @@ test("custom selection mutations are serialized and skip exact resolved reimport
   assert.match(engineSource, /private async applyCustomSelection/);
   assert.match(engineSource, /previousCombinedId === combined\.id/);
   assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
-  assert.match(engineSource, /preserveAnimation:\s*!roleChanged/);
-  assert.match(engineSource, /clearAnimationCache:\s*roleChanged/);
+  assert.match(engineSource, /preserveAnimation:\s*false/);
+  assert.match(engineSource, /clearAnimationCache:\s*false/);
+  assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !sameResolvedSelection\)/);
+  assert.doesNotMatch(engineSource, /captureAnimationPlaybackState|continueAnimationPlaybackState/);
   const sameSelectionBranch = engineSource.slice(
     engineSource.indexOf("const sameResolvedSelection"),
-    engineSource.indexOf("if (!roleChanged && previousAnimation.selection.motionUrl)")
+    engineSource.indexOf("await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection)")
   );
   assert.doesNotMatch(sameSelectionBranch, /resetCurrentSpringRuntimeState/);
   assert.match(engineSource, /if \(isEnabled && !wasEnabled\) \{\s*this\.resetAndSettleCurrentSpringRuntime\(60\);/);
   assert.doesNotMatch(engineSource, /settleCurrentPose\(\)/);
   assert.match(engineSource, /private async captureRolePartsInternal/);
-  assert.match(engineSource, /activeRoleId !== nextRoleId[\s\S]*this\.releaseCurrentCharacterResources\(\{/);
-  assert.match(engineSource, /partSet\?\.packages\.clear\(\)/);
-  assert.match(engineSource, /partSet\?\.roleRuntimes\.clear\(\)/);
+  assert.match(engineSource, /activeRoleId !== nextRoleId[\s\S]*wardrobe\.selectRole/);
+  assert.doesNotMatch(engineSource, /partSet\?\.packages\.clear\(\)/);
+  assert.doesNotMatch(engineSource, /partSet\?\.roleRuntimes\.clear\(\)/);
   assert.doesNotMatch(engineSource, /await this\.setCustomSelection\(selection\)/);
 });
 

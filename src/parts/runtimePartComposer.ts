@@ -76,6 +76,8 @@ export type HeadHairCompatibility = {
   }>;
 };
 
+const deniedHeadHairCompatibilityKeys = new WeakMap<HeadHairCompatibility, ReadonlySet<string>>();
+
 export type PartRuntimePackage = {
   version: string;
   packagePath?: string;
@@ -899,28 +901,34 @@ function assertHeadHairCompatible(
   if (selectedHeadSlot === "head") {
     return;
   }
-  const key = compatibilityKey(selection.unit, selection.headCostume3dId, selection.hairCostume3dId);
-  const deniedKeys = buildDeniedCompatibilityKeys(compatibility);
+  const key = headHairCompatibilityKey(selection.unit, selection.headCostume3dId, selection.hairCostume3dId);
+  const deniedKeys = getDeniedHeadHairCompatibilityKeys(compatibility);
   if (deniedKeys.has(key)) {
     throw new Error(`Head ${selection.headCostume3dId} and hair ${selection.hairCostume3dId} are not available together.`);
   }
 }
 
-function buildDeniedCompatibilityKeys(compatibility: HeadHairCompatibility | null) {
+export function getDeniedHeadHairCompatibilityKeys(compatibility: HeadHairCompatibility | null): ReadonlySet<string> {
   if (!compatibility) {
     return new Set<string>();
   }
-  return new Set(
+  const cached = deniedHeadHairCompatibilityKeys.get(compatibility);
+  if (cached) {
+    return cached;
+  }
+  const keys = new Set(
     [
       ...(compatibility.denied ?? []),
       ...(compatibility.rules ?? []).filter((entry) => entry.state === "not_available"),
     ].map((entry) =>
-      compatibilityKey(entry.unit, entry.headCostume3dId, entry.hairCostume3dId)
+      headHairCompatibilityKey(entry.unit, entry.headCostume3dId, entry.hairCostume3dId)
     )
   );
+  deniedHeadHairCompatibilityKeys.set(compatibility, keys);
+  return keys;
 }
 
-function compatibilityKey(unit: string | null | undefined, headCostume3dId: number, hairCostume3dId: number) {
+export function headHairCompatibilityKey(unit: string | null | undefined, headCostume3dId: number, hairCostume3dId: number) {
   return `${normalizeUnit(unit)}|${headCostume3dId}|${hairCostume3dId}`;
 }
 
@@ -2015,6 +2023,9 @@ function applyAccessoryTransformAdjustment(
 }
 
 function readStrictNumberArray(value: unknown) {
+  if (value instanceof Float32Array || value instanceof Uint16Array || value instanceof Uint32Array) {
+    return value;
+  }
   return Array.isArray(value) && value.every((entry) => typeof entry === "number")
     ? value
     : null;
@@ -2071,7 +2082,7 @@ function buildEulerRotationMatrix(rx: number, ry: number, rz: number) {
 }
 
 function transformVectorArray(
-  values: number[],
+  values: number[] | Float32Array | Uint16Array | Uint32Array,
   matrix: readonly number[],
   scale: { x: number; y: number; z: number },
   translation: { x: number; y: number; z: number },

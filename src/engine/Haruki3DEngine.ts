@@ -339,18 +339,6 @@ export type BodyAnimationSelection = {
   loopKind?: BodyAnimationKind | null;
 };
 
-type AnimationPlaybackRestoreState = {
-  selection: BodyAnimationSelection;
-  activeTime: number;
-  activeDuration: number;
-  activeWasLoop: boolean;
-  paused: boolean;
-  speed: number;
-  faceMotionTime: number;
-  faceMotionEnabled: boolean;
-  capturedAtMs: number;
-};
-
 export type RuntimeMaterialDebug = {
   meshName: string;
   sourceMaterialName: string;
@@ -658,6 +646,8 @@ type UnityMotionRuntime0414 = {
   clips: UnityMotionClip0414[];
 };
 
+type RuntimeNumericArray = number[] | Float32Array | Uint16Array | Uint32Array;
+
 type UnityMotionClip0414 = {
   name: string;
   tracks: UnityMotionTrack0414[];
@@ -667,8 +657,8 @@ type UnityMotionTrack0414 = {
   nodeKey: string;
   property: string;
   componentCount: number;
-  times: number[];
-  values: number[];
+  times: RuntimeNumericArray;
+  values: RuntimeNumericArray;
 };
 
 export type FaceMotionKeyframe = {
@@ -863,15 +853,15 @@ type RuntimeNativeMeshSource = {
   rendererTransformPath?: string;
   rootBonePath?: string | null;
   bonePaths?: string[];
-  boneInverseBindMatrices?: number[];
+  boneInverseBindMatrices?: RuntimeNumericArray;
   submeshes?: RuntimeNativeSubmeshSource[];
-  positions?: number[];
-  normals?: number[];
-  uv0?: number[];
-  uv1?: number[];
-  colors?: number[];
-  skinIndices?: number[];
-  skinWeights?: number[];
+  positions?: RuntimeNumericArray;
+  normals?: RuntimeNumericArray;
+  uv0?: RuntimeNumericArray;
+  uv1?: RuntimeNumericArray;
+  colors?: RuntimeNumericArray;
+  skinIndices?: RuntimeNumericArray;
+  skinWeights?: RuntimeNumericArray;
   morphTargets?: RuntimeNativeMorphTargetSource[];
 };
 
@@ -883,14 +873,14 @@ type RuntimeNativeSubmeshSource = {
   materialName?: string;
   start?: number;
   count?: number;
-  indices?: number[];
+  indices?: RuntimeNumericArray;
 };
 
 type RuntimeNativeMorphTargetSource = {
   name?: string;
-  indices?: number[];
-  positionDeltas?: number[];
-  normalDeltas?: number[];
+  indices?: RuntimeNumericArray;
+  positionDeltas?: RuntimeNumericArray;
+  normalDeltas?: RuntimeNumericArray;
 };
 
 type UnityPrefabSourceGraph = {
@@ -3402,9 +3392,19 @@ function readUnityMotionTrack0414(value: unknown): UnityMotionTrack0414 {
   return { nodeKey, property, componentCount, times, values };
 }
 
-function readNumberArray(value: unknown): number[] {
+function readNumberArray(value: unknown): RuntimeNumericArray {
+  if (
+    value instanceof Float32Array ||
+    value instanceof Uint16Array ||
+    value instanceof Uint32Array
+  ) {
+    return value;
+  }
   if (!Array.isArray(value)) {
     return [];
+  }
+  if (value.every((entry) => typeof entry === "number" && Number.isFinite(entry))) {
+    return value as number[];
   }
   const numbers = value.map(Number);
   if (!numbers.every(Number.isFinite)) {
@@ -5524,7 +5524,7 @@ export class Haruki3DEngine {
     this.sceneReference.visible = false;
   }
 
-  stepCaptureFrame(delta: number, advanceAnimation: boolean) {
+  private stepCharacterDynamics(delta: number, advanceAnimation: boolean) {
     const stepDelta = Math.max(0, delta);
     if (advanceAnimation) {
       this.currentAnimationMixer?.update(stepDelta);
@@ -5537,6 +5537,10 @@ export class Haruki3DEngine {
     } else {
       this.currentSpringRuntime?.resetPose();
     }
+  }
+
+  stepCaptureFrame(delta: number, advanceAnimation: boolean) {
+    this.stepCharacterDynamics(delta, advanceAnimation);
     this.updateProjectedShadows();
     this.updateShaderCameraPositions();
     this.updateShaderFaceBasis();
@@ -5725,28 +5729,20 @@ export class Haruki3DEngine {
     if (!wardrobe) {
       throw new Error("No custom part package is loaded.");
     }
-    const previousRoleId = wardrobe.getActiveRoleId();
     const previousCombinedId = wardrobe.getCombinedCharacter()?.id ?? null;
-    const previousAnimation = this.captureAnimationPlaybackState();
     const combined = await wardrobe.setCustomSelection(selection);
-    const roleChanged = previousRoleId !== wardrobe.getActiveRoleId();
-    const sameResolvedSelection = !roleChanged &&
-      previousCombinedId !== null &&
+    const sameResolvedSelection = previousCombinedId !== null &&
       previousCombinedId === combined.id &&
       this.currentImportIsCombined;
     if (!sameResolvedSelection) {
-      // FUnit-style hot replacement keeps same-role motion state while the prefab/spring graph is rebuilt.
+      // Match the official preview update path: preserve the outer engine, rebuild the full character graph.
       await this.importCombinedCharacter(combined, {
-        preserveAnimation: !roleChanged,
+        preserveAnimation: false,
         disposeBeforeLoad: true,
-        clearAnimationCache: roleChanged,
+        clearAnimationCache: false,
       });
     }
-    if (!roleChanged && previousAnimation.selection.motionUrl) {
-      await this.continueAnimationPlaybackState(previousAnimation);
-    } else {
-      await this.applyCustomRoleDefaultMotion(combined, roleChanged);
-    }
+    await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection);
     return combined;
   }
 
@@ -5769,17 +5765,8 @@ export class Haruki3DEngine {
     const activeRoleId = wardrobe.getActiveRoleId();
     const nextRoleId = runtimeRoleId(role.characterId, role.unit);
     const partSet = wardrobe.getPartPackageSet();
-    const roleChanged = activeRoleId !== nextRoleId;
-    if (roleChanged) {
-      partSet?.packages.clear();
-      partSet?.roleRuntimes.clear();
-      this.releaseCurrentCharacterResources({
-        preserveAnimationSelection: false,
-        clearAnimationCache: true,
-      });
+    if (activeRoleId !== nextRoleId) {
       wardrobe.selectRole(role.characterId, role.unit);
-      await this.setAnimationSelection(null);
-      this.setFaceMotionSet(null, null, null);
     }
     if (partSet) {
       await ensureRoleRuntimePackage(partSet, role.characterId, role.unit);
@@ -5874,7 +5861,8 @@ export class Haruki3DEngine {
     if (warmupFrames > 0) {
       this.setAnimationPaused(!advanceWarmupAnimation);
       for (let index = 0; index < warmupFrames; index += 1) {
-        this.stepCaptureFrame(1 / 60, advanceWarmupAnimation);
+        this.stepCharacterDynamics(1 / 60, advanceWarmupAnimation);
+        this.updateProjectedShadows();
       }
       this.setAnimationPaused(true);
     } else if (warmupMs > 0) {
@@ -5919,58 +5907,6 @@ export class Haruki3DEngine {
         loopKind: defaultLoopUrl ? defaultAnimationKind : null,
       });
     }
-  }
-
-  private captureAnimationPlaybackState(): AnimationPlaybackRestoreState {
-    return {
-      selection: {
-        motionUrl: this.currentAnimationUrl,
-        motionKind: this.currentAnimationKind,
-        loopUrl: this.currentAnimationLoopUrl,
-        loopKind: this.currentAnimationLoopKind,
-      },
-      activeTime: this.currentAnimationAction?.time ?? 0,
-      activeDuration: this.currentAnimationDuration,
-      activeWasLoop: Boolean(
-        this.currentAnimationLoopUrl &&
-        this.currentAnimationAction &&
-        !this.currentLoopAction &&
-        !this.queuedLoopClipName
-      ),
-      paused: this.animationPaused,
-      speed: this.animationPlaybackSpeed,
-      faceMotionTime: this.currentFaceMotionTime,
-      faceMotionEnabled: this.faceMotionEnabled,
-      capturedAtMs: performance.now(),
-    };
-  }
-
-  private async continueAnimationPlaybackState(
-    state: AnimationPlaybackRestoreState
-  ): Promise<void> {
-    await this.setAnimationSelection(state.selection);
-    if (state.activeWasLoop) {
-      this.activateQueuedLoopForSeek();
-    }
-    const elapsedSeconds = state.paused
-      ? 0
-      : Math.max(0, (performance.now() - state.capturedAtMs) / 1000) * state.speed;
-    const rawTargetTime = state.activeTime + elapsedSeconds;
-    const targetTime = state.activeWasLoop && state.activeDuration > 0
-      ? rawTargetTime % state.activeDuration
-      : rawTargetTime;
-    const phase = state.activeDuration > 0
-      ? targetTime / state.activeDuration
-      : 0;
-    if (state.selection.motionUrl) {
-      this.seekAnimationPhase(phase);
-    }
-    this.animationPlaybackSpeed = state.speed;
-    this.animationPaused = state.paused;
-    this.faceMotionEnabled = state.faceMotionEnabled;
-    this.currentFaceMotionTime = state.faceMotionTime + elapsedSeconds;
-    this.applyCurrentFaceMotionFrame();
-    this.applyAnimationPlaybackSettings();
   }
 
   getSnapshots(debugOptions?: UtjSpringBoneDebugOptions): HarukiEngineSnapshots {

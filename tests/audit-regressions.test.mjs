@@ -12,6 +12,22 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
+test("runtime files expose a stable version for parsed metadata invalidation", () => {
+  const source = readSource("capture-server.mjs");
+  assert.match(source, /"x-haruki-file-version": `\$\{stat\.size\}-\$\{Math\.trunc\(stat\.mtimeMs\)\}`/);
+  assert.match(source, /"access-control-expose-headers": "x-haruki-file-version"/);
+});
+
+test("global part registry prefers the compact Cloud representation", () => {
+  const source = readSource("capture-server.mjs");
+  assert.match(source, /application\/vnd\.haruki\.part-registry-compact\+msgpack-br/);
+  assert.match(source, /relativePath\.replace\(\/\^\\\/\+\//);
+  assert.match(source, /parts\/part-registry-compact\.msgpack\.br/);
+  assert.match(source, /parts\/head-hair-compatibility-compact\.msgpack\.br/);
+  assert.match(source, /application\/vnd\.haruki\.head-hair-compatibility-compact\+msgpack-br/);
+  assert.match(source, /"vary": "accept"/);
+});
+
 function sourceSlice(source, startMarker, endMarker) {
   const start = source.indexOf(startMarker);
   const end = source.indexOf(endMarker, start);
@@ -258,7 +274,7 @@ test("exact repeated selections preserve spring state", () => {
   const branch = sourceSlice(
     engineSource,
     "const sameResolvedSelection",
-    "if (!roleChanged && previousAnimation.selection.motionUrl)"
+    "await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection)"
   );
 
   assert.doesNotMatch(branch, /resetCurrentSpringRuntimeState/);

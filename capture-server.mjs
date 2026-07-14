@@ -57,6 +57,12 @@ const mimeByExtension = new Map([
   [".vrm", "model/gltf-binary"],
   [".wasm", "application/wasm"],
 ]);
+const compactPartRegistryContentType = "application/vnd.haruki.part-registry-compact+msgpack-br";
+const compactCompatibilityContentType = "application/vnd.haruki.head-hair-compatibility-compact+msgpack-br";
+const compactRuntimeFiles = [
+  ["parts/part-registry.json", "parts/part-registry-compact.msgpack.br", compactPartRegistryContentType],
+  ["parts/head-hair-compatibility.json", "parts/head-hair-compatibility-compact.msgpack.br", compactCompatibilityContentType],
+];
 
 function contentTypeForPath(filePath) {
   if (filePath.endsWith(".msgpack.br")) {
@@ -119,6 +125,8 @@ function serveResolvedFile(filePath, req, res, extraHeaders = {}) {
       "content-length": String(stat.size),
       "cache-control": "no-store",
       "access-control-allow-origin": "*",
+      "access-control-expose-headers": "x-haruki-file-version",
+      "x-haruki-file-version": `${stat.size}-${Math.trunc(stat.mtimeMs)}`,
       ...extraHeaders,
     };
     if (req.method === "HEAD") {
@@ -156,6 +164,19 @@ function serveRuntimeFile(root, relativePath, req, res) {
     res.writeHead(403);
     res.end("forbidden");
     return;
+  }
+
+  const normalizedRelativePath = relativePath.replace(/^\/+/, "");
+  const compactRuntimeFile = compactRuntimeFiles.find(([requestPath]) => requestPath === normalizedRelativePath);
+  if (compactRuntimeFile && req.headers.accept?.includes(compactRuntimeFile[2])) {
+    const compactPath = safeJoin(root, compactRuntimeFile[1]);
+    if (compactPath && fs.existsSync(compactPath)) {
+      serveResolvedFile(compactPath, req, res, {
+        "content-type": compactRuntimeFile[2],
+        "vary": "accept",
+      });
+      return;
+    }
   }
 
   if (path.extname(filePath).toLowerCase() === ".json" && !fs.existsSync(filePath)) {

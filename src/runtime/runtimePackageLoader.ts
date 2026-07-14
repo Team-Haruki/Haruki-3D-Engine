@@ -1,5 +1,5 @@
 import brotliWasm from "brotli-wasm";
-import { decode as decodeMessagePack } from "@msgpack/msgpack";
+import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
 import {
   characterHeightMetersById,
   previewLightDefaults,
@@ -18,6 +18,8 @@ import { CustomWardrobeController } from "../parts/customWardrobeController";
 import {
   getCharacterIndexEntries,
   getDefaultCustomSelection,
+  getDeniedHeadHairCompatibilityKeys,
+  headHairCompatibilityKey,
   runtimeRoleId,
   tryRuntimePartSlot,
   type Character3dIndex,
@@ -51,6 +53,9 @@ export type RuntimePackageLoadOptions = {
   deferDefaultSelection?: boolean;
   roleId?: string | null;
 };
+
+const parsedRuntimeMetadata = new Map<string, { version: string; value: unknown }>();
+const parsedRuntimeMetadataLimit = 16;
 
 export async function loadRuntimePackageFromBaseUrl(
   baseUrl: string,
@@ -503,14 +508,39 @@ function runtimeMessagePackBrotliUrl(url: string) {
 
 async function readMessagePackBrotliRuntime(response: Response, url: string) {
   try {
+    const version = response.headers.get("x-haruki-file-version");
+    const cached = version && isCacheableRuntimeMetadataUrl(url)
+      ? parsedRuntimeMetadata.get(url)
+      : null;
+    if (cached?.version === version) {
+      parsedRuntimeMetadata.delete(url);
+      parsedRuntimeMetadata.set(url, cached);
+      await response.body?.cancel();
+      return cached.value;
+    }
     const bytes = new Uint8Array(await response.arrayBuffer());
     const brotli = await brotliWasm;
-    return decodeMessagePack(brotli.decompress(bytes));
+    const value = decodeRuntimeMessagePack(brotli.decompress(bytes));
+    if (version && isCacheableRuntimeMetadataUrl(url)) {
+      parsedRuntimeMetadata.delete(url);
+      parsedRuntimeMetadata.set(url, { version, value });
+      while (parsedRuntimeMetadata.size > parsedRuntimeMetadataLimit) {
+        parsedRuntimeMetadata.delete(parsedRuntimeMetadata.keys().next().value!);
+      }
+    }
+    return value;
   } catch (error) {
     throw error instanceof Error
       ? error
       : new Error(`Failed to decode ${url}: ${String(error)}`);
   }
+}
+
+function isCacheableRuntimeMetadataUrl(url: string) {
+  const path = url.split(/[?#]/, 1)[0] ?? url;
+  return /\/parts\/by-role\/[^/]+\/[^/]+\/(?:part-registry|character3d-index)\.msgpack\.br$/.test(path) ||
+    /\/parts\/compat\/by-unit\/[^/]+\/head-hair-compatibility\.msgpack\.br$/.test(path) ||
+    /\/roles\/[^/]+\/[^/]+\/(?:role-runtime|motion\/unity-motion)\.msgpack\.br$/.test(path);
 }
 
 async function readGzipRuntimeJson(response: Response, url: string) {
@@ -567,7 +597,7 @@ function selectPartRuntimeCandidates(
     (unit === undefined || entry.unit === unit) &&
     isUsableRegistryEntry(entry)
   );
-  const deniedHeadHairKeys = buildDeniedHeadHairKeys(compatibility);
+  const deniedHeadHairKeys = getDeniedHeadHairCompatibilityKeys(compatibility);
 
   if (preferredCharacterId !== null) {
     for (const entry of indexEntries) {
@@ -614,7 +644,7 @@ function selectPartRuntimeCandidates(
       for (const hair of hairs) {
         if (
           tryRuntimePartSlot(head) !== "head" &&
-          deniedHeadHairKeys.has(headHairCandidateKey(head.unit ?? hair.unit, head.costume3dId, hair.costume3dId))
+          deniedHeadHairKeys.has(headHairCompatibilityKey(head.unit ?? hair.unit, head.costume3dId, hair.costume3dId))
         ) {
           continue;
         }
@@ -696,30 +726,6 @@ function hasUsableCustomPartSelection(
     baseUrl,
   };
   return Boolean(getDefaultCustomSelection(partSet));
-}
-
-function buildDeniedHeadHairKeys(compatibility: HeadHairCompatibility | null) {
-  const keys = new Set<string>();
-  if (!compatibility) {
-    return keys;
-  }
-  for (const entry of compatibility.denied ?? []) {
-    keys.add(headHairCandidateKey(entry.unit, entry.headCostume3dId, entry.hairCostume3dId));
-  }
-  for (const entry of compatibility.rules ?? []) {
-    if (entry.state === "not_available") {
-      keys.add(headHairCandidateKey(entry.unit, entry.headCostume3dId, entry.hairCostume3dId));
-    }
-  }
-  return keys;
-}
-
-function headHairCandidateKey(
-  unit: string | null | undefined,
-  headCostume3dId: number,
-  hairCostume3dId: number
-) {
-  return `${unit ?? ""}|${headCostume3dId}|${hairCostume3dId}`;
 }
 
 function partTypePriority(entry: PartRegistryEntry) {
