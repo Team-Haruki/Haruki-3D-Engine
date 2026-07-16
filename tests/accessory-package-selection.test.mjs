@@ -24,6 +24,7 @@ function makeRuntime(entry) {
     part: { ...entry },
     manifest: {
       id: entry.packagePath,
+      characterHeightMeters: 1.6,
       proxy: {},
       source: { meshUrl: "mesh.glb" },
       assembly: {},
@@ -37,6 +38,21 @@ function makeRuntime(entry) {
           { rendererTransformPath: "face/Hair" },
         ]
         : [],
+    },
+    springBone: {
+      prefabGraph: {
+        transforms: entry.partType === "body"
+          ? [
+            { pathId: 1, parentPathId: null, transformPath: "body" },
+            { pathId: 2, parentPathId: 1, transformPath: "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck" },
+            { pathId: 3, parentPathId: 2, transformPath: "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck/Head" },
+          ]
+          : [
+            { pathId: 1, parentPathId: null, transformPath: "face" },
+            { pathId: 2, parentPathId: 1, transformPath: "face/Position/Hip/Waist/Spine/Chest/Neck" },
+            { pathId: 3, parentPathId: 2, transformPath: "face/Position/Hip/Waist/Spine/Chest/Neck/Head" },
+          ],
+      },
     },
     textureRoles: [{ source: entry.packagePath }],
   };

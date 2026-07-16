@@ -13,7 +13,7 @@ test("part runtime delta restores shared heavy core fields", () => {
   };
   const delta = {
     version: "0415-part-delta-1",
-    corePath: "parts/_cores/base/part-runtime-core.json",
+    corePath: "parts/_cores/base/part-runtime-core.msgpack.br",
     part: { costume3dId: 2 },
     materialSlots: [{ mainTex: "/_texture_store/a.png" }],
     warnings: ["delta"],

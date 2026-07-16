@@ -5,16 +5,16 @@ import { applyRouteRegion, resolveRegionRoute } from "../region-routing.mjs";
 
 test("regional routes select a runtime subdirectory", () => {
   assert.deepEqual(
-    resolveRegionRoute("/regions/jp/runtime/character3d-index.json", "/data/runtime"),
+    resolveRegionRoute("/regions/jp/runtime/character3d-index.msgpack.br", "/data/runtime"),
     {
       region: "jp",
-      pathname: "/runtime/character3d-index.json",
+      pathname: "/runtime/character3d-index.msgpack.br",
       runtimeRoot: "/data/runtime/jp",
     }
   );
-  assert.deepEqual(resolveRegionRoute("/runtime/character3d-index.json", "/data/runtime"), {
+  assert.deepEqual(resolveRegionRoute("/runtime/character3d-index.msgpack.br", "/data/runtime"), {
     region: null,
-    pathname: "/runtime/character3d-index.json",
+    pathname: "/runtime/character3d-index.msgpack.br",
     runtimeRoot: "/data/runtime",
   });
 });

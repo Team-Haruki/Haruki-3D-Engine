@@ -27,7 +27,10 @@ const engine = new Haruki3DEngine({
   cameraProfile: "full-body",
 });
 
-await engine.loadRuntimePackage({ baseUrl: "/assets/runtime/001/" });
+await engine.loadRuntimePackage({
+  baseUrl: "/assets/runtime/001/",
+  roleId: "5:light_sound",
+});
 
 engine.renderFrame();
 engine.destroy();
@@ -38,7 +41,7 @@ Constructor options:
 - `container`: DOM element that receives the WebGL canvas.
 - `initialLight`: initial scene light state.
 - `presentationMode`: `"interactive"` or `"capture"`.
-- `cameraPreset`: `"default"` or `"capture"`. The legacy `"id5-debug"` value is accepted by CLI/config callers as an alias for `"capture"`.
+- `cameraPreset`: `"default"` or `"capture"`.
 - `cameraProfile`: capture-only CostumeShop framing, `"full-body"` or `"official-default"`.
 - `autoRender`: starts the internal render loop when true.
 - `manageResize`: installs resize handling when true.
@@ -48,18 +51,16 @@ Constructor options:
 ```ts
 await engine.loadRuntimePackage({
   baseUrl: "/assets/runtime/001/",
-  fullRuntimeOnly: false,
+  roleId: "5:light_sound",
   applyDefaultAnimation: true,
   applyFaceMotion: true,
 });
 ```
 
-`baseUrl` may point to either:
-
-- a full runtime package with `pjsk-sekai-runtime.extension.json`
-- a part registry package with `parts/part-registry.json`
-
-The loader first tries part registry mode unless `fullRuntimeOnly` is true. If the package is a registry, the returned result includes a wardrobe controller and the engine imports the default same-character part selection.
+`baseUrl` must point to a final Exporter runtime root. The loader reads the
+role-scoped `.msgpack.br` registry, core+delta part packages, unit-scoped
+compatibility data, and the role runtime. The result includes a wardrobe
+controller for same-character part selection.
 
 ## Custom Wardrobe
 
@@ -129,7 +130,7 @@ engine.applyCameraPreset("capture");
 engine.renderFrame();
 ```
 
-The included `capture.html` and `capture-runtime.mjs` are reference callers for automated screenshots. They are not the product GUI.
+The included `capture.html` is the persistent service's minimal browser harness. It is not the product GUI.
 
 The Docker service exposes the same capture path over HTTP:
 

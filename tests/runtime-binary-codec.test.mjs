@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { brotliCompressSync } from "node:zlib";
 
 import { encode, ExtensionCodec } from "@msgpack/msgpack";
 
@@ -8,7 +7,6 @@ import {
   decodeRuntimeMessagePack,
   runtimeBinaryArrayExtensionType,
 } from "../runtime-binary-codec.mjs";
-import { decodeMsgpackBrotliAsJSON } from "../runtime-codec.mjs";
 
 class RuntimeBinaryPayload {
   constructor(bytes) {
@@ -65,9 +63,4 @@ test("decodes runtime float and index extensions as typed arrays", () => {
   assert.ok(decoded.wideIndices instanceof Uint32Array);
   assert.deepEqual(Array.from(decoded.wideIndices), [70000, 4294967295]);
   assert.deepEqual(decoded.gravityDir, [0, -1, 0]);
-
-  const json = JSON.parse(decodeMsgpackBrotliAsJSON(brotliCompressSync(encodePayload({
-    positions: new RuntimeBinaryPayload(floats),
-  }))));
-  assert.deepEqual(json.positions, [0.25, -2.5, 7.75]);
 });

@@ -1,4 +1,4 @@
-import type { HairShadowMode, MaterialBindingMode } from "../engine/Haruki3DEngine";
+import type { HairShadowMode } from "../engine/Haruki3DEngine";
 
 export type ToonShadowSmoothMode =
   | "auto"
@@ -12,7 +12,6 @@ export type CharacterYawMode = "0" | "45" | "-45" | "90" | "-90" | "180";
 export type SpringRuntimeMode = "off" | "unity-prefab";
 
 export type EngineRenderState = {
-  materialBindingMode: MaterialBindingMode;
   hairShadowMode: HairShadowMode;
   toonShadowSmoothMode: ToonShadowSmoothMode;
   valueShadowInfluenceMode: ValueShadowInfluenceMode;
@@ -59,7 +58,6 @@ export const characterYawDegreesByMode: Record<CharacterYawMode, number> = {
 };
 
 export const defaultRenderState: EngineRenderState = {
-  materialBindingMode: "manifest",
   hairShadowMode: "sekai_head_position",
   toonShadowSmoothMode: "auto",
   valueShadowInfluenceMode: "1",

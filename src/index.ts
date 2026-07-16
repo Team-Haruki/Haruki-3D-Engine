@@ -17,7 +17,6 @@ export {
   type HarukiCaptureRolePartsResult,
   type HarukiEngineSnapshots,
   type HarukiRuntimePackageRequest,
-  type MaterialBindingMode,
   type PartImportSnapshot,
   type PjskCameraProfile,
   type PjskCameraPreset,

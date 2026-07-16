@@ -19,7 +19,7 @@ import type {
   UtjSpringBoneDebugOptions,
   UtjSpringBoneRuntimeSnapshot,
   UtjSpringBoneTraceSnapshot,
-} from "./utjSpringBoneRuntimeAdapter";
+} from "./springRuntimeTypes";
 import {
   convertUnityAxisToThree,
   type UnityVectorLike,
@@ -1517,7 +1517,10 @@ function buildNodeResolution(root: THREE.Object3D): NodeResolution {
       canonicalNodeByPath.set(canonicalPath, node);
     }
     const runtimePartIndex = readRuntimePartIndex(node);
-    for (const sourcePath of collectUnitySourcePathAliases(node, path, canonicalPath)) {
+    const transformPath = node.userData.pjskTransformPath;
+    for (const sourcePath of typeof transformPath === "string" && transformPath.length > 0
+      ? [transformPath]
+      : []) {
       if (typeof runtimePartIndex === "number") {
         nodeByPartPath.set(partPathKey(runtimePartIndex, sourcePath), node);
       }
@@ -1527,35 +1530,6 @@ function buildNodeResolution(root: THREE.Object3D): NodeResolution {
     }
   });
   return { nodeByPath, nodeByPartPath, canonicalNodeByPath };
-}
-
-function collectUnitySourcePathAliases(
-  node: THREE.Object3D,
-  path: string,
-  canonicalPath: string
-): string[] {
-  const aliases: string[] = [];
-  const transformPath = node.userData.pjskTransformPath;
-  if (typeof transformPath === "string" && transformPath.length > 0) {
-    aliases.push(transformPath);
-  }
-  for (const candidate of [path, canonicalPath]) {
-    const faceAlias = mountedFaceSourcePath(candidate);
-    if (faceAlias) {
-      aliases.push(faceAlias);
-    }
-  }
-  return aliases;
-}
-
-function mountedFaceSourcePath(path: string): string | null {
-  const mountSegment = "/__PJSK_RuntimeMount_face/";
-  const index = path.indexOf(mountSegment);
-  if (index < 0) {
-    return null;
-  }
-  const mountedPath = path.slice(index + mountSegment.length);
-  return mountedPath.startsWith("face/") ? mountedPath : null;
 }
 
 function resolveNode(

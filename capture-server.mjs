@@ -13,7 +13,6 @@ import {
 } from "./config/haruki-3d-engine-config.mjs";
 import { ensurePngRgba } from "./png-rgba.mjs";
 import { applyRouteRegion, resolveRegionRoute } from "./region-routing.mjs";
-import { decodeMsgpackBrotliAsJSON } from "./runtime-codec.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "dist");
@@ -57,13 +56,6 @@ const mimeByExtension = new Map([
   [".vrm", "model/gltf-binary"],
   [".wasm", "application/wasm"],
 ]);
-const compactPartRegistryContentType = "application/vnd.haruki.part-registry-compact+msgpack-br";
-const compactCompatibilityContentType = "application/vnd.haruki.head-hair-compatibility-compact+msgpack-br";
-const compactRuntimeFiles = [
-  ["parts/part-registry.json", "parts/part-registry-compact.msgpack.br", compactPartRegistryContentType],
-  ["parts/head-hair-compatibility.json", "parts/head-hair-compatibility-compact.msgpack.br", compactCompatibilityContentType],
-];
-
 function contentTypeForPath(filePath) {
   if (filePath.endsWith(".msgpack.br")) {
     return "application/msgpack";
@@ -164,48 +156,6 @@ function serveRuntimeFile(root, relativePath, req, res) {
     res.writeHead(403);
     res.end("forbidden");
     return;
-  }
-
-  const normalizedRelativePath = relativePath.replace(/^\/+/, "");
-  const compactRuntimeFile = compactRuntimeFiles.find(([requestPath]) => requestPath === normalizedRelativePath);
-  if (compactRuntimeFile && req.headers.accept?.includes(compactRuntimeFile[2])) {
-    const compactPath = safeJoin(root, compactRuntimeFile[1]);
-    if (compactPath && fs.existsSync(compactPath)) {
-      serveResolvedFile(compactPath, req, res, {
-        "content-type": compactRuntimeFile[2],
-        "vary": "accept",
-      });
-      return;
-    }
-  }
-
-  if (path.extname(filePath).toLowerCase() === ".json" && !fs.existsSync(filePath)) {
-    const gzipPath = `${filePath}.gz`;
-    if (fs.existsSync(gzipPath)) {
-      serveResolvedFile(gzipPath, req, res, {
-        "content-type": "application/json; charset=utf-8",
-        "content-encoding": "gzip",
-      });
-      return;
-    }
-    const msgpackBrotliPath = filePath.replace(/\.json$/i, ".msgpack.br");
-    if (fs.existsSync(msgpackBrotliPath)) {
-      try {
-        const payload = decodeMsgpackBrotliAsJSON(fs.readFileSync(msgpackBrotliPath));
-        const headers = {
-          "content-type": "application/json; charset=utf-8",
-          "content-length": String(Buffer.byteLength(payload)),
-          "cache-control": "no-store",
-          "access-control-allow-origin": "*",
-        };
-        res.writeHead(200, headers);
-        res.end(req.method === "HEAD" ? undefined : payload);
-      } catch {
-        res.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
-        res.end("failed to decode runtime registry");
-      }
-      return;
-    }
   }
 
   serveResolvedFile(filePath, req, res);

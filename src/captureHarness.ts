@@ -32,7 +32,6 @@ type CaptureCharacterYawMode = CharacterYawMode | "face-camera";
 
 type CaptureConfig = {
   baseUrl: string;
-  fullRuntimeOnly: boolean;
   phase: number;
   clip: "motion" | "motion_loop";
   warmupMs: number;
@@ -91,7 +90,6 @@ function readCaptureConfig(): CaptureConfig | null {
   const yawMode = params.get("characterYawMode");
   return {
     baseUrl,
-    fullRuntimeOnly: params.get("captureFullRuntimeOnly") === "true",
     phase: clamp01(Number.isFinite(phase) ? phase : 0.5),
     clip: clipParam === "motion" ? "motion" : "motion_loop",
     warmupMs: Math.max(Math.trunc(Number.isFinite(warmupMs) ? warmupMs : 0), 0),
@@ -248,9 +246,6 @@ function readSpringRuntimeMode(params: URLSearchParams): SpringRuntimeMode {
   if (mode === "off" || mode === "unity-prefab") {
     return mode;
   }
-  if (mode === "webgl-utj" || params.get("utjSpringBoneEnabled") === "true") {
-    return "unity-prefab";
-  }
   return "unity-prefab";
 }
 
@@ -299,11 +294,10 @@ async function ensureCaptureRuntimePackage(config: CaptureConfig, roleId: string
     captureRuntimePackageKey = packageKey;
     captureRuntimePackagePromise = engine.loadRuntimePackage({
       baseUrl,
-      fullRuntimeOnly: config.fullRuntimeOnly,
-      deferDefaultSelection: !config.fullRuntimeOnly,
+      deferDefaultSelection: true,
       roleId,
-      applyDefaultAnimation: config.fullRuntimeOnly,
-      applyFaceMotion: config.fullRuntimeOnly,
+      applyDefaultAnimation: false,
+      applyFaceMotion: false,
     }).then(() => undefined, (error) => {
       captureRuntimePackagePromise = null;
       captureRuntimePackageKey = null;
@@ -381,42 +375,6 @@ function waitForAnimationFrames(count: number) {
   });
 }
 
-async function prepareCaptureFrame(config: CaptureConfig) {
-  await engine.prepareCaptureFrame({
-    phase: config.phase,
-    clip: config.clip,
-    warmupMs: config.warmupMs,
-    warmupFrames: config.warmupFrames,
-    warmupMode: config.warmupMode,
-    cameraPreset: config.cameraPreset,
-    cameraProfile: config.cameraProfile,
-    characterYawMode: config.characterYawMode ?? undefined,
-    traceUtjBones: config.utjTraceBones,
-    traceUtjMaxEvents: config.utjTraceMaxEvents,
-  });
-  await waitForAnimationFrames(3);
-  const snapshots = engine.getSnapshots();
-  getCaptureWindow().__PJSK_CAPTURE_SNAPSHOT__ = {
-    phase: config.phase,
-    requestedClip: config.clip,
-    springRuntimeMode: config.springRuntimeMode,
-    bodyDebugMode: config.bodyDebugMode,
-    faceSdfEnabled: config.faceSdfEnabled,
-    faceSdfDebugMode: config.faceSdfDebugMode,
-    faceSdfDebugLightMode: config.faceSdfDebugLightMode,
-    projectedShadow: config.projectedShadow,
-    renderIsolation: config.renderIsolation,
-    cameraPreset: config.cameraPreset,
-    animation: snapshots.animation,
-    faceMotion: snapshots.faceMotion,
-    springBone: snapshots.springBone,
-    materialDebug: snapshots.runtimeDebug,
-    utjSpringBoneTrace: engine.getUtjSpringBoneTraceSnapshot(),
-  };
-  getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
-  document.body.dataset.captureReady = "true";
-}
-
 async function bootstrapCapture() {
   const config = readCaptureConfig();
   if (!config) {
@@ -436,17 +394,12 @@ async function bootstrapCapture() {
     if (config.characterYawMode && config.characterYawMode !== "face-camera") {
       engine.setCharacterYawDegrees(characterYawDegreesByMode[config.characterYawMode]);
     }
-    await ensureCaptureRuntimePackage(config);
     engine.setUtjSpringBoneTraceFilters(
       config.utjTraceBones,
       config.utjTraceMaxEvents
     );
-    if (config.fullRuntimeOnly) {
-      await prepareCaptureFrame(config);
-    } else {
-      getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
-      document.body.dataset.captureReady = "true";
-    }
+    getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
+    document.body.dataset.captureReady = "true";
   } catch (error) {
     setCaptureError(error);
   }

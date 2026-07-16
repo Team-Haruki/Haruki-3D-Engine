@@ -18,14 +18,14 @@ test("runtime files expose a stable version for parsed metadata invalidation", (
   assert.match(source, /"access-control-expose-headers": "x-haruki-file-version"/);
 });
 
-test("global part registry prefers the compact Cloud representation", () => {
-  const source = readSource("capture-server.mjs");
-  assert.match(source, /application\/vnd\.haruki\.part-registry-compact\+msgpack-br/);
-  assert.match(source, /relativePath\.replace\(\/\^\\\/\+\//);
-  assert.match(source, /parts\/part-registry-compact\.msgpack\.br/);
-  assert.match(source, /parts\/head-hair-compatibility-compact\.msgpack\.br/);
-  assert.match(source, /application\/vnd\.haruki\.head-hair-compatibility-compact\+msgpack-br/);
-  assert.match(source, /"vary": "accept"/);
+test("engine serves and loads only final MessagePack Brotli runtime files", () => {
+  const serverSource = readSource("capture-server.mjs");
+  const loaderSource = readSource("src/runtime/runtimePackageLoader.ts");
+  assert.doesNotMatch(serverSource, /content-encoding|decodeMsgpackBrotliAsJSON|compactRuntimeFiles/);
+  assert.match(loaderSource, /Runtime metadata must use \.msgpack\.br/);
+  assert.match(loaderSource, /parts\/by-role\/\$\{role\.characterId\}/);
+  assert.doesNotMatch(loaderSource, /full-runtime|\.json\.gz|DecompressionStream|parts\/part-registry\.json/);
+  assert.match(loaderSource, /runtime\.corePath\?\.endsWith\("\.msgpack\.br"\)/);
 });
 
 function sourceSlice(source, startMarker, endMarker) {
@@ -222,7 +222,7 @@ test("runtime package URLs cannot escape their region root", () => {
   const snippet = sourceSlice(
     source,
     "export function resolveRuntimePackageUrl",
-    "async function loadFullRuntimePackageFromBaseUrl"
+    "async function loadPartPackageSetFromBaseUrl"
   )
     .replace("export function", "function")
     .replace("baseUrl: string, relativePath: string", "baseUrl, relativePath");
@@ -235,15 +235,15 @@ test("runtime package URLs cannot escape their region root", () => {
   const resolveRuntimePackageUrl = vm.runInContext("resolveRuntimePackageUrl", context);
 
   assert.equal(
-    resolveRuntimePackageUrl("/runtime/jp/", "parts/body/part-runtime.json"),
-    "http://engine.local/runtime/jp/parts/body/part-runtime.json"
+    resolveRuntimePackageUrl("/runtime/jp/", "parts/body/part-runtime.msgpack.br"),
+    "http://engine.local/runtime/jp/parts/body/part-runtime.msgpack.br"
   );
   assert.equal(
-    resolveRuntimePackageUrl("/runtime/jp/", "parts/body//part-runtime.json"),
-    "http://engine.local/runtime/jp/parts/body/part-runtime.json"
+    resolveRuntimePackageUrl("/runtime/jp/", "parts/body//part-runtime.msgpack.br"),
+    "http://engine.local/runtime/jp/parts/body/part-runtime.msgpack.br"
   );
   assert.throws(
-    () => resolveRuntimePackageUrl("/runtime/jp/", "../en/parts/body/part-runtime.json"),
+    () => resolveRuntimePackageUrl("/runtime/jp/", "../en/parts/body/part-runtime.msgpack.br"),
     /relative path/i
   );
   assert.throws(
@@ -251,7 +251,7 @@ test("runtime package URLs cannot escape their region root", () => {
     /relative path/i
   );
   assert.throws(
-    () => resolveRuntimePackageUrl("/runtime/jp/", "parts/./body/part-runtime.json"),
+    () => resolveRuntimePackageUrl("/runtime/jp/", "parts/./body/part-runtime.msgpack.br"),
     /relative path/i
   );
 });

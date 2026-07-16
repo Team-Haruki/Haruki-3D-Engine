@@ -425,7 +425,7 @@ export const sampleCatalog: CharacterImportCatalog = {
         manifestUrl: "/converted/char05/body/base/body.manifest.json",
         meshUrl: "",
         skeletonUrl: "",
-        animationUrls: ["/converted/char05/body/base/unity-motion.json"],
+        animationUrls: ["/converted/char05/body/base/unity-motion.msgpack.br"],
       },
       neckAnchor: { x: 0, y: 1.78, z: 0.16 },
       skeleton: {
@@ -465,7 +465,7 @@ export const sampleCatalog: CharacterImportCatalog = {
         manifestUrl: "/converted/char05/body/stage/body.manifest.json",
         meshUrl: "",
         skeletonUrl: "",
-        animationUrls: ["/converted/char05/body/stage/unity-motion.json"],
+        animationUrls: ["/converted/char05/body/stage/unity-motion.msgpack.br"],
       },
       neckAnchor: { x: 0, y: 1.82, z: 0.18 },
       skeleton: {

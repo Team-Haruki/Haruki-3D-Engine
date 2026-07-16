@@ -18,7 +18,6 @@ on:
       - 'capture.html'
       - 'capture-server.mjs'
       - 'region-routing.mjs'
-      - 'runtime-codec.mjs'
       - 'runtime-binary-codec.mjs'
       - 'vite.config.ts'
       - 'vite.capture.config.ts'

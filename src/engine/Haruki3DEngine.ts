@@ -2,14 +2,13 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ensureRoleRuntimePackage,
-  fetchRuntimeJson,
+  fetchRuntimeMessagePack,
   loadRuntimePackageFromBaseUrl,
   type RuntimePackageLoadOptions,
   type RuntimePackageLoadResult,
 } from "../runtime/runtimePackageLoader";
 import type {
   BodyAssetManifest,
-  CharacterAssemblyState,
   HeadAssetManifest,
   MaterialLightingSettings,
   PreviewLightState,
@@ -33,7 +32,7 @@ import {
   type UtjSpringBoneDebugOptions,
   type UtjSpringBoneRuntimeSnapshot,
   type UtjSpringBoneTraceSnapshot,
-} from "./utjSpringBoneRuntimeAdapter";
+} from "./springRuntimeTypes";
 import { UnityPrefabSpringRuntime } from "./unityPrefabSpringRuntimeAdapter";
 import { SekaiExtraBoneRuntime } from "./sekaiExtraBoneRuntime";
 import {
@@ -245,14 +244,8 @@ export type HarukiEngineSnapshots = {
   utjSpringBoneTrace?: UtjSpringBoneTraceSnapshot | null;
 };
 
-export type PartImportMode = "glb" | "proxy";
-export type RuntimePartImportMode = PartImportMode | "unity-runtime";
-export type CompositionMode =
-  | "separate_parts"
-  | "node_attached"
-  | "bone_linked"
-  | "combined_glb"
-  | "unity_prefab";
+export type RuntimePartImportMode = "unity-runtime";
+export type CompositionMode = "pending" | "model_combine_setup";
 
 export type PartImportStatus = {
   assetId: string;
@@ -262,18 +255,14 @@ export type PartImportStatus = {
   meshCount: number;
   boneCount: number;
   skinnedMeshCount: number;
-  error?: string;
 };
 
 export type CompositionStatus = {
   mode: CompositionMode;
-  linkedBoneCount: number;
   missingBodyBones: string[];
   missingHeadBones: string[];
-  usingFallbackAttach: boolean;
 };
 
-export type MaterialBindingMode = "manifest" | "glb";
 export type BodyDebugMode =
   | "off"
   | "skin"
@@ -487,7 +476,7 @@ export type RuntimeProjectedShadowDebug = {
 };
 
 export type RuntimeDebugSnapshot = {
-  materialBindingMode: MaterialBindingMode;
+  materialBindingMode: "manifest";
   hairShadowMode: HairShadowMode;
   hairShadowOffset: { x: number; y: number; z: number };
   hairShadowWorldPosition: { x: number; y: number; z: number };
@@ -700,36 +689,13 @@ export type PartImportSnapshot = {
 };
 
 type LoadedPartResult = {
-  root: THREE.Group | null;
+  root: THREE.Group;
   sourceMode: RuntimePartImportMode;
   requestedUrl: string;
   meshCount: number;
   boneCount: number;
   skinnedMeshCount: number;
-  error?: string;
-  userData?: Record<string, unknown>;
-  vrm?: unknown;
-  springBoneManager?: unknown;
-  prefabSourceGraph?: UnityPrefabSourceGraph | null;
-};
-
-type BoneLink = {
-  bodyBone: THREE.Bone;
-  headBone: THREE.Bone;
-  bodyName: string;
-  headName: string;
-};
-
-type PrefabHeadFollowConstraint = {
-  source: THREE.Object3D;
-  targets: PrefabHeadFollowTarget[];
-  sourcePath: string;
-};
-
-type PrefabHeadFollowTarget = {
-  node: THREE.Object3D;
-  restOffset: THREE.Matrix4;
-  path: string;
+  prefabSourceGraph: UnityPrefabSourceGraph;
 };
 
 type PrefabHeadFollowDebug = {
@@ -826,7 +792,6 @@ type RuntimeUnityBodyHeadAssemblySource = {
   parentAttachPath?: string | null;
   childRootPath?: string | null;
   childOriginPath?: string | null;
-  runtimeMountPath?: string | null;
   parentingMode?: string;
   coordinateSpace?: string;
   faceRendererName?: string | null;
@@ -896,17 +861,6 @@ type UnityPrefabSourceGraph = {
   headRootPath: string | null;
   headOrigin: THREE.Object3D | null;
   headOriginPath: string | null;
-  assemblyMount: THREE.Object3D | null;
-  assemblyMountPath: string | null;
-  usesModelCombineSetup: boolean;
-  headOriginRestLocalToHeadRoot: THREE.Matrix4 | null;
-  headRootMounts: Array<{
-    root: THREE.Object3D;
-    rootPath: string | null;
-    origin: THREE.Object3D | null;
-    originPath: string | null;
-    originRestLocalToRoot: THREE.Matrix4 | null;
-  }>;
   debug: PrefabHeadFollowDebug;
 };
 
@@ -1147,29 +1101,6 @@ function isFaceOrFaceLayerMaterialKind(kind: unknown) {
   return kind === "face" ||
     kind === "face_sdf" ||
     isFaceLayerMaterialKind(kind);
-}
-
-function normalizeHeadRuntimeMaterialKind(
-  materialKind: string,
-  meshName: string | null | undefined,
-  materialName: string | null | undefined
-) {
-  const meshNameLower = (meshName ?? "").toLowerCase();
-  const materialNameLower = (materialName ?? "").toLowerCase();
-  if (
-    materialNameLower.includes("_hair_") ||
-    meshNameLower.includes("hair")
-  ) {
-    return "hair";
-  }
-  if (
-    materialNameLower.includes("_acc_") ||
-    meshNameLower === "acc" ||
-    meshNameLower.endsWith("/acc")
-  ) {
-    return "accessory";
-  }
-  return materialKind;
 }
 
 function getEyeThroughHairSourceKind(kind: unknown) {
@@ -1805,21 +1736,6 @@ function isMorphMesh(node: THREE.Object3D): node is THREE.Mesh {
   return !!mesh.isMesh && Array.isArray(mesh.morphTargetInfluences);
 }
 
-function hasSkinnedMeshesUsingSkeleton(root: THREE.Object3D, skeletonRoot: THREE.Object3D) {
-  let found = false;
-  root.traverse((node) => {
-    if (found) {
-      return;
-    }
-    const mesh = node as THREE.SkinnedMesh;
-    if (!mesh.isSkinnedMesh || !mesh.skeleton) {
-      return;
-    }
-    found = mesh.skeleton.bones.some((bone) => bone === skeletonRoot);
-  });
-  return found;
-}
-
 function getHeadLayerRenderOrder(kind: string) {
   switch (kind) {
     case "face_sdf":
@@ -2264,27 +2180,6 @@ function readCharacterHairMaterialController(
   };
 }
 
-function findPrefabGraphNodeByName(
-  nodeByPath: ReadonlyMap<string, THREE.Object3D>,
-  rootName: string,
-  nodeName: string | undefined
-) {
-  if (!nodeName) {
-    return null;
-  }
-  let best: { path: string; node: THREE.Object3D } | null = null;
-  for (const [path, node] of nodeByPath.entries()) {
-    if (
-      path.startsWith(`${rootName}/`) &&
-      node.name.toLowerCase() === nodeName.toLowerCase() &&
-      (!best || path.length > best.path.length)
-    ) {
-      best = { path, node };
-    }
-  }
-  return best;
-}
-
 function resolvePrefabGraphNode(
   nodeByPath: ReadonlyMap<string, THREE.Object3D>,
   candidates: readonly (string | null | undefined)[]
@@ -2336,11 +2231,10 @@ function getUnityPrefabTransformPath(node: THREE.Object3D) {
 
 function resolveUnityPrefabMountedHeadOrigin(
   mountedHeadRoot: THREE.Object3D,
-  assembly: RuntimeUnityBodyHeadAssemblySource | undefined,
-  fallbackOriginPath: string | null | undefined
+  assembly: RuntimeUnityBodyHeadAssemblySource
 ): { path: string; node: THREE.Object3D } | null {
   const rootPath = getUnityPrefabTransformPath(mountedHeadRoot);
-  const absoluteOriginPath = assembly?.childOriginPath ?? fallbackOriginPath ?? null;
+  const absoluteOriginPath = assembly.childOriginPath;
   const relativeOriginPath =
     rootPath && absoluteOriginPath?.startsWith(`${rootPath}/`)
       ? absoluteOriginPath.slice(rootPath.length + 1)
@@ -2382,7 +2276,7 @@ function computeUnityPrefabRestOffset(
 
 function isModelCombineSetupAssembly(
   assembly: RuntimeUnityBodyHeadAssemblySource | undefined
-) {
+): assembly is RuntimeUnityBodyHeadAssemblySource {
   return assembly?.parentingMode === "model_combine_setup";
 }
 
@@ -2402,28 +2296,9 @@ function drainChildrenKeepingLocal(sourceParent: THREE.Object3D, destParent: THR
 
 function resolveModelCombineNode(
   nodeByPath: Map<string, THREE.Object3D>,
-  candidates: Array<string | null | undefined>,
-  rootPath: string | null | undefined,
-  name: string
+  path: string | null | undefined
 ) {
-  const direct = resolvePrefabGraphNode(nodeByPath, candidates);
-  if (direct) {
-    return direct;
-  }
-  if (!rootPath) {
-    return null;
-  }
-  let best: { path: string; node: THREE.Object3D } | null = null;
-  for (const [path, node] of nodeByPath.entries()) {
-    if (
-      node.name === name &&
-      (path === rootPath || path.startsWith(`${rootPath}/`)) &&
-      (!best || path.length < best.path.length)
-    ) {
-      best = { path, node };
-    }
-  }
-  return best;
+  return resolvePrefabGraphNode(nodeByPath, [path]);
 }
 
 function moveKnownFaceRendererTransforms(
@@ -2453,66 +2328,24 @@ function detachNode(node: THREE.Object3D) {
 function applyOfficialModelCombineSetup(
   root: THREE.Group,
   nodeByPath: Map<string, THREE.Object3D>,
-  defaultBodyRoot: string,
-  assembly: RuntimeUnityBodyHeadAssemblySource | undefined
+  assembly: RuntimeUnityBodyHeadAssemblySource
 ) {
-  const combineNodeAName = assembly?.combineNodeAName ?? "Neck";
-  const combineNodeBName = assembly?.combineNodeBName ?? "Head";
-  const childMoveSuffix = assembly?.childMoveSuffix ?? "_target";
-  const parentRootPath = assembly?.parentRootPath ?? defaultBodyRoot;
-  const childRootPath = assembly?.childRootPath ?? "face";
+  const childMoveSuffix = assembly.childMoveSuffix ?? "_target";
+  const parentRootPath = assembly.parentRootPath;
+  const childRootPath = assembly.childRootPath;
   const bodyNodeA = resolveModelCombineNode(
     nodeByPath,
-    [
-      assembly?.parentCombineNodeAPath,
-      assembly?.parentAttachPath,
-      `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/${combineNodeAName}`,
-      `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}`,
-    ],
-    parentRootPath,
-    combineNodeAName
+    assembly.parentCombineNodeAPath ?? assembly.parentAttachPath
   );
-  const bodyNodeB = resolveModelCombineNode(
-    nodeByPath,
-    [
-      assembly?.parentCombineNodeBPath,
-      bodyNodeA ? `${bodyNodeA.path}/${combineNodeBName}` : null,
-      `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
-      `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
-    ],
-    bodyNodeA?.path,
-    combineNodeBName
-  );
+  const bodyNodeB = resolveModelCombineNode(nodeByPath, assembly.parentCombineNodeBPath);
   const faceNodeA = resolveModelCombineNode(
     nodeByPath,
-    [
-      assembly?.childCombineNodeAPath,
-      assembly?.childOriginPath,
-      `${childRootPath}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}`,
-    ],
-    childRootPath,
-    combineNodeAName
+    assembly.childCombineNodeAPath ?? assembly.childOriginPath
   );
-  const faceNodeB = resolveModelCombineNode(
-    nodeByPath,
-    [
-      assembly?.childCombineNodeBPath,
-      faceNodeA ? `${faceNodeA.path}/${combineNodeBName}` : null,
-      `${childRootPath}/Position/Hip/Waist/Spine/Chest/${combineNodeAName}/${combineNodeBName}`,
-    ],
-    faceNodeA?.path,
-    combineNodeBName
-  );
+  const faceNodeB = resolveModelCombineNode(nodeByPath, assembly.childCombineNodeBPath);
 
-  if (!bodyNodeA || !bodyNodeB || !faceNodeA || !faceNodeB) {
-    return {
-      active: false,
-      reason: "model combine setup nodes were not fully resolved",
-      bodyNodeA,
-      bodyNodeB,
-      faceNodeA,
-      faceNodeB,
-    };
+  if (!parentRootPath || !childRootPath || !bodyNodeA || !bodyNodeB || !faceNodeA || !faceNodeB) {
+    throw new Error("Official model_combine_setup paths were not fully resolved.");
   }
 
   drainChildrenKeepingLocal(bodyNodeB.node, faceNodeB.node);
@@ -2528,7 +2361,7 @@ function applyOfficialModelCombineSetup(
       nodeByPath,
       childRootPath,
       nodeByPath.get(parentRootPath) ?? bodyNodeAParent,
-      assembly?.faceRendererName ?? "Face"
+      assembly.faceRendererName ?? "Face"
     );
     setParentKeepingLocal(faceNodeA.node, bodyNodeAParent);
   }
@@ -2544,10 +2377,10 @@ function applyOfficialModelCombineSetup(
 
   nodeByPath.set(bodyNodeA.path, faceNodeA.node);
   nodeByPath.set(bodyNodeB.path, faceNodeB.node);
-  if (assembly?.parentAttachPath) {
+  if (assembly.parentAttachPath) {
     nodeByPath.set(assembly.parentAttachPath, faceNodeA.node);
   }
-  if (assembly?.parentCombineNodeBPath) {
+  if (assembly.parentCombineNodeBPath) {
     nodeByPath.set(assembly.parentCombineNodeBPath, faceNodeB.node);
   }
 
@@ -2567,8 +2400,6 @@ function applyOfficialModelCombineSetup(
 
 function buildUnityPrefabSourceGraph(
   extension: unknown,
-  bodyAsset: BodyAssetManifest,
-  headAsset: HeadAssetManifest,
   meshCarrierRoot?: THREE.Object3D | null
 ): UnityPrefabSourceGraph | null {
   const setup = readRuntimeUnitySetup0414ForGraph(extension);
@@ -2620,56 +2451,27 @@ function buildUnityPrefabSourceGraph(
   }
 
   root.updateMatrixWorld(true);
-  const defaultBodyRoot = setup.activeRootProfile?.defaultBodyRoot ?? "body";
   const assembly = setup.bodyHeadAssembly;
-  const bodyAttachByName = findPrefabGraphNodeByName(
-    nodeByPath,
-    defaultBodyRoot,
-    bodyAsset.skeleton.neckAttach.nodeName
-  );
-  const bodyAttach = resolvePrefabGraphNode(nodeByPath, [
-    assembly?.parentAttachPath,
-  ]) ?? bodyAttachByName ?? resolvePrefabGraphNode(nodeByPath, [
-    `${defaultBodyRoot}/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck`,
-    `${defaultBodyRoot}/Position/Hip/Waist/Spine/Chest/Neck`,
-  ]);
-  const headRoot = resolvePrefabGraphNode(nodeByPath, [
-    assembly?.childRootPath,
-    "face",
-    headAsset.assembly.rootNodeName,
-  ]);
-  const headRoots = collectUnityPrefabHeadRoots(root, headRoot?.node ?? null);
-  const headOriginByPath = resolvePrefabGraphNode(nodeByPath, [
-    assembly?.childOriginPath,
-    "face/Position",
-    headRoot?.path ? `${headRoot.path}/Position` : null,
-  ]);
-  const headOriginByName = findPrefabGraphNodeByName(
-    nodeByPath,
-    "face",
-    headAsset.assembly.attachOrigin.nodeName
-  );
-  const headOrigin = headOriginByPath ?? headOriginByName;
-  const useModelCombineSetup = isModelCombineSetupAssembly(assembly);
-  const modelCombine = useModelCombineSetup
-    ? applyOfficialModelCombineSetup(root, nodeByPath, defaultBodyRoot, assembly)
-    : null;
-
-  let headOriginRestLocalToHeadRoot: THREE.Matrix4 | null = null;
-  if (!useModelCombineSetup && headRoot && headOrigin) {
-    headRoot.node.updateMatrixWorld(true);
-    headOrigin.node.updateMatrixWorld(true);
-    headOriginRestLocalToHeadRoot = new THREE.Matrix4()
-      .copy(headRoot.node.matrixWorld)
-      .invert()
-      .multiply(headOrigin.node.matrixWorld);
+  if (!isModelCombineSetupAssembly(assembly)) {
+    throw new Error("Runtime package must provide the official model_combine_setup body/head assembly.");
   }
+  const bodyAttach = resolvePrefabGraphNode(nodeByPath, [assembly.parentAttachPath]);
+  const headRoot = resolvePrefabGraphNode(nodeByPath, [assembly.childRootPath]);
+  const headRoots = collectUnityPrefabHeadRoots(root, headRoot?.node ?? null);
+  const headOrigin = resolvePrefabGraphNode(nodeByPath, [assembly.childOriginPath]);
+  if (!bodyAttach || !headRoot || !headOrigin) {
+    throw new Error("Official model_combine_setup body/head roots were not fully resolved.");
+  }
+  const modelCombine = applyOfficialModelCombineSetup(
+    root,
+    nodeByPath,
+    assembly
+  );
   const headRootMounts = headRoots.map((mountedHeadRoot) => {
     const rootPath = getUnityPrefabTransformPath(mountedHeadRoot);
     const mountedHeadOrigin = resolveUnityPrefabMountedHeadOrigin(
       mountedHeadRoot,
-      assembly,
-      headOrigin?.path ?? "face/Position"
+      assembly
     );
     const originRestLocalToRoot = mountedHeadOrigin
       ? computeUnityPrefabRestOffset(mountedHeadRoot, mountedHeadOrigin.node)
@@ -2683,42 +2485,6 @@ function buildUnityPrefabSourceGraph(
     };
   });
 
-  let assemblyMount: THREE.Object3D | null = null;
-  let assemblyMountPath: string | null = null;
-  const runtimeMountPath = assembly?.runtimeMountPath ?? "PJSK_RuntimeMount_face";
-  if (!useModelCombineSetup && bodyAttach && headRoot) {
-    assemblyMount = new THREE.Object3D();
-    assemblyMount.name = runtimeMountPath.split("/").pop() ?? "PJSK_RuntimeMount_face";
-    assemblyMount.userData.pjskTransformPath = runtimeMountPath;
-    assemblyMount.userData.pjskRuntimeAssemblyMount = true;
-    assemblyMountPath = runtimeMountPath;
-    bodyAttach.node.add(assemblyMount);
-
-    for (const mounted of headRootMounts) {
-      if (mounted.root.parent) {
-        mounted.root.parent.remove(mounted.root);
-      }
-      assemblyMount.add(mounted.root);
-      if (mounted.originRestLocalToRoot) {
-        const headRootLocal = new THREE.Matrix4()
-          .copy(mounted.originRestLocalToRoot)
-          .invert();
-        headRootLocal.decompose(
-          mounted.root.position,
-          mounted.root.quaternion,
-          mounted.root.scale
-        );
-      } else {
-        mounted.root.position.set(0, 0, 0);
-        mounted.root.quaternion.identity();
-        mounted.root.scale.set(1, 1, 1);
-      }
-      mounted.root.updateMatrix();
-    }
-    nodeByPath.set(runtimeMountPath, assemblyMount);
-    root.updateMatrixWorld(true);
-  }
-
   const meshCarrierBindings: UnityPrefabSourceGraph["meshCarrierBindings"] = [];
   if (meshCarrierRoot) {
     const carrierNodeByPath = buildPrefabNodePathLookup(meshCarrierRoot);
@@ -2731,26 +2497,10 @@ function buildUnityPrefabSourceGraph(
   }
 
   const debug: PrefabHeadFollowDebug = {
-    active: useModelCombineSetup
-      ? Boolean(modelCombine?.active)
-      : Boolean(bodyAttach && headRoot && headOrigin && headOriginRestLocalToHeadRoot),
-    sourcePath: useModelCombineSetup
-      ? modelCombine?.bodyNodeA?.path ?? null
-      : bodyAttach?.path ?? null,
-    targetPath: useModelCombineSetup
-      ? modelCombine?.faceNodeA?.path ?? null
-      : headOrigin?.path ?? null,
-    reason: useModelCombineSetup
-      ? modelCombine?.reason ?? null
-      : bodyAttach
-      ? headRoot
-        ? headOrigin
-          ? headOriginRestLocalToHeadRoot
-            ? null
-            : "head origin rest offset was not computed"
-          : "head origin prefab node was not found"
-        : "head root prefab node was not found"
-      : "body attach prefab node was not found",
+    active: Boolean(modelCombine.active),
+    sourcePath: modelCombine.bodyNodeA?.path ?? null,
+    targetPath: modelCombine.faceNodeA?.path ?? null,
+    reason: modelCombine.reason ?? null,
     setupVersion: String(setup.version ?? ""),
     sourceScaleCorrection,
     mountedHeadRootCount: headRootMounts.length,
@@ -2762,9 +2512,7 @@ function buildUnityPrefabSourceGraph(
       String(binding.source.userData.pjskTransformPath ?? binding.source.name)
     ),
     keyNodes: {
-      runtimeMount: assemblyMount
-        ? makePrefabNodeDebug(assemblyMount, root)
-        : null,
+      runtimeMount: null,
       modelCombineBodyNeck: modelCombine?.bodyNodeA
         ? makePrefabNodeDebug(modelCombine.bodyNodeA.node, root)
         : null,
@@ -2784,11 +2532,6 @@ function buildUnityPrefabSourceGraph(
     headRootPath: headRoot?.path ?? null,
     headOrigin: headOrigin?.node ?? null,
     headOriginPath: headOrigin?.path ?? null,
-    assemblyMount,
-    assemblyMountPath,
-    usesModelCombineSetup: useModelCombineSetup,
-    headOriginRestLocalToHeadRoot,
-    headRootMounts,
     debug,
   };
 }
@@ -3329,7 +3072,7 @@ function prepareRuntimeAnimationClip(
 }
 
 function isUnityMotionJsonUrl(url: string) {
-  return /(?:^|\/)unity-motion\.(?:json|msgpack\.br)(?:$|[?#])/i.test(url);
+  return /(?:^|\/)unity-motion\.msgpack\.br(?:$|[?#])/i.test(url);
 }
 
 function inferBodyAnimationKind(
@@ -3351,12 +3094,12 @@ function readUnityMotionRuntime0414(value: unknown): UnityMotionRuntime0414 {
   const version = String(payload.version ?? payload.Version ?? "");
   const rawClips = payload.clips ?? payload.Clips;
   if (version !== "0414" || !Array.isArray(rawClips)) {
-    throw new Error("Unity motion JSON must be version 0414 and contain clips.");
+    throw new Error("Unity motion runtime must be version 0414 and contain clips.");
   }
 
   const clips = rawClips.map(readUnityMotionClip0414);
   if (!clips.length) {
-    throw new Error("Unity motion JSON contains no clips.");
+    throw new Error("Unity motion runtime contains no clips.");
   }
   return { version, clips };
 }
@@ -3436,7 +3179,7 @@ function unityMotionTrackToThreeTrack(track: UnityMotionTrack0414): THREE.Keyfra
 }
 
 async function loadUnityMotionClips(url: string): Promise<THREE.AnimationClip[]> {
-  const runtime = readUnityMotionRuntime0414(await fetchRuntimeJson(url));
+  const runtime = readUnityMotionRuntime0414(await fetchRuntimeMessagePack(url));
   return runtime.clips.map((clip) => {
     const tracks = clip.tracks.map(unityMotionTrackToThreeTrack);
     const duration = tracks
@@ -3632,18 +3375,11 @@ function isFaceAssemblyBridgeMotionTarget(target: BodyMotionTarget) {
 
 function hasUnityBodyHeadAssembly(extension: unknown) {
   const setup = readRuntimeUnitySetup0414ForGraph(extension);
-  if (setup?.bodyHeadAssembly?.parentingMode === "model_combine_setup") {
-    return Boolean(
-      setup.bodyHeadAssembly.parentAttachPath &&
-      setup.bodyHeadAssembly.childRootPath &&
-      setup.bodyHeadAssembly.childOriginPath
-    );
-  }
   return Boolean(
+    setup?.bodyHeadAssembly?.parentingMode === "model_combine_setup" &&
     setup?.bodyHeadAssembly?.parentAttachPath &&
     setup.bodyHeadAssembly.childRootPath &&
-    setup.bodyHeadAssembly.childOriginPath &&
-    setup.bodyHeadAssembly.runtimeMountPath
+    setup.bodyHeadAssembly.childOriginPath
   );
 }
 
@@ -3790,27 +3526,6 @@ function makePrefabNodeDebug(
     worldQuaternion: quaternionDebugSnapshot(worldQuaternion),
     worldForward: vectorDebugSnapshot(worldForward),
   };
-}
-
-function collectPrefabHeadFollowTargets(root: THREE.Object3D) {
-  const targets: Array<{ node: THREE.Object3D; path: string }> = [];
-  const seen = new Set<THREE.Object3D>();
-  root.traverse((node) => {
-    if (node === root || !node.name) {
-      return;
-    }
-
-    const rawPath = buildObjectPath(node, root);
-    const canonicalPath = buildObjectPath(node, root, true);
-    const isFaceControlRoot = canonicalPath === "face/Position";
-    if (!isFaceControlRoot || seen.has(node)) {
-      return;
-    }
-
-    seen.add(node);
-    targets.push({ node, path: rawPath });
-  });
-  return targets;
 }
 
 function collectPrefabPositionRootDebug(root: THREE.Object3D) {
@@ -4247,19 +3962,14 @@ export class Haruki3DEngine {
   private customSelectionQueue: Promise<unknown> = Promise.resolve();
   private currentBodyAsset: BodyAssetManifest | null = null;
   private currentHeadAsset: HeadAssetManifest | null = null;
-  private currentImportIsCombined = false;
   private currentImportSnapshot: PartImportSnapshot | null = null;
   private currentBodyAttachNode: THREE.Object3D | null = null;
   private currentHeadAttachOriginNode: THREE.Object3D | null = null;
   private currentCompositionStatus: CompositionStatus = {
-    mode: "separate_parts",
-    linkedBoneCount: 0,
+    mode: "pending",
     missingBodyBones: [],
     missingHeadBones: [],
-    usingFallbackAttach: true,
   };
-  private readonly activeBoneLinks: BoneLink[] = [];
-  private currentStitchMode: CharacterAssemblyState["stitchMode"] = "stitched";
   private currentBodyAnimationRoot: THREE.Object3D | null = null;
   private currentAnimationUrl: string | null = null;
   private currentAnimationKind: BodyAnimationKind | null = null;
@@ -4283,11 +3993,9 @@ export class Haruki3DEngine {
   private currentFaceMotionError: string | null = null;
   private readonly currentHeadMorphRuntimes: HeadMorphRuntime[] = [];
   private currentRuntimeExtension: unknown = null;
-  private currentVrmSpringBoneManager: unknown = null;
   private currentSpringRuntime: SpringRuntimeController | null = null;
   private currentExtraBoneRuntime: SekaiExtraBoneRuntime | null = null;
   private currentPrefabSourceGraph: UnityPrefabSourceGraph | null = null;
-  private currentPrefabHeadFollowConstraint: PrefabHeadFollowConstraint | null = null;
   private currentPrefabHeadFollowDebug: PrefabHeadFollowDebug = {
     active: false,
     sourcePath: null,
@@ -4318,7 +4026,6 @@ export class Haruki3DEngine {
   private readonly headDotDirectionalLight = new THREE.Vector2();
   private readonly hairHeadPosition = new THREE.Vector3();
   private currentHairOffset = new THREE.Vector3();
-  private materialBindingMode: MaterialBindingMode = "manifest";
   private hairShadowMode: HairShadowMode = "sekai_head_position";
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
@@ -4474,71 +4181,6 @@ export class Haruki3DEngine {
     }
   }
 
-  async importCharacterParts(
-    bodyAsset: BodyAssetManifest,
-    headAsset: HeadAssetManifest
-  ): Promise<PartImportSnapshot> {
-    const revision = ++this.importRevision;
-    this.runtimeDebug.outlineShells = [];
-    this.currentBodyAsset = bodyAsset;
-    this.currentHeadAsset = headAsset;
-    this.currentImportIsCombined = false;
-    this.currentPrefabSourceGraph = null;
-    this.currentPrefabHeadFollowConstraint = null;
-    this.currentPrefabHeadFollowDebug = {
-      active: false,
-      sourcePath: null,
-      targetPath: null,
-      reason: "separate parts import",
-    };
-    const [loadedBody, loadedHead] = await Promise.all([
-      this.loadBodyAsset(bodyAsset),
-      this.loadHeadAsset(headAsset),
-    ]);
-
-    if (revision !== this.importRevision) {
-      return {
-        revision,
-        body: this.makeImportStatus(bodyAsset, loadedBody),
-        head: this.makeImportStatus(headAsset, loadedHead),
-        composition: this.currentCompositionStatus,
-      };
-    }
-
-    const bodyMeshCount = this.applyBodyAsset(bodyAsset, loadedBody);
-    const headMeshCount = this.applyHeadAsset(headAsset, loadedHead);
-    const composition = this.prepareComposition();
-    await this.refreshAnimationPlayback();
-
-    if (revision !== this.importRevision) {
-      return {
-        revision,
-        body: this.makeImportStatus(bodyAsset, loadedBody),
-        head: this.makeImportStatus(headAsset, loadedHead),
-        composition: this.currentCompositionStatus,
-      };
-    }
-    const snapshot = {
-      revision,
-      body: {
-        ...this.makeImportStatus(bodyAsset, loadedBody),
-        meshCount: bodyMeshCount,
-        boneCount: loadedBody.boneCount,
-        skinnedMeshCount: loadedBody.skinnedMeshCount,
-      },
-      head: {
-        ...this.makeImportStatus(headAsset, loadedHead),
-        meshCount: headMeshCount,
-        boneCount: loadedHead.boneCount,
-        skinnedMeshCount: loadedHead.skinnedMeshCount,
-      },
-      composition,
-    };
-    this.currentImportSnapshot = snapshot;
-    this.applyRenderIsolationMode();
-    return snapshot;
-  }
-
   async importCombinedCharacter(
     characterAsset: RuntimeCombinedCharacterAsset,
     options: CombinedCharacterImportOptions = {}
@@ -4560,7 +4202,6 @@ export class Haruki3DEngine {
     this.lastNativeMeshInstallDiagnostics = null;
     this.currentBodyAsset = characterAsset.bodyAsset;
     this.currentHeadAsset = characterAsset.headAsset;
-    this.currentImportIsCombined = true;
     this.lastConstraintSetupDiagnostics = null;
     this.applyCharacterHeight(characterAsset.bodyAsset.characterHeightMeters ?? this.characterHeight);
     const loaded = await this.loadCombinedCharacterAsset(characterAsset);
@@ -4577,11 +4218,7 @@ export class Haruki3DEngine {
     this.clearCharacterSlot(this.bodySlot);
     this.clearCharacterSlot(this.headSlot);
     this.resetSlotParents();
-    this.currentRuntimeExtension = this.resolvePjskRuntimeExtension(
-      loaded,
-      characterAsset.runtimeExtension
-    );
-    this.currentVrmSpringBoneManager = loaded.springBoneManager ?? null;
+    this.currentRuntimeExtension = characterAsset.runtimeExtension;
     this.currentSpringRuntime = null;
     this.currentExtraBoneRuntime = null;
     this.currentBodyAttachNode = null;
@@ -4590,7 +4227,6 @@ export class Haruki3DEngine {
     this.currentHeadMorphRuntimes.length = 0;
     this.currentBodyAnimationRoot = null;
     this.currentPrefabSourceGraph = null;
-    this.currentPrefabHeadFollowConstraint = null;
     this.currentPrefabHeadFollowDebug = {
       active: false,
       sourcePath: null,
@@ -4598,75 +4234,23 @@ export class Haruki3DEngine {
       reason: "not initialized",
     };
 
-    if (loaded.root) {
-      this.bodySlot.add(loaded.root);
-      const prefabSourceGraph = loaded.prefabSourceGraph ?? (this.springRuntimeMode === "unity-prefab"
-        ? buildUnityPrefabSourceGraph(
-          this.currentRuntimeExtension,
-          characterAsset.bodyAsset,
-          characterAsset.headAsset,
-          loaded.root
-        )
-        : null);
-      if (prefabSourceGraph) {
-        this.currentPrefabSourceGraph = prefabSourceGraph;
-        if (prefabSourceGraph.root !== loaded.root) {
-          this.bodySlot.add(prefabSourceGraph.root);
-        }
-        this.currentBodyAnimationRoot = prefabSourceGraph.root;
-        this.currentBodyAttachNode = prefabSourceGraph.bodyAttach;
-        this.currentHeadAttachOriginNode = prefabSourceGraph.headOrigin;
-        this.currentPrefabHeadFollowDebug = prefabSourceGraph.debug;
-      } else {
-        this.currentBodyAnimationRoot = loaded.root;
-        const bodySkeletonRoot = this.findNodeByName(
-          loaded.root,
-          characterAsset.bodyAsset.skeleton.rootNodeName
-        );
-        const headSkeletonRoot = this.findNodeByName(
-          loaded.root,
-          characterAsset.headAsset.assembly.rootNodeName
-        );
-        this.currentBodyAttachNode = this.findNodeByName(
-          bodySkeletonRoot ?? loaded.root,
-          characterAsset.bodyAsset.skeleton.neckAttach.nodeName
-        );
-        this.currentHeadAttachOriginNode = this.findNodeByName(
-          headSkeletonRoot ?? loaded.root,
-          characterAsset.headAsset.assembly.attachOrigin.nodeName
-        );
-      }
-      this.bindHeadMorphTargets(loaded.root, characterAsset.headAsset);
-      const bodySkeletonRoot = this.currentPrefabSourceGraph
-        ? this.currentPrefabSourceGraph.nodeByPath.get(
-          this.currentPrefabSourceGraph.bodyAttachPath?.split("/").slice(0, 1).join("/") ?? "body"
-        ) ?? null
-        : this.findNodeByName(
-          loaded.root,
-          characterAsset.bodyAsset.skeleton.rootNodeName
-        );
-      this.prepareCombinedComposition(bodySkeletonRoot, loaded.root);
-      const runtimeRoot = this.currentBodyAnimationRoot ?? loaded.root;
-      this.currentExtraBoneRuntime = SekaiExtraBoneRuntime.fromPjskRuntimeExtension(
-        this.currentRuntimeExtension,
-        runtimeRoot
-      );
-      this.currentSpringRuntime = this.createSpringRuntime(
-        this.currentPrefabSourceGraph?.root ?? runtimeRoot
-      );
-      this.currentPrefabHeadFollowConstraint = this.currentPrefabSourceGraph
-        ? null
-        : this.createPrefabHeadFollowConstraint(loaded.root);
-      this.syncUnityPrefabSourceGraph();
-    } else {
-      this.currentCompositionStatus = {
-        mode: "separate_parts",
-        linkedBoneCount: 0,
-        missingBodyBones: [],
-        missingHeadBones: [],
-        usingFallbackAttach: true,
-      };
+    this.bodySlot.add(loaded.root);
+    this.currentPrefabSourceGraph = loaded.prefabSourceGraph;
+    if (loaded.prefabSourceGraph.root !== loaded.root) {
+      this.bodySlot.add(loaded.prefabSourceGraph.root);
     }
+    this.currentBodyAnimationRoot = loaded.prefabSourceGraph.root;
+    this.currentBodyAttachNode = loaded.prefabSourceGraph.bodyAttach;
+    this.currentHeadAttachOriginNode = loaded.prefabSourceGraph.headOrigin;
+    this.currentPrefabHeadFollowDebug = loaded.prefabSourceGraph.debug;
+    this.bindHeadMorphTargets(loaded.root, characterAsset.headAsset);
+    this.prepareCombinedComposition();
+    this.currentExtraBoneRuntime = SekaiExtraBoneRuntime.fromPjskRuntimeExtension(
+      this.currentRuntimeExtension,
+      loaded.prefabSourceGraph.root
+    );
+    this.currentSpringRuntime = this.createSpringRuntime(loaded.prefabSourceGraph.root);
+    this.syncUnityPrefabSourceGraph();
     await this.refreshAnimationPlayback({
       resetSpring: preservedAnimation === null,
     });
@@ -4695,7 +4279,7 @@ export class Haruki3DEngine {
         this.currentAnimationMixer?.update(0);
       }
       this.applyCurrentFaceMotionFrame();
-      this.syncLinkedHeadBones();
+      this.syncOfficialModelCombineSetup();
       this.currentExtraBoneRuntime?.update();
       this.resetCurrentSpringRuntimeState();
     }
@@ -4719,11 +4303,6 @@ export class Haruki3DEngine {
     this.currentImportSnapshot = snapshot;
     this.applyRenderIsolationMode();
     return snapshot;
-  }
-
-  setMaterialBindingMode(mode: MaterialBindingMode) {
-    this.materialBindingMode = mode;
-    this.runtimeDebug.materialBindingMode = mode;
   }
 
   setHairShadowMode(mode: HairShadowMode) {
@@ -4772,7 +4351,7 @@ export class Haruki3DEngine {
     const yaw = THREE.MathUtils.degToRad(Number.isFinite(degrees) ? degrees : 0);
     this.characterRoot.rotation.y = yaw;
     this.characterRoot.updateMatrixWorld(true);
-    this.syncLinkedHeadBones();
+    this.syncOfficialModelCombineSetup();
     this.characterRoot.updateMatrixWorld(true);
     this.updateShaderFaceBasis();
   }
@@ -4834,7 +4413,7 @@ export class Haruki3DEngine {
     const targetYaw = Math.atan2(cameraDirection.x, cameraDirection.z);
     this.characterRoot.rotation.y += targetYaw - currentYaw;
     this.characterRoot.updateMatrixWorld(true);
-    this.syncLinkedHeadBones();
+    this.syncOfficialModelCombineSetup();
     this.characterRoot.updateMatrixWorld(true);
     this.updateShaderFaceBasis();
   }
@@ -5356,7 +4935,7 @@ export class Haruki3DEngine {
   getSpringBoneSnapshot(debugOptions?: UtjSpringBoneDebugOptions): SpringBoneRuntimeSnapshot {
     return summarizeSpringBoneMetadata(
       this.currentRuntimeExtension,
-      Boolean(this.currentVrmSpringBoneManager),
+      false,
       this.currentSpringRuntime?.getSnapshot(this.isSpringRuntimeEnabled(), debugOptions) ?? null
     );
   }
@@ -5520,7 +5099,7 @@ export class Haruki3DEngine {
     this.currentAnimationMixer?.update(0);
     this.currentFaceMotionTime = nextTime;
     this.applyCurrentFaceMotionFrame();
-    this.syncLinkedHeadBones();
+    this.syncOfficialModelCombineSetup();
     this.resetCurrentSpringRuntimeState();
     this.applyAnimationPlaybackSettings();
   }
@@ -5563,7 +5142,7 @@ export class Haruki3DEngine {
       this.currentAnimationMixer?.update(stepDelta);
       this.updateFaceMotion(stepDelta);
     }
-    this.syncLinkedHeadBones();
+    this.syncOfficialModelCombineSetup();
     this.currentExtraBoneRuntime?.update();
     if (this.isSpringRuntimeEnabled()) {
       this.currentSpringRuntime?.update(stepDelta);
@@ -5766,8 +5345,7 @@ export class Haruki3DEngine {
     const previousCombinedId = wardrobe.getCombinedCharacter()?.id ?? null;
     const combined = await wardrobe.setCustomSelection(selection);
     const sameResolvedSelection = previousCombinedId !== null &&
-      previousCombinedId === combined.id &&
-      this.currentImportIsCombined;
+      previousCombinedId === combined.id;
     const nextAnimationUrl = combined.bodyAsset.source.animationUrls?.[0] ?? null;
     const nextAnimationKind = inferBodyAnimationKind(nextAnimationUrl);
     const nextLoopUrl = nextAnimationUrl && (
@@ -5777,7 +5355,6 @@ export class Haruki3DEngine {
       ? nextAnimationUrl
       : null;
     const preserveAnimation = previousCombinedId !== null &&
-      this.currentImportIsCombined &&
       previousSelection !== null &&
       runtimeRoleId(previousSelection.characterId, previousSelection.unit) ===
         runtimeRoleId(selection.characterId, selection.unit) &&
@@ -6014,97 +5591,6 @@ export class Haruki3DEngine {
     );
     await this.refreshAnimationPlayback();
     return this.getAnimationSnapshot();
-  }
-
-  updateAssembly(assembly: CharacterAssemblyState) {
-    if (!this.currentBodyAsset || !this.currentHeadAsset) {
-      return;
-    }
-    if (this.currentImportIsCombined) {
-      this.currentStitchMode = assembly.stitchMode;
-      this.bodySlot.parent?.remove(this.bodySlot);
-      this.headSlot.parent?.remove(this.headSlot);
-      this.characterRoot.add(this.bodySlot);
-      this.characterRoot.add(this.headSlot);
-      this.bodySlot.position.set(0, 0, 0);
-      this.headSlot.position.set(0, 0, 0);
-      this.bodySlot.scale.setScalar(1);
-      this.headSlot.scale.setScalar(1);
-      return;
-    }
-
-    const bodyNeckAnchor = new THREE.Vector3(
-      this.currentBodyAsset.skeleton.neckAttach.fallbackPosition.x,
-      this.currentBodyAsset.skeleton.neckAttach.fallbackPosition.y,
-      this.currentBodyAsset.skeleton.neckAttach.fallbackPosition.z
-    );
-    const rawHeadPosition = new THREE.Vector3(
-      this.currentHeadAsset.rawImportOffset.x,
-      this.currentHeadAsset.rawImportOffset.y,
-      this.currentHeadAsset.rawImportOffset.z
-    );
-    const userOffset = new THREE.Vector3(
-      assembly.headOffset.x,
-      assembly.headOffset.y,
-      assembly.headOffset.z
-    );
-    this.currentStitchMode = assembly.stitchMode;
-
-    this.bodySlot.parent?.remove(this.bodySlot);
-    this.headSlot.parent?.remove(this.headSlot);
-    this.characterRoot.add(this.bodySlot);
-    this.characterRoot.add(this.headSlot);
-    this.bodySlot.position.set(0, 0, 0);
-    this.headSlot.position.set(0, 0, 0);
-    this.headSlot.scale.setScalar(assembly.headScale);
-
-    const headOriginOffset = this.resolveHeadOriginOffset(assembly.headScale);
-    const stitchedParent = this.currentBodyAttachNode ?? this.bodySlot;
-    const actualBodyAttach = new THREE.Vector3();
-    if (this.currentBodyAttachNode) {
-      this.currentBodyAttachNode.getWorldPosition(actualBodyAttach);
-      this.characterRoot.worldToLocal(actualBodyAttach);
-    } else {
-      actualBodyAttach.copy(bodyNeckAnchor);
-    }
-
-    switch (assembly.stitchMode) {
-      case "stitched":
-        this.characterRoot.add(this.bodySlot);
-        if (this.currentCompositionStatus.mode === "bone_linked") {
-          this.characterRoot.add(this.headSlot);
-          this.headSlot.position
-            .copy(actualBodyAttach)
-            .add(userOffset)
-            .sub(headOriginOffset);
-        } else {
-          stitchedParent.add(this.headSlot);
-        }
-        this.bodySlot.position.set(0, 0, 0);
-        if (this.currentCompositionStatus.mode === "bone_linked") {
-        } else if (this.currentBodyAttachNode) {
-          this.headSlot.position.copy(userOffset).sub(headOriginOffset);
-        } else {
-          this.headSlot.position.copy(bodyNeckAnchor).add(userOffset).sub(headOriginOffset);
-        }
-        break;
-      case "manual":
-        this.characterRoot.add(this.bodySlot);
-        this.characterRoot.add(this.headSlot);
-        this.bodySlot.position.set(0, 0, 0);
-        this.headSlot.position.copy(rawHeadPosition).add(userOffset).sub(headOriginOffset);
-        break;
-      case "split":
-        this.characterRoot.add(this.bodySlot);
-        this.characterRoot.add(this.headSlot);
-        this.bodySlot.position.set(-assembly.splitDistance * 0.5, 0, 0);
-        this.headSlot.position.set(
-          assembly.splitDistance * 0.5 + assembly.headOffset.x - headOriginOffset.x,
-          1.25 + assembly.headOffset.y - headOriginOffset.y,
-          assembly.headOffset.z - headOriginOffset.z
-        );
-        break;
-    }
   }
 
   updatePreviewLight(next: PreviewLightState) {
@@ -6507,7 +5993,6 @@ export class Haruki3DEngine {
       meshCount: loaded.meshCount,
       boneCount: loaded.boneCount,
       skinnedMeshCount: loaded.skinnedMeshCount,
-      error: loaded.error,
     };
   }
 
@@ -6554,13 +6039,11 @@ export class Haruki3DEngine {
     this.currentSpringRuntime?.resetPose();
     this.currentSpringRuntime = null;
     this.currentExtraBoneRuntime = null;
-    this.currentVrmSpringBoneManager = null;
     this.currentRuntimeExtension = null;
     this.currentBodyAttachNode = null;
     this.currentHeadAttachOriginNode = null;
     this.currentBodyAnimationRoot = null;
     this.currentPrefabSourceGraph = null;
-    this.currentPrefabHeadFollowConstraint = null;
     this.currentPrefabHeadFollowDebug = {
       active: false,
       sourcePath: null,
@@ -6584,17 +6067,6 @@ export class Haruki3DEngine {
       return null;
     }
     return this.findNodeByImportedName(root, name);
-  }
-
-  private collectBones(root: THREE.Object3D) {
-    const bones = new Map<string, THREE.Bone>();
-    root.traverse((node) => {
-      const bone = node as THREE.Bone;
-      if (bone.isBone) {
-        bones.set(bone.name, bone);
-      }
-    });
-    return bones;
   }
 
   private findNodeByImportedName(
@@ -6645,387 +6117,64 @@ export class Haruki3DEngine {
     return depth;
   }
 
-  private prepareCombinedComposition(
-    bodySkeletonRoot: THREE.Object3D | null,
-    combinedRoot: THREE.Object3D | null
-  ): CompositionStatus {
-    this.activeBoneLinks.length = 0;
-    const missingBodyBones: string[] = [];
-    const missingHeadBones: string[] = [];
-    const usingFallbackAttach =
-      !this.currentBodyAttachNode;
-
-    if (!this.currentBodyAsset || !this.currentHeadAsset) {
-      this.currentCompositionStatus = {
-        mode: "combined_glb",
-        linkedBoneCount: 0,
-        missingBodyBones,
-        missingHeadBones,
-        usingFallbackAttach,
-      };
-      return this.currentCompositionStatus;
+  private prepareCombinedComposition(): CompositionStatus {
+    const graph = this.currentPrefabSourceGraph;
+    if (!graph) {
+      throw new Error("Official model_combine_setup graph is not loaded.");
     }
-
-    if (this.currentPrefabSourceGraph) {
-      this.currentCompositionStatus = {
-        mode: "unity_prefab",
-        linkedBoneCount: 0,
-        missingBodyBones: this.currentPrefabSourceGraph.bodyAttach ? [] : ["Unity prefab body attach unresolved"],
-        missingHeadBones:
-          this.currentPrefabSourceGraph.headRoot && this.currentPrefabSourceGraph.headOrigin
-            ? []
-            : ["Unity prefab head root/origin unresolved"],
-        usingFallbackAttach:
-          !this.currentPrefabSourceGraph.bodyAttach || !this.currentPrefabSourceGraph.headOrigin,
-      };
-      return this.currentCompositionStatus;
-    }
-
-    if (!bodySkeletonRoot) {
-      missingBodyBones.push(
-        this.currentBodyAsset.skeleton.rootNodeName ?? "<body-root>"
-      );
-    }
-
-    if (
-      bodySkeletonRoot &&
-      combinedRoot &&
-      this.currentBodyAsset.skeleton.skeletonId ===
-        this.currentHeadAsset.assembly.expectedSkeletonId
-    ) {
-      if (!hasSkinnedMeshesUsingSkeleton(combinedRoot, bodySkeletonRoot)) {
-        missingBodyBones.push("Combined skin does not use body skeleton root");
-      }
-    } else if (
-      bodySkeletonRoot &&
-      this.currentBodyAsset.skeleton.skeletonId !==
-        this.currentHeadAsset.assembly.expectedSkeletonId
-    ) {
-      missingBodyBones.push(
-        `Skeleton mismatch: ${this.currentBodyAsset.skeleton.skeletonId} != ${this.currentHeadAsset.assembly.expectedSkeletonId}`
-      );
-    }
-
     this.currentCompositionStatus = {
-      mode: "combined_glb",
-      linkedBoneCount: this.activeBoneLinks.length,
-      missingBodyBones,
-      missingHeadBones,
-      usingFallbackAttach,
+      mode: "model_combine_setup",
+      missingBodyBones: graph.bodyAttach ? [] : ["Unity prefab body attach unresolved"],
+      missingHeadBones:
+        graph.headRoot && graph.headOrigin
+          ? []
+          : ["Unity prefab head root/origin unresolved"],
     };
     return this.currentCompositionStatus;
-  }
-
-  private prepareComposition(): CompositionStatus {
-    this.activeBoneLinks.length = 0;
-    if (!this.currentBodyAsset || !this.currentHeadAsset) {
-      this.currentCompositionStatus = {
-        mode: "separate_parts",
-        linkedBoneCount: 0,
-        missingBodyBones: [],
-        missingHeadBones: [],
-        usingFallbackAttach: true,
-      };
-      return this.currentCompositionStatus;
-    }
-
-    const usingFallbackAttach =
-      !this.currentBodyAttachNode || !this.currentHeadAttachOriginNode;
-    const missingBodyBones: string[] = [];
-    const missingHeadBones: string[] = [];
-
-    if (
-      this.currentBodyAsset.skeleton.skeletonId !==
-      this.currentHeadAsset.assembly.expectedSkeletonId
-    ) {
-      this.currentCompositionStatus = {
-        mode: this.currentBodyAttachNode ? "node_attached" : "separate_parts",
-        linkedBoneCount: 0,
-        missingBodyBones: [
-          `Skeleton mismatch: ${this.currentBodyAsset.skeleton.skeletonId} != ${this.currentHeadAsset.assembly.expectedSkeletonId}`,
-        ],
-        missingHeadBones,
-        usingFallbackAttach,
-      };
-      return this.currentCompositionStatus;
-    }
-
-    const bodyBones = this.collectBones(this.bodySlot);
-    const headBones = this.collectBones(this.headSlot);
-    const remapEntries = Object.entries(
-      this.currentHeadAsset.assembly.boneRemap ?? {}
-    );
-
-    for (const [headName, bodyName] of remapEntries) {
-      const headBone = headBones.get(headName);
-      if (!headBone) {
-        missingHeadBones.push(headName);
-        continue;
-      }
-      const bodyBone = bodyBones.get(bodyName);
-      if (!bodyBone) {
-        missingBodyBones.push(bodyName);
-        continue;
-      }
-      this.activeBoneLinks.push({
-        bodyBone,
-        headBone,
-        bodyName,
-        headName,
-      });
-    }
-
-    this.currentCompositionStatus = {
-      mode: this.activeBoneLinks.length
-        ? "bone_linked"
-        : this.currentBodyAttachNode
-          ? "node_attached"
-          : "separate_parts",
-      linkedBoneCount: this.activeBoneLinks.length,
-      missingBodyBones,
-      missingHeadBones,
-      usingFallbackAttach,
-    };
-    return this.currentCompositionStatus;
-  }
-
-  private resolveHeadOriginOffset(headScale: number) {
-    if (this.currentHeadAttachOriginNode) {
-      const world = new THREE.Vector3();
-      this.currentHeadAttachOriginNode.getWorldPosition(world);
-      const local = this.headSlot.worldToLocal(world);
-      return local.multiplyScalar(headScale);
-    }
-    if (!this.currentHeadAsset) {
-      return new THREE.Vector3();
-    }
-    return new THREE.Vector3(
-      this.currentHeadAsset.assembly.attachOrigin.fallbackPosition.x,
-      this.currentHeadAsset.assembly.attachOrigin.fallbackPosition.y,
-      this.currentHeadAsset.assembly.attachOrigin.fallbackPosition.z
-    ).multiplyScalar(headScale);
-  }
-
-  private async loadBodyAsset(
-    bodyAsset: BodyAssetManifest
-  ): Promise<LoadedPartResult> {
-    const message = "Legacy body GLB import is disabled; export a prefab native runtime package with container.unityRuntimeJson.";
-    this.runtimeDebug.body = [
-      {
-        meshName: "<body-load-failed>",
-        sourceMaterialName: bodyAsset.displayName,
-        resolvedKey: "glb_disabled",
-        resolvedKind: "body",
-        usedOriginalMap: false,
-        boundMainTex: null,
-        boundShadowTex: null,
-        boundValueTex: null,
-        boundFaceShadowTex: null,
-        finalMaterialType: message,
-      },
-    ];
-    return {
-      root: null,
-      sourceMode: "proxy",
-      requestedUrl: bodyAsset.source.meshUrl,
-      meshCount: 0,
-      boneCount: 0,
-      skinnedMeshCount: 0,
-      error: message,
-    };
-  }
-
-  private async loadHeadAsset(
-    headAsset: HeadAssetManifest
-  ): Promise<LoadedPartResult> {
-    const message = "Legacy head GLB import is disabled; export a prefab native runtime package with container.unityRuntimeJson.";
-    this.runtimeDebug.head = [
-      {
-        meshName: "<head-load-failed>",
-        sourceMaterialName: headAsset.displayName,
-        resolvedKey: "glb_disabled",
-        resolvedKind: "head",
-        usedOriginalMap: false,
-        boundMainTex: null,
-        boundShadowTex: null,
-        boundValueTex: null,
-        boundFaceShadowTex: null,
-        finalMaterialType: message,
-      },
-    ];
-    return {
-      root: null,
-      sourceMode: "proxy",
-      requestedUrl: headAsset.source.meshUrl,
-      meshCount: 0,
-      boneCount: 0,
-      skinnedMeshCount: 0,
-      error: message,
-    };
   }
 
   private async loadCombinedCharacterAsset(
     characterAsset: RuntimeCombinedCharacterAsset
   ): Promise<LoadedPartResult> {
-    if (characterAsset.unityRuntimeJsonUrl) {
-      const prefabSourceGraph = buildUnityPrefabSourceGraph(
-        characterAsset.runtimeExtension,
-        characterAsset.bodyAsset,
-        characterAsset.headAsset,
-        null
-      );
-      if (!prefabSourceGraph) {
-        const message = "Unity Prefab runtime requires runtimeUnitySetup version 0414 in unity-runtime.json.";
-        this.runtimeDebug.body = [
-          {
-            meshName: "<unity-runtime-load-failed>",
-            sourceMaterialName: characterAsset.displayName,
-            resolvedKey: "missing_runtime_unity_setup",
-            resolvedKind: "body",
-            usedOriginalMap: false,
-            boundMainTex: null,
-            boundShadowTex: null,
-            boundValueTex: null,
-            boundFaceShadowTex: null,
-            finalMaterialType: message,
-          },
-        ];
-        this.runtimeDebug.head = [
-          {
-            meshName: "<unity-runtime-load-failed>",
-            sourceMaterialName: characterAsset.displayName,
-            resolvedKey: "missing_runtime_unity_setup",
-            resolvedKind: "head",
-            usedOriginalMap: false,
-            boundMainTex: null,
-            boundShadowTex: null,
-            boundValueTex: null,
-            boundFaceShadowTex: null,
-            finalMaterialType: message,
-          },
-        ];
-        return {
-          root: null,
-          sourceMode: "proxy",
-          requestedUrl: characterAsset.unityRuntimeJsonUrl ?? "",
-          meshCount: 0,
-          boneCount: 0,
-          skinnedMeshCount: 0,
-          error: message,
-        };
-      }
-
-      this.currentPrefabSourceGraph = prefabSourceGraph;
-      this.syncUnityPrefabSourceGraph();
-      const nativeResult = installUnityRuntimeNativeMeshes(
-        prefabSourceGraph,
-        characterAsset.runtimeExtension
-      );
-      this.lastNativeMeshInstallDiagnostics = nativeResult;
-      if (nativeResult.error) {
-        const message = nativeResult.error;
-        this.runtimeDebug.body = [
-          {
-            meshName: "<unity-runtime-load-failed>",
-            sourceMaterialName: characterAsset.displayName,
-            resolvedKey: "missing_native_meshes",
-            resolvedKind: "body",
-            usedOriginalMap: false,
-            boundMainTex: null,
-            boundShadowTex: null,
-            boundValueTex: null,
-            boundFaceShadowTex: null,
-            finalMaterialType: message,
-          },
-        ];
-        this.runtimeDebug.head = [
-          {
-            meshName: "<unity-runtime-load-failed>",
-            sourceMaterialName: characterAsset.displayName,
-            resolvedKey: "missing_native_meshes",
-            resolvedKind: "head",
-            usedOriginalMap: false,
-            boundMainTex: null,
-            boundShadowTex: null,
-            boundValueTex: null,
-            boundFaceShadowTex: null,
-            finalMaterialType: message,
-          },
-        ];
-        return {
-          root: null,
-          sourceMode: "proxy",
-          requestedUrl: characterAsset.unityRuntimeJsonUrl ?? "",
-          meshCount: 0,
-          boneCount: nativeResult.boneCount,
-          skinnedMeshCount: 0,
-          error: `${message}${nativeResult.warnings.length ? ` ${nativeResult.warnings.slice(0, 3).join(" ")}` : ""}`,
-        };
-      }
-
-      this.syncUnityPrefabSourceGraph();
-      if (this.materialBindingMode === "manifest") {
-        await this.overrideBodyMaterials(prefabSourceGraph.root, characterAsset.bodyAsset);
-        await this.overrideHeadMaterials(prefabSourceGraph.root, characterAsset.headAsset, {
-          eyeController: readCharacterEyeMaterialController(characterAsset.runtimeExtension),
-          hairController: readCharacterHairMaterialController(characterAsset.runtimeExtension),
-        });
-      } else {
-        this.runtimeDebug.body = [];
-        this.runtimeDebug.head = [];
-      }
-      this.installSekaiOutlineShells(prefabSourceGraph.root);
-      return {
-        root: prefabSourceGraph.root,
-        sourceMode: "unity-runtime",
-        requestedUrl: characterAsset.unityRuntimeJsonUrl ?? "",
-        meshCount: nativeResult.meshCount,
-        boneCount: nativeResult.boneCount,
-        skinnedMeshCount: nativeResult.skinnedMeshCount,
-        userData: { pjskUnityRuntimeNativeMeshWarnings: nativeResult.warnings },
-        vrm: null,
-        springBoneManager: null,
-        prefabSourceGraph,
-      };
+    if (!characterAsset.unityRuntimeJsonUrl) {
+      throw new Error("Final runtime package must provide container.unityRuntimeJson.");
+    }
+    const prefabSourceGraph = buildUnityPrefabSourceGraph(
+      characterAsset.runtimeExtension,
+      null
+    );
+    if (!prefabSourceGraph) {
+      throw new Error("Final runtime package must provide runtimeUnitySetup version 0414.");
     }
 
-    const message = "Pure Unity runtime requires container.unityRuntimeJson; combined GLB fallback is disabled.";
-    this.runtimeDebug.body = [
-      {
-        meshName: "<combined-load-failed>",
-        sourceMaterialName: characterAsset.displayName,
-        resolvedKey: "missing_unity_runtime_json",
-        resolvedKind: "body",
-        usedOriginalMap: false,
-        boundMainTex: null,
-        boundShadowTex: null,
-        boundValueTex: null,
-        boundFaceShadowTex: null,
-        finalMaterialType: message,
-      },
-    ];
-    this.runtimeDebug.head = [
-      {
-        meshName: "<combined-load-failed>",
-        sourceMaterialName: characterAsset.displayName,
-        resolvedKey: "missing_unity_runtime_json",
-        resolvedKind: "head",
-        usedOriginalMap: false,
-        boundMainTex: null,
-        boundShadowTex: null,
-        boundValueTex: null,
-        boundFaceShadowTex: null,
-        finalMaterialType: message,
-      },
-    ];
+    this.currentPrefabSourceGraph = prefabSourceGraph;
+    this.syncUnityPrefabSourceGraph();
+    const nativeResult = installUnityRuntimeNativeMeshes(
+      prefabSourceGraph,
+      characterAsset.runtimeExtension
+    );
+    this.lastNativeMeshInstallDiagnostics = nativeResult;
+    if (nativeResult.error) {
+      throw new Error(
+        `${nativeResult.error}${nativeResult.warnings.length ? ` ${nativeResult.warnings.slice(0, 3).join(" ")}` : ""}`
+      );
+    }
+
+    this.syncUnityPrefabSourceGraph();
+    await this.overrideBodyMaterials(prefabSourceGraph.root, characterAsset.bodyAsset);
+    await this.overrideHeadMaterials(prefabSourceGraph.root, characterAsset.headAsset, {
+      eyeController: readCharacterEyeMaterialController(characterAsset.runtimeExtension),
+      hairController: readCharacterHairMaterialController(characterAsset.runtimeExtension),
+    });
+    this.installSekaiOutlineShells(prefabSourceGraph.root);
     return {
-      root: null,
-      sourceMode: "proxy",
-      requestedUrl: characterAsset.meshUrl ?? "",
-      meshCount: 0,
-      boneCount: 0,
-      skinnedMeshCount: 0,
-      error: message,
+      root: prefabSourceGraph.root,
+      sourceMode: "unity-runtime",
+      requestedUrl: characterAsset.unityRuntimeJsonUrl,
+      meshCount: nativeResult.meshCount,
+      boneCount: nativeResult.boneCount,
+      skinnedMeshCount: nativeResult.skinnedMeshCount,
+      prefabSourceGraph,
     };
   }
 
@@ -7187,7 +6336,10 @@ export class Haruki3DEngine {
       const mainTex = await this.loadTexture(slot.mainTex);
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      const materialKind = slot.materialKind ?? "body";
+      if (!slot.materialKind) {
+        throw new Error(`Body material ${slot.materialName ?? slot.materialKey} is missing materialKind.`);
+      }
+      const materialKind = slot.materialKind;
       const lighting = tuneLightingForPreview(slot.materialKind, slot.lighting);
       const material = cloneBodyShaderMaterial(this.bodyMaterial, {
         mainTex,
@@ -7384,7 +6536,10 @@ export class Haruki3DEngine {
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
       const faceShadowTex = await this.loadTexture(slot.faceShadowTex);
-      const kind = normalizeHeadRuntimeMaterialKind(slot.materialKind ?? "face", slot.meshName, slot.materialName);
+      if (!slot.materialKind) {
+        throw new Error(`Head material ${slot.materialName ?? slot.materialKey} is missing materialKind.`);
+      }
+      const kind = slot.materialKind;
       const isAccessory = Boolean(slot.isAccessory) || kind === "accessory";
       const lighting = tuneLightingForPreview(kind, slot.lighting);
       let material: THREE.Material;
@@ -8096,195 +7251,6 @@ export class Haruki3DEngine {
     }
   }
 
-  private applyBodyAsset(
-    bodyAsset: BodyAssetManifest,
-    loaded: LoadedPartResult
-  ) {
-    this.resetSlotParents();
-    this.clearCharacterSlot(this.bodySlot);
-    this.currentRuntimeExtension = null;
-    this.currentVrmSpringBoneManager = loaded.springBoneManager ?? null;
-    this.currentBodyAttachNode = null;
-    updateSekaiBodyMaterial(this.bodyMaterial, {
-      baseColor: bodyAsset.proxy.bodyColor,
-      shadowColor: bodyAsset.proxy.shadowColor,
-      skinColorDefault:
-        this.currentHeadAsset?.proxy.skinColorDefault ??
-        this.currentHeadAsset?.proxy.faceColor ??
-        bodyAsset.proxy.bodyColor,
-      skinColor1:
-        this.currentHeadAsset?.proxy.skinColor1 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        bodyAsset.proxy.shadowColor,
-      skinColor2:
-        this.currentHeadAsset?.proxy.skinColor2 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        bodyAsset.proxy.shadowColor,
-      lightDirection: this.directionalLight.position.clone(),
-      lightIntensity: this.directionalLight.intensity,
-      ambientIntensity: this.fillLight.intensity,
-      shadowThreshold: this.bodyMaterial.uniforms.uShadowThreshold.value,
-      shadowWeight: this.bodyMaterial.uniforms.uShadowWeight.value,
-      characterAmbientIntensity:
-        this.bodyMaterial.uniforms.uCharacterAmbientIntensity.value,
-      rimIntensity: this.bodyMaterial.uniforms.uRimIntensity.value,
-      controllerRimThreshold:
-        this.bodyMaterial.uniforms.uControllerRimThreshold.value,
-      rimDirectionality: this.bodyMaterial.uniforms.uRimDirectionality.value,
-      rimDirection: this.bodyMaterial.uniforms.uRimDirection.value.clone(),
-      specularPower: this.bodyMaterial.uniforms.uSpecularPower.value,
-      rimThreshold: this.bodyMaterial.uniforms.uRimThreshold.value,
-      shadowTexWeight: this.bodyMaterial.uniforms.uShadowTexWeight.value,
-      shadowWidthOverride: this.toonShadowWidthOverride,
-      valueShadowInfluence: this.toonValueShadowInfluence,
-      saturation: this.bodyMaterial.uniforms.uSaturation.value,
-      partsAmbientColor: `#${this.bodyMaterial.uniforms.uPartsAmbientColor.value.getHexString()}`,
-      reflectionBlendColor: `#${this.bodyMaterial.uniforms.uReflectionBlendColor.value.getHexString()}`,
-      bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
-      skinTintEnabled: true,
-    });
-
-    if (loaded.root) {
-      this.bodySlot.add(loaded.root);
-      this.currentBodyAnimationRoot = loaded.root;
-      this.currentBodyAttachNode = this.findNodeByName(
-        loaded.root,
-        bodyAsset.skeleton.neckAttach.nodeName
-      );
-      return loaded.meshCount;
-    }
-
-    this.currentBodyAnimationRoot = null;
-
-    const body = new THREE.Mesh(
-      new THREE.CapsuleGeometry(
-        bodyAsset.proxy.shoulderWidth * 0.34,
-        bodyAsset.proxy.torsoLength,
-        10,
-        20
-      ),
-      this.bodyMaterial
-    );
-    body.position.y = 0.16;
-    body.scale.setScalar(bodyAsset.proxy.bodyScale);
-    this.bodySlot.add(body);
-
-    const shoulderBand = new THREE.Mesh(
-      new THREE.TorusGeometry(
-        bodyAsset.proxy.shoulderWidth * 0.48,
-        0.12,
-        10,
-        48
-      ),
-      this.bodyMaterial
-    );
-    shoulderBand.rotation.x = Math.PI / 2;
-    shoulderBand.position.y = bodyAsset.neckAnchor.y - 0.16;
-    this.bodySlot.add(shoulderBand);
-
-    const neckMarker = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.09, 0.09, 0.1, 18),
-      new THREE.MeshBasicMaterial({ color: "#5d4235" })
-    );
-    neckMarker.position.set(
-      bodyAsset.neckAnchor.x,
-      bodyAsset.neckAnchor.y,
-      bodyAsset.neckAnchor.z
-    );
-    this.bodySlot.add(neckMarker);
-    return 3;
-  }
-
-  private applyHeadAsset(
-    headAsset: HeadAssetManifest,
-    loaded: LoadedPartResult
-  ) {
-    this.resetSlotParents();
-    this.clearCharacterSlot(this.headSlot);
-    this.currentVrmSpringBoneManager =
-      loaded.springBoneManager ?? this.currentVrmSpringBoneManager;
-    this.currentHeadAttachOriginNode = null;
-    this.runtimeDebug.headMorphs = [];
-    updateSekaiFaceMaterial(this.faceMaterial, {
-      baseColor: headAsset.proxy.faceColor,
-      warmColor: headAsset.proxy.faceShadeColor,
-      skinColorDefault: headAsset.proxy.skinColorDefault ?? headAsset.proxy.faceColor,
-      skinColor1: headAsset.proxy.skinColor1 ?? headAsset.proxy.faceShadeColor,
-      skinColor2: headAsset.proxy.skinColor2 ?? headAsset.proxy.faceShadeColor,
-      lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
-      lightIntensity: this.directionalLight.intensity,
-      ambientIntensity: this.fillLight.intensity,
-      faceSoftness: this.faceMaterial.uniforms.uFaceSoftness.value,
-      faceSdfUseLightDirection:
-        this.faceMaterial.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
-      headDotDirectionalLight: this.headDotDirectionalLight,
-      useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
-      faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
-    });
-    updateSekaiBodyMaterial(this.hairMaterial, {
-      baseColor: headAsset.proxy.hairColor,
-      shadowColor: headAsset.proxy.hairShadowColor,
-      lightDirection: this.directionalLight.position.clone(),
-      lightIntensity: this.directionalLight.intensity,
-      ambientIntensity: this.fillLight.intensity,
-      shadowThreshold: this.hairMaterial.uniforms.uShadowThreshold.value,
-      shadowWeight: this.hairMaterial.uniforms.uShadowWeight.value,
-      characterAmbientIntensity:
-        this.hairMaterial.uniforms.uCharacterAmbientIntensity.value,
-      rimIntensity: this.hairMaterial.uniforms.uRimIntensity.value,
-      controllerRimThreshold:
-        this.hairMaterial.uniforms.uControllerRimThreshold.value,
-      rimDirectionality: this.hairMaterial.uniforms.uRimDirectionality.value,
-      rimDirection: this.hairMaterial.uniforms.uRimDirection.value.clone(),
-      specularPower: this.hairMaterial.uniforms.uSpecularPower.value,
-      rimThreshold: this.hairMaterial.uniforms.uRimThreshold.value,
-      shadowTexWeight: this.hairMaterial.uniforms.uShadowTexWeight.value,
-      saturation: this.hairMaterial.uniforms.uSaturation.value,
-      partsAmbientColor: `#${this.hairMaterial.uniforms.uPartsAmbientColor.value.getHexString()}`,
-      reflectionBlendColor: `#${this.hairMaterial.uniforms.uReflectionBlendColor.value.getHexString()}`,
-      skinTintEnabled: false,
-    });
-
-    if (loaded.root) {
-      this.headSlot.add(loaded.root);
-      this.bindHeadMorphTargets(loaded.root, headAsset);
-      this.currentHeadAttachOriginNode = this.findNodeByName(
-        loaded.root,
-        headAsset.assembly.attachOrigin.nodeName
-      );
-      return loaded.meshCount;
-    }
-
-    const face = new THREE.Mesh(
-      new THREE.SphereGeometry(headAsset.proxy.headRadius, 32, 32),
-      this.faceMaterial
-    );
-    face.position.set(
-      0,
-      headAsset.proxy.headRadius * 0.92,
-      headAsset.proxy.faceDepth * 0.28
-    );
-    face.scale.set(1.0, 0.94, headAsset.proxy.faceDepth);
-    this.headSlot.add(face);
-
-    const hair = new THREE.Mesh(
-      new THREE.TorusGeometry(headAsset.proxy.hairArc, 0.14, 14, 48, Math.PI),
-      this.hairMaterial
-    );
-    hair.rotation.x = Math.PI / 2;
-    hair.position.set(0, headAsset.proxy.headRadius + 0.42, -0.08);
-    this.headSlot.add(hair);
-
-    const seam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.22, 0.18, 18),
-      this.faceMaterial
-    );
-    seam.position.set(0, 0.08, 0.02);
-    seam.scale.z = 0.74;
-    this.headSlot.add(seam);
-    return 3;
-  }
-
   private bindHeadMorphTargets(
     root: THREE.Object3D,
     headAsset: HeadAssetManifest
@@ -8761,7 +7727,7 @@ export class Haruki3DEngine {
     this.currentAnimationError = null;
 
     if (!this.currentAnimationUrl || !this.currentBodyAnimationRoot) {
-      this.syncLinkedHeadBones();
+      this.syncOfficialModelCombineSetup();
       this.currentExtraBoneRuntime?.update();
       if (resetSpring) {
         this.resetCurrentSpringRuntimeState();
@@ -8776,7 +7742,7 @@ export class Haruki3DEngine {
     let clips = this.animationClipCache.get(clipCacheKey);
     if (!clips) {
       if (this.currentAnimationKind !== "unity-json") {
-        this.currentAnimationError = `Unity motion JSON is required; GLTF animation fallback is disabled for ${this.currentAnimationUrl}.`;
+        this.currentAnimationError = `Unity motion .msgpack.br is required for ${this.currentAnimationUrl}.`;
         return;
       }
       try {
@@ -8923,7 +7889,7 @@ export class Haruki3DEngine {
 
     this.applyAnimationPlaybackSettings();
     this.currentAnimationMixer.update(0);
-    this.syncLinkedHeadBones();
+    this.syncOfficialModelCombineSetup();
     this.currentExtraBoneRuntime?.update();
     if (resetSpring) {
       this.resetCurrentSpringRuntimeState();
@@ -8979,8 +7945,6 @@ export class Haruki3DEngine {
       const resolved = resolvePrefabNodeCandidate(nodeByPath, candidates);
       return resolved ? makePrefabNodeDebug(resolved.node, root) : null;
     };
-    const constraint = this.currentPrefabHeadFollowConstraint;
-    const targetPaths = constraint?.targets.map((target) => target.path) ?? [];
     const bodyNeck = resolveKeyNode([
       "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck",
       "body/Position/Hip/Waist/Spine/Chest/Neck",
@@ -9002,8 +7966,6 @@ export class Haruki3DEngine {
     ]);
     return {
       ...base,
-      targetCount: targetPaths.length,
-      targetPaths,
       positionRoots: collectPrefabPositionRootDebug(root),
       assemblyDistances: {
         bodyNeckToFaceNeck: debugNodeWorldDistance(bodyNeck, faceNeck),
@@ -9021,109 +7983,6 @@ export class Haruki3DEngine {
     };
   }
 
-  private createPrefabHeadFollowConstraint(
-    root: THREE.Object3D
-  ): PrefabHeadFollowConstraint | null {
-    if (readRuntimeUnitySetupVersion(this.currentRuntimeExtension) !== "0414") {
-      this.currentPrefabHeadFollowDebug = {
-        active: false,
-        sourcePath: null,
-        targetPath: null,
-        reason: "runtimeUnitySetup version is not 0414",
-      };
-      return null;
-    }
-
-    const nodeByPath = buildPrefabNodePathLookup(root);
-    const source = resolvePrefabNodeCandidate(nodeByPath, [
-      "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck",
-      "body/Position/Hip/Waist/Spine/Chest/Neck",
-    ]);
-    if (!source) {
-      this.currentPrefabHeadFollowDebug = {
-        active: false,
-        sourcePath: null,
-        targetPath: null,
-        reason: "body neck prefab node was not found",
-      };
-      return null;
-    }
-
-    const targetNodes = collectPrefabHeadFollowTargets(root);
-    if (targetNodes.length === 0) {
-      this.currentPrefabHeadFollowDebug = {
-        active: false,
-        sourcePath: source.path,
-        targetPath: null,
-        reason: "head prefab follow targets were not found",
-      };
-      return null;
-    }
-
-    root.updateMatrixWorld(true);
-    source.node.updateMatrixWorld(true);
-    const sourceRestInverse = new THREE.Matrix4()
-      .copy(source.node.matrixWorld)
-      .invert();
-    const targets = targetNodes.map((target) => {
-      target.node.updateMatrixWorld(true);
-      return {
-        node: target.node,
-        path: target.path,
-        restOffset: sourceRestInverse.clone().multiply(target.node.matrixWorld),
-      };
-    });
-    this.currentPrefabHeadFollowDebug = {
-      active: true,
-      sourcePath: source.path,
-      targetPath: targets.map((target) => target.path).join(", "),
-      reason: null,
-    };
-    return {
-      source: source.node,
-      sourcePath: source.path,
-      targets,
-    };
-  }
-
-  private syncPrefabHeadFollow() {
-    if (this.currentPrefabSourceGraph) {
-      return;
-    }
-    const constraint = this.currentPrefabHeadFollowConstraint;
-    if (!constraint) {
-      return;
-    }
-
-    this.characterRoot.updateMatrixWorld(true);
-    constraint.source.updateMatrixWorld(true);
-    for (const target of constraint.targets) {
-      this.tempMatrixB.multiplyMatrices(
-        constraint.source.matrixWorld,
-        target.restOffset
-      );
-
-      const parent = target.node.parent;
-      if (parent) {
-        parent.updateMatrixWorld(true);
-        this.tempMatrixA.copy(parent.matrixWorld).invert();
-        this.tempMatrixB.premultiply(this.tempMatrixA);
-      }
-
-      this.tempMatrixB.decompose(
-        this.tempVector,
-        this.tempQuaternion,
-        this.tempScale
-      );
-      target.node.position.copy(this.tempVector);
-      target.node.quaternion.copy(this.tempQuaternion);
-      target.node.scale.copy(this.tempScale);
-      target.node.updateMatrix();
-      target.node.updateMatrixWorld(true);
-    }
-    this.characterRoot.updateMatrixWorld(true);
-  }
-
   private syncUnityPrefabSourceGraph() {
     const graph = this.currentPrefabSourceGraph;
     if (!graph) {
@@ -9131,58 +7990,6 @@ export class Haruki3DEngine {
     }
 
     graph.root.updateMatrixWorld(true);
-    if (
-      !graph.usesModelCombineSetup &&
-      graph.bodyAttach &&
-      graph.headRoot &&
-      graph.headOrigin
-    ) {
-      graph.bodyAttach.updateMatrixWorld(true);
-      if (graph.assemblyMount) {
-        graph.assemblyMount.position.set(0, 0, 0);
-        graph.assemblyMount.quaternion.identity();
-        graph.assemblyMount.scale.set(1, 1, 1);
-        graph.assemblyMount.updateMatrix();
-        graph.assemblyMount.updateMatrixWorld(true);
-      }
-      const mounts = graph.headRootMounts.length
-        ? graph.headRootMounts
-        : [{
-          root: graph.headRoot,
-          rootPath: graph.headRootPath,
-          origin: graph.headOrigin,
-          originPath: graph.headOriginPath,
-          originRestLocalToRoot: graph.headOriginRestLocalToHeadRoot,
-        }];
-      for (const mounted of mounts) {
-        if (!mounted.originRestLocalToRoot) {
-          continue;
-        }
-        this.tempMatrixB.copy(mounted.originRestLocalToRoot).invert();
-        this.tempMatrixB.decompose(
-          this.tempVector,
-          this.tempQuaternion,
-          this.tempScale
-        );
-        mounted.root.position.copy(this.tempVector);
-        mounted.root.quaternion.copy(this.tempQuaternion);
-        mounted.root.scale.copy(this.tempScale);
-        mounted.root.updateMatrix();
-      }
-      const bodyHead = graph.nodeByPath.get(
-        "body/Position/PositionOffset/Hip/Waist/Spine/Chest/Neck/Head"
-      ) ?? graph.nodeByPath.get("body/Position/Hip/Waist/Spine/Chest/Neck/Head");
-      const faceHead = graph.nodeByPath.get(
-        "face/Position/Hip/Waist/Spine/Chest/Neck/Head"
-      );
-      if (bodyHead && faceHead) {
-        faceHead.position.copy(bodyHead.position);
-        faceHead.quaternion.copy(bodyHead.quaternion);
-        faceHead.scale.copy(bodyHead.scale);
-        faceHead.updateMatrix();
-      }
-      graph.root.updateMatrixWorld(true);
-    }
 
     this.lastConstraintSetupDiagnostics = applyUnityRuntimeConstraints(
       graph,
@@ -9199,58 +8006,8 @@ export class Haruki3DEngine {
     graph.root.updateMatrixWorld(true);
   }
 
-  private syncLinkedHeadBones() {
+  private syncOfficialModelCombineSetup() {
     this.syncUnityPrefabSourceGraph();
-    this.syncPrefabHeadFollow();
-
-    if (
-      (
-        this.currentCompositionStatus.mode !== "bone_linked" &&
-        this.currentCompositionStatus.mode !== "combined_glb"
-      ) ||
-      this.currentStitchMode !== "stitched" ||
-      !this.activeBoneLinks.length
-    ) {
-      return;
-    }
-
-    this.characterRoot.updateMatrixWorld(true);
-    for (const link of this.activeBoneLinks) {
-      link.bodyBone.updateMatrixWorld(true);
-      const parent = link.headBone.parent;
-      if (parent) {
-        parent.updateMatrixWorld(true);
-        this.tempMatrixA.copy(parent.matrixWorld).invert();
-        this.tempMatrixB.multiplyMatrices(
-          this.tempMatrixA,
-          link.bodyBone.matrixWorld
-        );
-      } else {
-        this.tempMatrixB.copy(link.bodyBone.matrixWorld);
-      }
-      this.tempMatrixB.decompose(
-        this.tempVector,
-        this.tempQuaternion,
-        this.tempScale
-      );
-      link.headBone.position.copy(this.tempVector);
-      link.headBone.quaternion.copy(this.tempQuaternion);
-      link.headBone.scale.copy(this.tempScale);
-      link.headBone.updateMatrix();
-    }
-    this.characterRoot.updateMatrixWorld(true);
   }
 
-  private resolvePjskRuntimeExtension(
-    loaded: LoadedPartResult,
-    runtimeExtension: unknown
-  ) {
-    if (runtimeExtension) {
-      return runtimeExtension;
-    }
-    const extensions = (loaded.userData?.gltfExtensions ?? null) as
-      | Record<string, unknown>
-      | null;
-    return extensions?.PJSK_sekai_runtime ?? null;
-  }
 }

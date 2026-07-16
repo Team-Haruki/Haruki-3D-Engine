@@ -2,7 +2,6 @@ import type {
   BodyAssetManifest,
   HeadAssetManifest,
 } from "../data/sampleScene";
-import { characterHeightMetersById } from "../data/sampleScene";
 import type { RuntimeCombinedCharacterAsset } from "../engine/Haruki3DEngine";
 
 export type RuntimePartType = "body" | "head" | "hair" | "head_optional";
@@ -183,13 +182,21 @@ type RuntimePrefabGraph = Record<string, unknown> & {
 
 type RuntimePrefabTransform = Record<string, unknown> & {
   pathId?: number;
+  gameObjectPathId?: number | null;
+  name?: string | null;
+  transformPath?: string | null;
   parentPathId?: number | null;
   childPathIds?: number[];
+  localPosition?: VectorLike | null;
+  localRotation?: QuaternionLike | null;
+  localScale?: VectorLike | null;
   runtimePartIndex?: number;
 };
 
 type RuntimePrefabMonoBehaviour = Record<string, unknown> & {
   pathId?: number;
+  scriptName?: string | null;
+  transformPath?: string | null;
   runtimePartIndex?: number;
 };
 
@@ -206,6 +213,13 @@ type VectorLike = {
   X?: number;
   Y?: number;
   Z?: number;
+};
+
+type QuaternionLike = {
+  x?: number;
+  y?: number;
+  z?: number;
+  w?: number;
 };
 
 type RuntimeManager = Record<string, unknown> & {
@@ -538,7 +552,7 @@ export function composeRuntimeCombinedCharacterAsset(
     id: `custom-${selectionRoleId}-${selection.bodyCostume3dId}-${selection.headCostume3dId}-${encodeURIComponent(resolvedSelection.headPackagePath)}-${selection.hairCostume3dId}-${selection.headOptionalCostume3dId ?? "none"}`,
     displayName: `Custom ${selectionRoleId}`,
     meshUrl: "",
-    unityRuntimeJsonUrl: `haruki-composed://role-${selectionRoleId}/unity-runtime.json`,
+    unityRuntimeJsonUrl: `haruki-composed://role-${selectionRoleId}/unity-runtime.msgpack.br`,
     unityRuntimeJsonPath: "viewer-composed-part-runtime",
     bodyAsset: bodyManifest,
     headAsset: headManifest,
@@ -788,7 +802,9 @@ function withRegistryEntryRuntimeMetadata(
     manifest.id = `${partType}-${entry.characterId}-${entry.costume3dId}-${entry.unit ?? "default"}`;
     manifest.displayName = entry.name ?? readOptionalString(manifest.displayName) ?? manifest.id;
     manifest.characterId = String(entry.characterId).padStart(2, "0");
-    manifest.characterHeightMeters = resolveRuntimePartCharacterHeightMeters(entry.characterId);
+    if (typeof manifest.characterHeightMeters !== "number" || manifest.characterHeightMeters <= 0) {
+      throw new Error(`Part runtime ${entry.packagePath} is missing characterHeightMeters.`);
+    }
   }
 
   return {
@@ -949,7 +965,9 @@ function normalizeBodyManifestFromPart(
   manifest.id ||= `body-${runtime.part.costume3dId}`;
   manifest.displayName ||= runtime.part.name ?? manifest.id;
   manifest.characterId = String(runtime.part.characterId).padStart(2, "0");
-  manifest.characterHeightMeters ??= resolveRuntimePartCharacterHeightMeters(runtime.part.characterId);
+  if (typeof manifest.characterHeightMeters !== "number" || manifest.characterHeightMeters <= 0) {
+    throw new Error(`Body part runtime ${runtime.packagePath} is missing characterHeightMeters.`);
+  }
   manifest.materialPipeline ??= "embedded";
   manifest.source ||= { bundleRoot: "", manifestUrl: "", meshUrl: "" };
   manifest.neckAnchor = normalizeVec3(manifest.neckAnchor, { x: 0, y: 1.75, z: 0.15 });
@@ -1003,7 +1021,9 @@ function normalizeHeadManifestFromParts(
   manifest.id = `head-${selection.headCostume3dId}-source-${encodeURIComponent(selection.headPackagePath ?? "auto")}-hair-${selection.hairCostume3dId}`;
   manifest.displayName = `Head ${selection.headCostume3dId} / Hair ${selection.hairCostume3dId}`;
   manifest.characterId = String(selection.characterId).padStart(2, "0");
-  manifest.characterHeightMeters ??= resolveRuntimePartCharacterHeightMeters(selection.characterId);
+  if (typeof manifest.characterHeightMeters !== "number" || manifest.characterHeightMeters <= 0) {
+    throw new Error(`Head part runtime ${head.packagePath} is missing characterHeightMeters.`);
+  }
   manifest.materialPipeline ??= "embedded";
   manifest.source ||= { bundleRoot: "", manifestUrl: "", meshUrl: "" };
   manifest.rawImportOffset = normalizeVec3(manifest.rawImportOffset, { x: 0, y: 0, z: 0 });
@@ -1102,11 +1122,6 @@ function isRuntimeContributor(
   return composition.activePartTypes.has(runtimePartSlot(runtime.part));
 }
 
-function resolveRuntimePartCharacterHeightMeters(characterId: number | string | null | undefined) {
-  const normalized = String(characterId ?? "").padStart(2, "0");
-  return characterHeightMetersById[normalized] ?? 1;
-}
-
 function readOptionalString(value: unknown) {
   return typeof value === "string" ? value : "";
 }
@@ -1165,11 +1180,15 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
   const colliderBindings = rebuildColliderBindings(remappedParts);
   const managerColliderCaches = rebuildManagerColliderCaches(remappedParts, colliderBindings);
   const bindingDecisions = rebuildBindingDecisions(bones, colliderBindings);
-  return {
+  const bodyHeadAssembly = resolveComposedBodyHeadAssembly(prefabGraphs);
+  if (!bodyHeadAssembly) {
+    throw new Error("Composed parts do not provide the official model_combine_setup body/head paths.");
+  }
+  const runtimeSetup: RuntimeSetup = {
     ...firstSetup,
     version: "0414",
     prefabGraphs,
-    bodyHeadAssembly: firstSetup.bodyHeadAssembly ?? resolveComposedBodyHeadAssembly(prefabGraphs),
+    bodyHeadAssembly,
     rootSelectionProfile: {
       policy: "viewer_composed_active_parts",
       rootCandidates: [],
@@ -1212,6 +1231,167 @@ function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
     },
     managerColliderCaches,
     warnings,
+  };
+  mountHeadOptionalPrefabGraphs(
+    remappedParts,
+    runtimeSetup,
+    resolveHeadOptionalFaceId(runtimes)
+  );
+  return runtimeSetup;
+}
+
+function mountHeadOptionalPrefabGraphs(
+  parts: RemappedRuntimePart[],
+  runtimeSetup: RuntimeSetup,
+  faceId: string | null
+) {
+  for (const part of parts.filter((entry) => entry.partType === "head_optional")) {
+    const graph = part.prefabGraph;
+    const attachNode = normalizePathSegment(readOptionalString(part.runtime.mount?.attachNode));
+    const target = attachNode ? findHeadOptionalAttachTransform(parts, attachNode) : null;
+    const prefabRoot = (graph?.transforms ?? []).find((transform) =>
+      transform.parentPathId == null && readOptionalString(transform.transformPath) === "optional"
+    );
+    if (!graph || !target || !prefabRoot || typeof target.pathId !== "number" || typeof prefabRoot.pathId !== "number") {
+      runtimeSetup.warnings?.push(
+        `Head optional prefab '${readOptionalString(part.runtime.part.modelAssetbundleName) || "<unknown>"}' was not instantiated: official prefab root 'optional' or active attach node '${attachNode || "<missing>"}' was not found.`
+      );
+      continue;
+    }
+
+    const controller = (graph.monoBehaviours ?? []).find((entry) =>
+      readOptionalString(entry.scriptName) === "CharacterAccessoryTransformController" &&
+      isSameOrDescendantPath(readOptionalString(entry.transformPath), "optional")
+    );
+    if (controller) {
+      const controllerPath = readOptionalString(controller.transformPath);
+      const controllerTarget = (graph.transforms ?? []).find((transform) =>
+        readOptionalString(transform.transformPath) === controllerPath
+      );
+      if (controllerTarget) {
+        applyAccessoryControllerTransform(
+          controllerTarget,
+          resolveAccessoryTransformAdjustment(part.runtime, faceId)
+        );
+        graph.headOptionalControllerPath = controllerPath;
+      } else {
+        runtimeSetup.warnings?.push(
+          `Head optional controller target '${controllerPath || "<missing>"}' was not found in prefab 'optional'.`
+        );
+      }
+    } else {
+      prefabRoot.localPosition = { X: 0, Y: 0, Z: 0 };
+      prefabRoot.localRotation = { x: 0, y: 0, z: 0, w: 1 };
+    }
+
+    retainHeadOptionalPrefabSubtree(graph, "optional");
+    prefabRoot.parentPathId = target.pathId;
+    target.childPathIds = [...new Set([...(target.childPathIds ?? []), prefabRoot.pathId])];
+    graph.headOptionalAttachPath = readOptionalString(target.transformPath);
+    graph.headOptionalPrefabRootPath = "optional";
+  }
+}
+
+function findHeadOptionalAttachTransform(
+  parts: RemappedRuntimePart[],
+  attachNode: string
+): RuntimePrefabTransform | null {
+  for (const part of parts) {
+    if (part.partType === "head_optional" || !part.prefabGraph) {
+      continue;
+    }
+    const transforms = part.prefabGraph.transforms ?? [];
+    const transformsById = new Map(
+      transforms
+        .filter((transform): transform is RuntimePrefabTransform & { pathId: number } =>
+          typeof transform.pathId === "number"
+        )
+        .map((transform) => [transform.pathId, transform])
+    );
+    const activeByGameObjectPathId = new Map(
+      readRecordArray(part.prefabGraph.gameObjects).map((gameObject) => [
+        readNumber(gameObject.pathId, Number.NaN),
+        gameObject.activeSelf !== false && gameObject.activeInHierarchy !== false,
+      ])
+    );
+    const isActive = (transform: RuntimePrefabTransform) =>
+      typeof transform.gameObjectPathId !== "number" ||
+      activeByGameObjectPathId.get(transform.gameObjectPathId) !== false;
+    const visit = (transform: RuntimePrefabTransform): RuntimePrefabTransform | null => {
+      if (!isActive(transform)) {
+        return null;
+      }
+      if (readOptionalString(transform.name) === attachNode || normalizePathSegment(readOptionalString(transform.transformPath)) === attachNode) {
+        return transform;
+      }
+      for (const childPathId of transform.childPathIds ?? []) {
+        const child = transformsById.get(childPathId);
+        const match = child ? visit(child) : null;
+        if (match) {
+          return match;
+        }
+      }
+      return null;
+    };
+    for (const activeRoot of part.activeRoots) {
+      const root = transforms.find((transform) =>
+        transform.parentPathId == null && readOptionalString(transform.transformPath) === activeRoot
+      );
+      const match = root ? visit(root) : null;
+      if (match) {
+        return match;
+      }
+    }
+  }
+  return null;
+}
+
+function retainHeadOptionalPrefabSubtree(graph: RuntimePrefabGraph, prefabRootPath: string) {
+  const belongsToPrefab = (entry: Record<string, unknown>) =>
+    isSameOrDescendantPath(readOptionalString(entry.transformPath), prefabRootPath);
+  graph.transforms = (graph.transforms ?? []).filter(belongsToPrefab);
+  graph.gameObjects = readRecordArray(graph.gameObjects).filter(belongsToPrefab);
+  graph.renderers = readRecordArray(graph.renderers).filter(belongsToPrefab);
+  graph.animators = readRecordArray(graph.animators).filter(belongsToPrefab);
+  graph.monoBehaviours = (graph.monoBehaviours ?? []).filter(belongsToPrefab);
+  graph.constraints = readRecordArray(graph.constraints).filter(belongsToPrefab);
+  graph.rootTransformPathIds = graph.transforms
+    .filter((transform) => readOptionalString(transform.transformPath) === prefabRootPath)
+    .map((transform) => transform.pathId)
+    .filter((pathId): pathId is number => typeof pathId === "number");
+}
+
+function isSameOrDescendantPath(path: string, rootPath: string) {
+  return path === rootPath || path.startsWith(`${rootPath}/`);
+}
+
+function applyAccessoryControllerTransform(
+  target: RuntimePrefabTransform,
+  adjustment: AccessoryTransformAdjustment | null
+) {
+  const position = readVectorLike(adjustment?.position, 0, 0, 0);
+  const rotation = readVectorLike(adjustment?.rotationEulerDegrees, 0, 0, 0);
+  const scale = readVectorLike(adjustment?.scale, 1, 1, 1);
+  target.localPosition = { X: position.x, Y: position.y, Z: position.z };
+  target.localRotation = unityQuaternionFromEulerDegrees(rotation);
+  target.localScale = { X: Math.abs(scale.x), Y: Math.abs(scale.y), Z: Math.abs(scale.z) };
+}
+
+function unityQuaternionFromEulerDegrees(rotation: { x: number; y: number; z: number }) {
+  const x = rotation.x * Math.PI / 180;
+  const y = rotation.y * Math.PI / 180;
+  const z = rotation.z * Math.PI / 180;
+  const c1 = Math.cos(x / 2);
+  const c2 = Math.cos(y / 2);
+  const c3 = Math.cos(z / 2);
+  const s1 = Math.sin(x / 2);
+  const s2 = Math.sin(y / 2);
+  const s3 = Math.sin(z / 2);
+  return {
+    x: s1 * c2 * c3 - c1 * s2 * s3,
+    y: c1 * s2 * c3 + s1 * c2 * s3,
+    z: c1 * c2 * s3 + s1 * s2 * c3,
+    w: c1 * c2 * c3 - s1 * s2 * s3,
   };
 }
 
@@ -1269,7 +1449,6 @@ function resolveComposedBodyHeadAssembly(prefabGraphs: unknown[]) {
     parentAttachPath,
     childRootPath: "face",
     childOriginPath,
-    runtimeMountPath: null,
     parentingMode: "model_combine_setup",
     coordinateSpace: "unity-left-handed",
     faceRendererName: "Face",
@@ -1380,6 +1559,9 @@ function selectRuntimePartActiveRoots(partType: RuntimePartType, activeRoots: st
   }
   if ((partType === "head" || partType === "hair") && activeRoots.includes("face")) {
     return ["face"];
+  }
+  if (partType === "head_optional" && activeRoots.includes("optional")) {
+    return ["optional"];
   }
   if (activeRoots.length) {
     return [activeRoots[0]];
@@ -1892,9 +2074,7 @@ function firstPathSegment(value: string | null | undefined): string | null {
 function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: RuntimeSetup) {
   const warnings = runtimes.flatMap((runtime) => runtime.warnings ?? []);
   const meshes: Record<string, unknown>[] = [];
-  const optionalMeshKeys = new Set<string>();
-  const headOptionalFaceId = resolveHeadOptionalFaceId(runtimes);
-  for (const runtime of runtimes) {
+  for (const [runtimeIndex, runtime] of runtimes.entries()) {
     const partType = runtimePartSlot(runtime.part);
     for (const mesh of readRecordArray(runtime.nativeMeshes?.meshes)) {
       if (partType !== "head_optional") {
@@ -1903,41 +2083,27 @@ function mergeNativeMeshes(runtimes: PartRuntimePackage[], runtimeSetup: Runtime
       }
 
       const sourceRendererTransformPath = readOptionalString(mesh.rendererTransformPath);
-      const attachPath = resolveHeadOptionalAttachPath(
-        readOptionalString(runtime.mount?.attachNode),
-        runtimeSetup,
-        sourceRendererTransformPath
+      const mountedGraph = readRecordArray(runtimeSetup.prefabGraphs).find((graph) =>
+        readNumber(graph.runtimePartIndex, -1) === runtimeIndex &&
+        Boolean(readOptionalString(graph.headOptionalAttachPath))
       );
-      if (!attachPath) {
+      const prefabRootPath = readOptionalString(mountedGraph?.headOptionalPrefabRootPath);
+      if (!mountedGraph || !prefabRootPath) {
         warnings.push(
-          `Head optional mesh '${readOptionalString(mesh.meshPath) || readOptionalString(mesh.meshName) || "<unnamed>"}' kept at '${sourceRendererTransformPath || "<missing>"}': attach node '${readOptionalString(runtime.mount?.attachNode) || "<missing>"}' was not found in composed head graph.`
-        );
-        meshes.push(mesh);
-        continue;
-      }
-
-      const dedupeKey = [
-        readOptionalString(mesh.meshName),
-        readOptionalString(mesh.meshPath),
-        readRecordArray(mesh.submeshes).map((submesh) => readOptionalString(submesh.materialKey)).join(","),
-      ].join("|");
-      if (optionalMeshKeys.has(dedupeKey)) {
-        warnings.push(
-          `Head optional duplicate native mesh '${readOptionalString(mesh.meshPath) || readOptionalString(mesh.meshName) || "<unnamed>"}' skipped after mount remap.`
+          `Head optional mesh '${readOptionalString(mesh.meshPath) || readOptionalString(mesh.meshName) || "<unnamed>"}' was skipped because the official prefab could not be mounted.`
         );
         continue;
       }
-      optionalMeshKeys.add(dedupeKey);
-      const adjustment = resolveAccessoryTransformAdjustment(runtime, headOptionalFaceId);
-      if (hasAccessoryTransformAdjustments(runtime) && !headOptionalFaceId) {
-        warnings.push(
-          `Head optional mesh '${readOptionalString(mesh.meshPath) || readOptionalString(mesh.meshName) || "<unnamed>"}' kept without accessory transform adjustment: face id could not be resolved from the active head package.`
-        );
+      if (
+        sourceRendererTransformPath !== prefabRootPath &&
+        !sourceRendererTransformPath.startsWith(`${prefabRootPath}/`)
+      ) {
+        continue;
       }
       meshes.push({
-        ...applyAccessoryTransformAdjustment(mesh, adjustment),
+        ...mesh,
         sourceRendererTransformPath,
-        rendererTransformPath: attachPath,
+        rendererTransformPath: sourceRendererTransformPath,
       });
     }
   }
@@ -1976,10 +2142,6 @@ function extractFaceIdFromBundlePath(value: string) {
   return `${match[1]}/${match[2]}`;
 }
 
-function hasAccessoryTransformAdjustments(runtime: PartRuntimePackage) {
-  return Object.keys(readAccessoryTransformAdjustments(runtime)).length > 0;
-}
-
 function resolveAccessoryTransformAdjustment(
   runtime: PartRuntimePackage,
   faceId: string | null
@@ -1994,42 +2156,6 @@ function resolveAccessoryTransformAdjustment(
 
 function readAccessoryTransformAdjustments(runtime: PartRuntimePackage) {
   return asRecord(runtime.mount?.accessoryTransformAdjustments);
-}
-
-function applyAccessoryTransformAdjustment(
-  mesh: Record<string, unknown>,
-  adjustment: AccessoryTransformAdjustment | null
-) {
-  if (!adjustment) {
-    return mesh;
-  }
-  const position = readVectorLike(adjustment.position, 0, 0, 0);
-  const rotation = readVectorLike(adjustment.rotationEulerDegrees, 0, 0, 0);
-  const scale = readVectorLike(adjustment.scale, 1, 1, 1);
-  const matrix = buildEulerRotationMatrix(
-    degreesToRadians(rotation.x),
-    degreesToRadians(rotation.y),
-    degreesToRadians(rotation.z)
-  );
-  const transformed = { ...mesh };
-  const positions = readStrictNumberArray(mesh.positions);
-  if (positions) {
-    transformed.positions = transformVectorArray(positions, matrix, scale, position, true);
-  }
-  const normals = readStrictNumberArray(mesh.normals);
-  if (normals) {
-    transformed.normals = transformVectorArray(normals, matrix, inverseScale(scale), { x: 0, y: 0, z: 0 }, false);
-  }
-  return transformed;
-}
-
-function readStrictNumberArray(value: unknown) {
-  if (value instanceof Float32Array || value instanceof Uint16Array || value instanceof Uint32Array) {
-    return value;
-  }
-  return Array.isArray(value) && value.every((entry) => typeof entry === "number")
-    ? value
-    : null;
 }
 
 function readVectorLike(
@@ -2050,110 +2176,10 @@ function readNumber(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function degreesToRadians(value: number) {
-  return value * Math.PI / 180;
-}
-
-function inverseScale(scale: { x: number; y: number; z: number }) {
-  return {
-    x: Math.abs(scale.x) > 0.000001 ? 1 / scale.x : 1,
-    y: Math.abs(scale.y) > 0.000001 ? 1 / scale.y : 1,
-    z: Math.abs(scale.z) > 0.000001 ? 1 / scale.z : 1,
-  };
-}
-
-function buildEulerRotationMatrix(rx: number, ry: number, rz: number) {
-  const cx = Math.cos(rx);
-  const sx = Math.sin(rx);
-  const cy = Math.cos(ry);
-  const sy = Math.sin(ry);
-  const cz = Math.cos(rz);
-  const sz = Math.sin(rz);
-  return [
-    cy * cz,
-    sx * sy * cz - cx * sz,
-    cx * sy * cz + sx * sz,
-    cy * sz,
-    sx * sy * sz + cx * cz,
-    cx * sy * sz - sx * cz,
-    -sy,
-    sx * cy,
-    cx * cy,
-  ] as const;
-}
-
-function transformVectorArray(
-  values: number[] | Float32Array | Uint16Array | Uint32Array,
-  matrix: readonly number[],
-  scale: { x: number; y: number; z: number },
-  translation: { x: number; y: number; z: number },
-  includeTranslation: boolean
-) {
-  const result = values.slice();
-  for (let index = 0; index + 2 < result.length; index += 3) {
-    const x = result[index] * scale.x;
-    const y = result[index + 1] * scale.y;
-    const z = result[index + 2] * scale.z;
-    result[index] = matrix[0] * x + matrix[1] * y + matrix[2] * z + (includeTranslation ? translation.x : 0);
-    result[index + 1] = matrix[3] * x + matrix[4] * y + matrix[5] * z + (includeTranslation ? translation.y : 0);
-    result[index + 2] = matrix[6] * x + matrix[7] * y + matrix[8] * z + (includeTranslation ? translation.z : 0);
-    if (!includeTranslation) {
-      const length = Math.hypot(result[index], result[index + 1], result[index + 2]);
-      if (length > 0.000001) {
-        result[index] /= length;
-        result[index + 1] /= length;
-        result[index + 2] /= length;
-      }
-    }
-  }
-  return result;
-}
-
-function resolveHeadOptionalAttachPath(
-  attachNode: string | null | undefined,
-  runtimeSetup: RuntimeSetup,
-  sourceRendererTransformPath?: string | null
-): string | null {
-  const candidates = collectRuntimeSetupTransformPaths(runtimeSetup);
-  const requested = normalizePathSegment(attachNode) || normalizePathSegment(sourceRendererTransformPath);
-  if (!requested) {
-    return null;
-  }
-  const exact = candidates.find((path) => path === requested);
-  if (exact) {
-    return exact;
-  }
-  const byLeaf = candidates
-    .filter((path) => path.split("/").filter(Boolean).pop() === requested)
-    .sort((left, right) => attachPathPriority(left) - attachPathPriority(right) || left.localeCompare(right));
-  return byLeaf[0] ?? null;
-}
-
-function collectRuntimeSetupTransformPaths(runtimeSetup: RuntimeSetup): string[] {
-  return uniqueStrings(readRecordArray(runtimeSetup.prefabGraphs).flatMap((graph) =>
-    readRecordArray(graph.transforms).map((transform) =>
-      readOptionalString(transform.transformPath)
-    )
-  ).filter(Boolean));
-}
 
 function normalizePathSegment(value: string | null | undefined): string | null {
   const normalized = value?.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? "";
   return normalized || null;
-}
-
-function attachPathPriority(path: string): number {
-  const root = firstPathSegment(path);
-  if (root === "body" || root === "sit_body" || root === "guitar_body") {
-    return 0;
-  }
-  if (path.startsWith("face/Position/")) {
-    return 1;
-  }
-  if (path.startsWith("face/")) {
-    return 2;
-  }
-  return 10;
 }
 
 type MaterialSlotWithTextures = {

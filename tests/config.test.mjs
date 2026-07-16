@@ -6,7 +6,6 @@ import test from "node:test";
 import * as THREE from "three";
 import ts from "typescript";
 
-import { parseArgs } from "../capture-runtime.mjs";
 import {
   loadEngineConfig,
   resolveCaptureRuntimeOptions,
@@ -165,37 +164,13 @@ test("capture server idle shutdown can be disabled", () => {
   assert.equal(server.idleShutdownMs, 0);
 });
 
-test("runtime package loader prefers gzip JSON packages with plain JSON fallback", () => {
-  const loaderSource = fs.readFileSync(
-    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
-    "utf8"
-  );
-
-  assert.ok(loaderSource.includes("const gzipUrl = `${url}.gz`;"));
-  assert.ok(loaderSource.includes('new DecompressionStream("gzip")'));
-  assert.ok(loaderSource.includes("JSON.parse(await readGzipRuntimeJson"));
-  assert.ok(loaderSource.includes('const response = await fetch(url, { cache: "no-store" })'));
-  assert.ok(loaderSource.includes('response.headers.get("x-haruki-file-version")'));
-  assert.ok(loaderSource.includes("isCacheableRuntimeMetadataUrl"));
-  assert.ok(loaderSource.includes("parsedRuntimeMetadataLimit = 16"));
-});
-
-test("runtime package loader decodes role runtime paths already stored as MessagePack Brotli", () => {
-  const loaderSource = fs.readFileSync(
-    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
-    "utf8"
-  );
-
-  assert.match(loaderSource, /if \(url\.endsWith\("\.msgpack\.br"\)\) \{\s+return url;\s+\}/);
-});
-
 test("engine recognizes compressed Unity motion URLs", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /unity-motion\\\.\(\?:json\|msgpack\\\.br\)/);
+  assert.match(engineSource, /unity-motion\\\.msgpack\\\.br/);
   assert.match(engineSource, /value\.every\(\(entry\) => typeof entry === "number" && Number\.isFinite\(entry\)\)/);
   assert.match(engineSource, /return value as number\[\]/);
 });
@@ -215,7 +190,7 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
   );
 
   assert.ok(loaderSource.includes("parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}"));
-  assert.ok(loaderSource.includes("parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.json"));
+  assert.ok(loaderSource.includes("parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.msgpack.br"));
   assert.ok(loaderSource.includes("ensureCompatibilityForSelection"));
   assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit))'));
   assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit))'));
@@ -285,40 +260,6 @@ test("engine head material render order follows documented Sekai render queues",
   assert.match(engineSource, /case "hair":\s+return 2451;/);
   assert.match(engineSource, /case "eye_through_hair":\s+return 2452;/);
   assert.match(engineSource, /case "eyelight_through_hair":\s+return 2455;/);
-});
-
-test("capture runtime accepts part-registry role capture options", () => {
-  const options = parseArgs([
-    "--input", "/tmp/input",
-    "--out", "/tmp/out.png",
-    "--role-id", "5:light_sound",
-    "--body-costume3d-id", "2",
-    "--head-costume3d-id", "3",
-    "--head-package-path", "parts/_sources/head_optional/shared",
-    "--hair-costume3d-id", "4",
-    "--head-optional-costume3d-id", "9",
-  ]);
-
-  assert.equal(options.partCapture, true);
-  assert.equal(options.roleId, "5:light_sound");
-  assert.equal(options.bodyCostume3dId, 2);
-  assert.equal(options.headCostume3dId, 3);
-  assert.equal(options.headPackagePath, "parts/_sources/head_optional/shared");
-  assert.equal(options.hairCostume3dId, 4);
-  assert.equal(options.headOptionalCostume3dId, 9);
-});
-
-test("capture runtime rejects incomplete part-registry capture options", () => {
-  assert.throws(
-    () => parseArgs([
-      "--input", "/tmp/input",
-      "--out", "/tmp/out.png",
-      "--role-id", "5:light_sound",
-      "--body-costume3d-id", "2",
-      "--head-costume3d-id", "3",
-    ]),
-    /Missing or invalid --hair-costume3d-id/
-  );
 });
 
 test("persistent capture server propagates config defaults into role parts capture", () => {
@@ -411,7 +352,7 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
   )?.[0] ?? "";
   assert.match(dynamicsBody, /currentAnimationMixer\?\.update/);
   assert.match(dynamicsBody, /updateFaceMotion/);
-  assert.match(dynamicsBody, /syncLinkedHeadBones/);
+  assert.match(dynamicsBody, /syncOfficialModelCombineSetup/);
   assert.match(dynamicsBody, /currentExtraBoneRuntime\?\.update/);
   assert.match(dynamicsBody, /currentSpringRuntime\?\.update/);
   assert.doesNotMatch(dynamicsBody, /updateShaderCameraPositions|updateShaderFaceBasis/);
@@ -447,37 +388,7 @@ test("capture server supports temporary cache mode and GC configuration", () => 
   assert.ok(serverSource.includes('/^tmp_[A-Za-z0-9._-]+\\.png$/'));
 });
 
-test("role parts capture reuses full runtime capture frame preparation", () => {
-  const harnessSource = fs.readFileSync(
-    path.join(repoRoot, "src/captureHarness.ts"),
-    "utf8"
-  );
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
-    "utf8"
-  );
-  const captureRolePartsBody = engineSource.match(
-    /async captureRoleParts\([^]*?return \{\s+selection,\s+combinedCharacter,\s+snapshots: this\.getSnapshots\([^]*?\),\s+\};\s+\}/
-  )?.[0] ?? "";
-  const prepareCaptureFrameBody = engineSource.match(
-    /prepareCaptureFrame\([^]*?this\.renderFrame\(\);\s+\}/
-  )?.[0] ?? "";
-
-  assert.match(harnessSource, /await engine\.prepareCaptureFrame\(/);
-  assert.match(captureRolePartsBody, /await this\.prepareCaptureFrame\(/);
-  assert.doesNotMatch(captureRolePartsBody, /this\.seekAnimationLoopPhase/);
-  assert.match(prepareCaptureFrameBody, /const startPhase = advanceWarmupAnimation && warmupFrames > 0 && duration > 0/);
-  assert.match(prepareCaptureFrameBody, /seekTargetPhase\(startPhase\);/);
-  assert.match(prepareCaptureFrameBody, /for \(let index = 0; index < warmupFrames; index \+= 1\)/);
-  assert.equal(prepareCaptureFrameBody.match(/seekTargetPhase\(/g)?.length, 1);
-});
-
 test("capture camera preset uses official CostumeShop camera parameters and keeps id5-debug as a legacy alias", () => {
-  const runtimeOptions = parseArgs([
-    "--input", "/tmp/input",
-    "--out", "/tmp/out.png",
-    "--camera-preset", "id5-debug",
-  ]);
   const configOptions = resolveCaptureRuntimeOptions({
     capture: {
       cameraPreset: "id5-debug",
@@ -493,8 +404,6 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
     "utf8"
   );
 
-  assert.equal(runtimeOptions.cameraPreset, "capture");
-  assert.equal(runtimeOptions.cameraProfile, "full-body");
   assert.equal(configOptions.cameraPreset, "capture");
   assert.equal(configOptions.cameraProfile, "official-default");
   assert.match(engineSource, /export type PjskCameraPreset = "default" \| "capture";/);
@@ -544,7 +453,7 @@ test("combined runtime imports apply character height before capture camera fram
 
   assert.match(
     engineSource,
-    /this\.currentBodyAsset = characterAsset\.bodyAsset;\s+this\.currentHeadAsset = characterAsset\.headAsset;\s+this\.currentImportIsCombined = true;\s+(?:this\.lastConstraintSetupDiagnostics = null;\s+)?this\.applyCharacterHeight\(characterAsset\.bodyAsset\.characterHeightMeters \?\? this\.characterHeight\);/s
+    /this\.currentBodyAsset = characterAsset\.bodyAsset;\s+this\.currentHeadAsset = characterAsset\.headAsset;\s+(?:this\.lastConstraintSetupDiagnostics = null;\s+)?this\.applyCharacterHeight\(characterAsset\.bodyAsset\.characterHeightMeters \?\? this\.characterHeight\);/s
   );
 });
 
@@ -624,20 +533,15 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.match(engineSource, /if \(material\.uniforms\.uHeadPosition\) \{\s+material\.uniforms\.uHeadPosition\.value\.copy\(this\.hairHeadPosition\);\s+\}/s);
 });
 
-test("head material binding normalizes old runtime hair and accessory kinds before FaceSDF fallback", () => {
+test("head material binding requires exporter material kinds", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /normalizeHeadRuntimeMaterialKind/);
-  assert.match(engineSource, /materialNameLower\.includes\("_hair_"\)/);
-  assert.match(engineSource, /meshNameLower\.includes\("hair"\)/);
-  assert.match(engineSource, /return "hair";/);
-  assert.match(engineSource, /materialNameLower\.includes\("_acc_"\)/);
-  assert.match(engineSource, /meshNameLower === "acc"/);
-  assert.match(engineSource, /return "accessory";/);
-  assert.match(engineSource, /const kind = normalizeHeadRuntimeMaterialKind\(slot\.materialKind \?\? "face", slot\.meshName, slot\.materialName\);/);
+  assert.doesNotMatch(engineSource, /normalizeHeadRuntimeMaterialKind|materialNameLower\.includes\("_hair_"\)|meshNameLower\.includes\("hair"\)/);
+  assert.match(engineSource, /Head material \$\{slot\.materialName \?\? slot\.materialKey\} is missing materialKind/);
+  assert.match(engineSource, /const kind = slot\.materialKind/);
 });
 
 test("head hair compatibility uses not-available patterns as a blacklist", () => {
@@ -698,17 +602,18 @@ test("native prefab meshes bind with exported Unity inverse bind matrices before
   );
 });
 
-test("engine rejects GLB model fallbacks for prefab-native runtime packages", () => {
+test("engine exposes only prefab-native runtime imports", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /Legacy body GLB import is disabled/);
-  assert.match(engineSource, /Legacy head GLB import is disabled/);
-  assert.match(engineSource, /combined GLB fallback is disabled/);
+  assert.match(engineSource, /Final runtime package must provide container\.unityRuntimeJson/);
+  assert.match(engineSource, /Final runtime package must provide runtimeUnitySetup version 0414/);
+  assert.doesNotMatch(engineSource, /importCharacterParts|loadBodyAsset|loadHeadAsset|applyBodyAsset|applyHeadAsset/);
+  assert.doesNotMatch(engineSource, /"glb" \| "proxy"|combined_glb|separate_parts|bone_linked|node_attached/);
   assert.match(engineSource, /export type BodyAnimationKind = "unity-json";/);
-  assert.match(engineSource, /GLTF animation fallback is disabled/);
+  assert.match(engineSource, /Unity motion \.msgpack\.br is required/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(bodyAsset\.source\.meshUrl/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(headAsset\.source\.meshUrl/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(\s+meshUrl,\s+characterAsset\.id\s+\)/s);
@@ -756,47 +661,13 @@ test("projected character shadows are separate scene objects", () => {
 });
 
 test("runtime accessory material slots carry the official accessory shader flag", () => {
-  const runtimeLoaderSource = fs.readFileSync(
-    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
-    "utf8"
-  );
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(runtimeLoaderSource, /isAccessory: readBoolean\(slot\.isAccessory \?\? slot\.IsAccessory\)/);
-  assert.match(runtimeLoaderSource, /fallbackMaterialKind === "accessory"/);
   assert.match(engineSource, /const isAccessory = Boolean\(slot\.isAccessory\) \|\| kind === "accessory"/);
   assert.match(engineSource, /material\.userData\.pjskIsAccessory = isAccessory/);
-});
-
-test("capture runtime parser allows config to replace built-in defaults", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "haruki-engine-cli-config-test-"));
-  const configPath = path.join(dir, "engine.config.json");
-  fs.writeFileSync(configPath, JSON.stringify({
-    capture: {
-      width: 640,
-      height: 480,
-      scale: 2,
-      timeoutMs: 12000
-    },
-    chromium: {
-      executable: "/usr/bin/chromium-from-config"
-    }
-  }));
-
-  const options = parseArgs([
-    "--config", configPath,
-    "--input", dir,
-    "--out", path.join(dir, "capture.png"),
-  ]);
-
-  assert.equal(options.width, 640);
-  assert.equal(options.height, 480);
-  assert.equal(options.scale, 2);
-  assert.equal(options.timeoutMs, 12000);
-  assert.equal(options.chromium, "/usr/bin/chromium-from-config");
 });
 
 test("part registry runtime path keeps role motion separate from part packages", () => {
@@ -818,7 +689,7 @@ test("part registry runtime path keeps role motion separate from part packages",
   );
 
   assert.match(composerSource, /type RoleRuntimePackage =/);
-  assert.match(composerSource, /resolveHeadOptionalAttachPath/);
+  assert.match(composerSource, /findHeadOptionalAttachTransform/);
   assert.match(composerSource, /sourceRendererTransformPath/);
   assert.match(composerSource, /constraintSetup:\s*\{/);
   assert.match(composerSource, /repair constraints after composition/);
@@ -900,7 +771,7 @@ test("custom selection mutations use the official full-character update path", (
   assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
   assert.match(engineSource, /const previousSelection = wardrobe\.getCustomSelection\(\)/);
   assert.match(engineSource, /const nextAnimationUrl = combined\.bodyAsset\.source\.animationUrls\?\.\[0\] \?\? null/);
-  assert.match(engineSource, /const preserveAnimation = previousCombinedId !== null &&\s+this\.currentImportIsCombined &&\s+previousSelection !== null &&\s+runtimeRoleId\(previousSelection\.characterId, previousSelection\.unit\) ===\s+runtimeRoleId\(selection\.characterId, selection\.unit\) &&\s+this\.currentAnimationUrl === nextAnimationUrl &&\s+this\.currentAnimationLoopUrl === nextLoopUrl/);
+  assert.match(engineSource, /const preserveAnimation = previousCombinedId !== null &&\s+previousSelection !== null &&\s+runtimeRoleId\(previousSelection\.characterId, previousSelection\.unit\) ===\s+runtimeRoleId\(selection\.characterId, selection\.unit\) &&\s+this\.currentAnimationUrl === nextAnimationUrl &&\s+this\.currentAnimationLoopUrl === nextLoopUrl/);
   assert.match(engineSource, /preserveAnimation,\s+disposeBeforeLoad:\s*true/);
   assert.match(engineSource, /clearAnimationCache:\s*false/);
   assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !preserveAnimation\)/);
@@ -1032,44 +903,12 @@ test("custom capture exposes SpringBone trace and named offset diagnostics", () 
   assert.match(serverSource, /traceUtjBones/);
   assert.match(serverSource, /springDebugBones/);
   assert.match(harnessSource, /utjSpringBoneTrace: engine\.getUtjSpringBoneTraceSnapshot\(\)/);
-  assert.match(harnessSource, /await ensureCaptureRuntimePackage\(config\);\s+engine\.setUtjSpringBoneTraceFilters/s);
+  assert.match(harnessSource, /engine\.setUtjSpringBoneTraceFilters\(/);
   assert.match(engineSource, /traceUtjBones\?: string\[\]/);
   assert.match(engineSource, /springDebugBones\?: string\[\]/);
   assert.match(engineSource, /getSnapshots\(\{\s+springDebugBones: request\.springDebugBones/s);
   assert.match(springSource, /debugOffsets/);
   assert.match(springSource, /springDebugAllOffsets/);
-});
-
-test("unity-prefab SpringBone keeps direct serialized colliders out of manager-cache filtering", () => {
-  const prefabSpringSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
-    "utf8"
-  );
-  const utjSpringSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/utjSpringBoneRuntimeAdapter.ts"),
-    "utf8"
-  );
-
-  assert.match(prefabSpringSource, /bindingKind === "colliderFlag" && candidateRoots\.size > 0/);
-  assert.doesNotMatch(prefabSpringSource, /filterCollidersByManagerCache\(directColliders/);
-  assert.match(prefabSpringSource, /direct serialized collider references \/ pose root preference/);
-  assert.doesNotMatch(utjSpringSource, /filterCollidersByManagerCache\(group\.colliders/);
-  assert.match(utjSpringSource, /direct serialized collider references \/ pose root preference/);
-});
-
-test("utj SpringBone runtime includes official force provider variants", () => {
-  const utjSpringSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/utjSpringBoneRuntimeAdapter.ts"),
-    "utf8"
-  );
-
-  assert.match(utjSpringSource, /type RuntimeForceProvider = RuntimeForceVolume \| RuntimeWindVolume \| RuntimeWindVolumeOneSelf/);
-  assert.match(utjSpringSource, /kind: "ForceVolume"/);
-  assert.match(utjSpringSource, /kind: "WindVolume"/);
-  assert.match(utjSpringSource, /computeForceVolume/);
-  assert.match(utjSpringSource, /computeWindVolume/);
-  assert.match(utjSpringSource, /positionalMultiplier/);
-  assert.match(utjSpringSource, /offsetVector/);
 });
 
 test("docker runtime image includes capture server config module", () => {
@@ -1083,19 +922,11 @@ test("capture server uses container-safe SwiftShader WebGL flags", () => {
     path.join(repoRoot, "capture-server.mjs"),
     "utf8"
   );
-  const runtimeSource = fs.readFileSync(
-    path.join(repoRoot, "capture-runtime.mjs"),
-    "utf8"
-  );
 
   assert.doesNotMatch(serverSource, /"--disable-gpu"/);
   assert.match(serverSource, /"--use-gl=angle"/);
   assert.match(serverSource, /"--use-angle=swiftshader"/);
   assert.match(serverSource, /"--enable-unsafe-swiftshader"/);
-  assert.doesNotMatch(runtimeSource, /"--disable-gpu"/);
-  assert.match(runtimeSource, /"--use-gl=angle"/);
-  assert.match(runtimeSource, /"--use-angle=swiftshader"/);
-  assert.match(runtimeSource, /"--enable-unsafe-swiftshader"/);
 });
 
 test("capture server readiness waits for request API, not default wardrobe bootstrap", () => {
@@ -1119,52 +950,34 @@ test("part runtime manifests preserve exporter proxy colors before fallback defa
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
-  const loaderSource = fs.readFileSync(
-    path.join(repoRoot, "src/runtime/runtimePackageLoader.ts"),
-    "utf8"
-  );
-
   assert.match(composerSource, /manifest\.proxy \|\|=/);
   assert.match(composerSource, /bodyColor:\s*manifest\.proxy\.bodyColor \?\? "#f2d0c3"/);
   assert.match(composerSource, /shadowColor:\s*manifest\.proxy\.shadowColor \?\? "#bf958a"/);
   assert.match(composerSource, /faceColor:\s*manifest\.proxy\.faceColor \?\? "#fde2d9"/);
   assert.match(composerSource, /skinColorDefault:\s*manifest\.proxy\.skinColorDefault \?\? manifest\.proxy\.faceColor \?\? "#fde2d9"/);
   assert.match(composerSource, /hairColor:\s*manifest\.proxy\.hairColor \?\? "#7b5b4a"/);
-  assert.match(loaderSource, /const proxy = asRecord\(record\.proxy \?\? record\.Proxy\)/);
-  assert.match(loaderSource, /bodyColor:\s*readString\(proxy\.bodyColor \?\? proxy\.BodyColor, "#f2d0c3"\)/);
-  assert.match(loaderSource, /shadowColor:\s*readString\(proxy\.shadowColor \?\? proxy\.ShadowColor, "#bf958a"\)/);
-  assert.match(loaderSource, /faceColor:\s*readString\(proxy\.faceColor \?\? proxy\.FaceColor, "#fde2d9"\)/);
-  assert.match(loaderSource, /skinColor2:\s*readString\(proxy\.skinColor2 \?\? proxy\.SkinColor2, readString\(proxy\.faceShadeColor \?\? proxy\.FaceShadeColor, "#f7cdbf"\)\)/);
 });
 
-test("legacy custom part manifests infer character height before capture framing", () => {
+test("final part manifests require exported character height", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
 
-  assert.match(composerSource, /characterHeightMetersById/);
-  assert.match(composerSource, /function resolveRuntimePartCharacterHeightMeters/);
-  assert.match(
-    composerSource,
-    /manifest\.characterHeightMeters\s*\?\?=\s*resolveRuntimePartCharacterHeightMeters\(runtime\.part\.characterId\)/
-  );
-  assert.match(
-    composerSource,
-    /manifest\.characterHeightMeters\s*\?\?=\s*resolveRuntimePartCharacterHeightMeters\(selection\.characterId\)/
-  );
+  assert.doesNotMatch(composerSource, /characterHeightMetersById|resolveRuntimePartCharacterHeightMeters/);
+  assert.match(composerSource, /Body part runtime \$\{runtime\.packagePath\} is missing characterHeightMeters/);
+  assert.match(composerSource, /Head part runtime \$\{head\.packagePath\} is missing characterHeightMeters/);
 });
 
-test("unity prefab source graph keeps legacy runtime mount behind model-combine mode", () => {
+test("unity prefab source graph requires the official model-combine setup", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /const runtimeMountPath = assembly\?\.runtimeMountPath \?\? "PJSK_RuntimeMount_face"/);
-  assert.match(engineSource, /if \(!useModelCombineSetup && bodyAttach && headRoot\)/);
-  assert.match(engineSource, /usesModelCombineSetup: useModelCombineSetup/);
-  assert.doesNotMatch(engineSource, /if \(bodyAttach && headRoot && assembly\?\.runtimeMountPath\)/);
+  assert.match(engineSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
+  assert.doesNotMatch(engineSource, /PJSK_RuntimeMount_face/);
+  assert.doesNotMatch(engineSource, /runtimeMountPath/);
 });
 
 test("unity prefab source graph mounts every duplicate composed face root", () => {
@@ -1187,7 +1000,8 @@ test("unity prefab source graph applies official ModelCombineSetup graft instead
   );
 
   assert.match(engineSource, /function applyOfficialModelCombineSetup/);
-  assert.match(engineSource, /assembly\?\.faceRendererName \?\? "Face"/);
+  assert.match(engineSource, /assembly\.faceRendererName \?\? "Face"/);
+  assert.match(engineSource, /Official model_combine_setup paths were not fully resolved/);
   assert.match(engineSource, /new Set\(\[faceRendererName, "Face", "Hair", "Acc"\]\)/);
   assert.match(engineSource, /drainChildrenKeepingLocal\(bodyNodeB\.node, faceNodeB\.node\)/);
   assert.match(engineSource, /child\.name\.endsWith\(childMoveSuffix\)/);
@@ -1195,7 +1009,8 @@ test("unity prefab source graph applies official ModelCombineSetup graft instead
   assert.match(engineSource, /nodeByPath\.set\(bodyNodeB\.path, faceNodeB\.node\)/);
   assert.match(engineSource, /detachNode\(bodyNodeB\.node\)/);
   assert.match(engineSource, /detachNode\(bodyNodeA\.node\)/);
-  assert.match(engineSource, /!graph\.usesModelCombineSetup/);
+  assert.match(engineSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
+  assert.doesNotMatch(engineSource, /usesModelCombineSetup/);
 });
 
 test("Sekai ExtraBone runtime follows official rotation order and coefficient direction", () => {
@@ -1302,7 +1117,7 @@ test("part composer applies registry identity over shared source packages", () =
   assert.match(composerSource, /withRegistryEntryRuntimeMetadata/);
   assert.match(composerSource, /costume3dId:\s*entry\.costume3dId/);
   assert.match(composerSource, /characterId:\s*entry\.characterId/);
-  assert.match(composerSource, /manifest\.characterHeightMeters\s*=\s*resolveRuntimePartCharacterHeightMeters\(entry\.characterId\)/);
+  assert.match(composerSource, /Part runtime \$\{entry\.packagePath\} is missing characterHeightMeters/);
   assert.match(composerSource, /expectedSkeletonId:\s*String\(entry\.characterId\)\.padStart/);
 });
 
@@ -1317,19 +1132,58 @@ test("part composer treats empty head optional slots as no-op selections", () =>
   assert.match(composerSource, /return null/);
 });
 
-test("part composer mounts head optional accessories on body attach nodes and applies face-specific adjustments", () => {
+test("part composer instantiates head optional prefabs with the official accessory mounting flow", () => {
   const composerSource = fs.readFileSync(
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
 
   assert.match(composerSource, /resolveHeadOptionalFaceId/);
+  assert.match(composerSource, /mountHeadOptionalPrefabGraphs/);
+  assert.match(composerSource, /findHeadOptionalAttachTransform/);
+  assert.match(composerSource, /headOptionalPrefabRootPath/);
+  assert.match(composerSource, /headOptionalControllerPath/);
+  assert.match(composerSource, /retainHeadOptionalPrefabSubtree/);
+  assert.match(composerSource, /partType === "head_optional" && activeRoots\.includes\("optional"\)/);
+  assert.match(composerSource, /sourceRendererTransformPath\.startsWith\(`\$\{prefabRootPath\}\/`\)/);
   assert.match(composerSource, /extractFaceIdFromBundlePath/);
   assert.match(composerSource, /accessoryTransformAdjustments/);
-  assert.match(composerSource, /applyAccessoryTransformAdjustment/);
-  assert.match(composerSource, /transformVectorArray\(positions, matrix, scale, position, true\)/);
-  assert.match(composerSource, /transformVectorArray\(normals, matrix, inverseScale\(scale\), \{ x: 0, y: 0, z: 0 \}, false\)/);
-  assert.match(composerSource, /root === "body" \|\| root === "sit_body" \|\| root === "guitar_body"/);
+  assert.match(composerSource, /applyAccessoryControllerTransform/);
+  assert.match(composerSource, /localScale = \{ X: Math\.abs\(scale\.x\), Y: Math\.abs\(scale\.y\), Z: Math\.abs\(scale\.z\) \}/);
+  assert.doesNotMatch(composerSource, /applyAccessoryTransformAdjustment/);
+  assert.doesNotMatch(composerSource, /transformVectorArray/);
+  assert.doesNotMatch(composerSource, /attachPathPriority/);
+});
+
+test("accessory controller Euler conversion matches Unity's default ZXY rotation order", () => {
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+  const helperSource = composerSource.match(
+    /function unityQuaternionFromEulerDegrees\([\s\S]*?\n\}/
+  )?.[0];
+  assert.ok(helperSource);
+  const helperJavaScript = ts.transpileModule(helperSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.None,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  const unityQuaternionFromEulerDegrees = new Function(
+    `${helperJavaScript}\nreturn unityQuaternionFromEulerDegrees;`
+  )();
+
+  const actual = unityQuaternionFromEulerDegrees({ x: 17, y: -31, z: 43 });
+  const expected = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(
+      THREE.MathUtils.degToRad(17),
+      THREE.MathUtils.degToRad(-31),
+      THREE.MathUtils.degToRad(43),
+      "ZXY"
+    )
+  );
+  assert.ok(new THREE.Quaternion(actual.x, actual.y, actual.z, actual.w).angleTo(expected) < 1e-7);
 });
 
 test("part composer resolves material textures relative to each source package", () => {
@@ -1357,13 +1211,14 @@ test("composed part runtime declares body-head assembly for motion retarget supp
     "utf8"
   );
 
-  assert.match(composerSource, /bodyHeadAssembly:.*resolveComposedBodyHeadAssembly/s);
+  assert.match(composerSource, /const bodyHeadAssembly = resolveComposedBodyHeadAssembly\(prefabGraphs\)/);
+  assert.match(composerSource, /Composed parts do not provide the official model_combine_setup body\/head paths/);
   assert.match(composerSource, /const parentAttachPath = resolveComposedBodyAttachPath/);
   assert.match(composerSource, /const childOriginPath = resolveComposedHeadOriginPath/);
   assert.match(composerSource, /childRootPath:\s*"face"/);
   assert.match(composerSource, /childOriginPath,/);
   assert.match(composerSource, /"face\/Position\/Hip\/Waist\/Spine\/Chest\/Neck"/);
-  assert.match(composerSource, /runtimeMountPath:\s*null/);
+  assert.doesNotMatch(composerSource, /runtimeMountPath/);
   assert.match(composerSource, /parentingMode:\s*"model_combine_setup"/);
   assert.match(composerSource, /faceRendererName:\s*"Face"/);
   assert.match(composerSource, /combineNodeAName:\s*"Neck"/);
@@ -1382,7 +1237,7 @@ test("unity prefab spring runtime is created from prefab source graph on initial
 
   assert.match(
     engineSource,
-    /this\.currentSpringRuntime = this\.createSpringRuntime\(\s*this\.currentPrefabSourceGraph\?\.root \?\? runtimeRoot\s*\)/
+    /this\.currentSpringRuntime = this\.createSpringRuntime\(loaded\.prefabSourceGraph\.root\)/
   );
   assert.match(engineSource, /runtimePresent: boolean/);
   assert.match(engineSource, /active: boolean/);

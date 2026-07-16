@@ -1,20 +1,7 @@
 import brotliWasm from "brotli-wasm";
 import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
 import { mergePartRuntimeCore } from "../../part-runtime-core.mjs";
-import {
-  characterHeightMetersById,
-  previewLightDefaults,
-  sekaiPluginLightLocationToThreeDirection,
-  type BodyAssetManifest,
-  type HeadAssetManifest,
-  type MaterialLightingSettings,
-  type PreviewLightState,
-  type Vec3,
-} from "../data/sampleScene";
-import type {
-  FaceMotionSet,
-  RuntimeCombinedCharacterAsset,
-} from "../engine/Haruki3DEngine";
+import type { RuntimeCombinedCharacterAsset } from "../engine/Haruki3DEngine";
 import { CustomWardrobeController } from "../parts/customWardrobeController";
 import {
   getCharacterIndexEntries,
@@ -32,27 +19,24 @@ import {
   type RuntimePartType,
 } from "../parts/runtimePartComposer";
 
-type UnknownRecord = Record<string, unknown>;
-
 type PartRegistryInput = PartRegistryEntry[] | {
   entries?: PartRegistryEntry[];
   parts?: PartRegistryEntry[];
 };
 
 export type RuntimePackageLoadResult = {
-  kind: "part-registry" | "full-runtime";
+  kind: "part-registry";
   combinedCharacter: RuntimeCombinedCharacterAsset | null;
-  previewLight: PreviewLightState | null;
-  faceMotion: FaceMotionSet | null;
+  previewLight: null;
+  faceMotion: null;
   displayNameByUrl: Map<string, string>;
   partSet: PartPackageSet | null;
   wardrobe: CustomWardrobeController | null;
 };
 
 export type RuntimePackageLoadOptions = {
-  fullRuntimeOnly?: boolean;
   deferDefaultSelection?: boolean;
-  roleId?: string | null;
+  roleId: string;
 };
 
 const parsedRuntimeMetadata = new Map<string, { version: string; value: unknown }>();
@@ -60,58 +44,31 @@ const parsedRuntimeMetadataLimit = 16;
 
 export async function loadRuntimePackageFromBaseUrl(
   baseUrl: string,
-  options: RuntimePackageLoadOptions = {}
+  options: RuntimePackageLoadOptions
 ): Promise<RuntimePackageLoadResult> {
   const displayNameByUrl = new Map<string, string>();
-  let partRegistryError: unknown = null;
-
-  if (!options.fullRuntimeOnly) {
-    try {
-      const partSet = await loadPartPackageSetFromBaseUrl(baseUrl, {
-        deferDefaultSelection: options.deferDefaultSelection,
-        roleId: options.roleId,
-      });
-      const wardrobe = new CustomWardrobeController({
-        resolveUrl: (path) => resolveRuntimePackageUrl(baseUrl, path),
-        loadPartRuntime: async (entry) =>
-          loadPartRuntimePackage(partSet, entry, baseUrl),
-        ensureCompatibility: async (selection) =>
-          ensureCompatibilityForSelection(partSet, selection.unit, baseUrl),
-      });
-      const combinedCharacter = wardrobe.loadPartPackageSet(partSet, {
-        composeDefault: !options.deferDefaultSelection,
-      });
-      if (!combinedCharacter && !options.deferDefaultSelection) {
-        throw new Error(`Part registry package did not expose a default custom selection from ${baseUrl}.`);
-      }
-      return {
-        kind: "part-registry",
-        combinedCharacter,
-        previewLight: null,
-        faceMotion: null,
-        displayNameByUrl,
-        partSet,
-        wardrobe,
-      };
-    } catch (error) {
-      partRegistryError = error;
-    }
+  const partSet = await loadPartPackageSetFromBaseUrl(baseUrl, options);
+  const wardrobe = new CustomWardrobeController({
+    resolveUrl: (path) => resolveRuntimePackageUrl(baseUrl, path),
+    loadPartRuntime: async (entry) => loadPartRuntimePackage(partSet, entry, baseUrl),
+    ensureCompatibility: async (selection) =>
+      ensureCompatibilityForSelection(partSet, selection.unit, baseUrl),
+  });
+  const combinedCharacter = wardrobe.loadPartPackageSet(partSet, {
+    composeDefault: !options.deferDefaultSelection,
+  });
+  if (!combinedCharacter && !options.deferDefaultSelection) {
+    throw new Error(`Part registry package did not expose a default custom selection from ${baseUrl}.`);
   }
-
-  try {
-    return await loadFullRuntimePackageFromBaseUrl(baseUrl, displayNameByUrl);
-  } catch (error) {
-    if (!partRegistryError) {
-      throw error;
-    }
-    const registryMessage = partRegistryError instanceof Error
-      ? partRegistryError.message
-      : String(partRegistryError);
-    const runtimeMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Failed to load part registry package: ${registryMessage}. Full runtime fallback also failed: ${runtimeMessage}`
-    );
-  }
+  return {
+    kind: "part-registry",
+    combinedCharacter,
+    previewLight: null,
+    faceMotion: null,
+    displayNameByUrl,
+    partSet,
+    wardrobe,
+  };
 }
 
 export function resolveRuntimePackageUrl(baseUrl: string, relativePath: string) {
@@ -133,102 +90,19 @@ export function resolveRuntimePackageUrl(baseUrl: string, relativePath: string) 
   return new URL(normalized, base).toString();
 }
 
-async function loadFullRuntimePackageFromBaseUrl(
-  baseUrl: string,
-  displayNameByUrl: Map<string, string>
-): Promise<RuntimePackageLoadResult> {
-  const extensionUrl = resolveRuntimePackageUrl(baseUrl, "pjsk-sekai-runtime.extension.json");
-  const baseRuntimeExtension = asRecord(await fetchRuntimeJson(extensionUrl));
-  const unityRuntimeJsonPath = readUnityRuntimeJsonPath(baseRuntimeExtension);
-  if (!unityRuntimeJsonPath) {
-    throw new Error("Pure Unity converter output must contain character/unity-runtime.json.");
-  }
-  const unityRuntimeJsonUrl = resolveRuntimePackageUrl(baseUrl, unityRuntimeJsonPath);
-  displayNameByUrl.set(
-    unityRuntimeJsonUrl,
-    unityRuntimeJsonPath.split("/").pop() ?? unityRuntimeJsonPath
-  );
-
-  const runtime = await normalizeRuntimeWithUnityRuntimeJson(
-    baseRuntimeExtension,
-    unityRuntimeJsonUrl,
-    (path) => resolveRuntimePackageUrl(baseUrl, path)
-  );
-  const unityMotionJsonPath = readEmbeddedUnityMotionPath(runtime.extension);
-  const unityMotionJsonUrl = unityMotionJsonPath
-    ? resolveRuntimePackageUrl(baseUrl, unityMotionJsonPath)
-    : undefined;
-  if (unityMotionJsonUrl && unityMotionJsonPath) {
-    displayNameByUrl.set(
-      unityMotionJsonUrl,
-      unityMotionJsonPath.split("/").pop() ?? unityMotionJsonPath
-    );
-    runtime.bodyAsset = {
-      ...runtime.bodyAsset,
-      source: {
-        ...runtime.bodyAsset.source,
-        animationUrls: [unityMotionJsonUrl],
-      },
-    };
-  }
-
-  return {
-    kind: "full-runtime",
-    combinedCharacter: {
-      id: `runtime-${runtime.bodyAsset.characterId ?? "unknown"}-unity-runtime.json`,
-      displayName: "Runtime unity-runtime.json",
-      meshUrl: "",
-      unityRuntimeJsonUrl,
-      unityRuntimeJsonPath,
-      unityMotionJsonUrl,
-      unityMotionJsonPath: unityMotionJsonPath ?? undefined,
-      bodyAsset: runtime.bodyAsset,
-      headAsset: runtime.headAsset,
-      runtimeExtension: runtime.extension,
-    },
-    previewLight: readRuntimePreviewLight(runtime.extension),
-    faceMotion: readEmbeddedFaceMotion(runtime.extension),
-    displayNameByUrl,
-    partSet: null,
-    wardrobe: null,
-  };
-}
-
 async function loadPartPackageSetFromBaseUrl(
   baseUrl: string,
-  options: { deferDefaultSelection?: boolean; roleId?: string | null } = {}
+  options: RuntimePackageLoadOptions
 ): Promise<PartPackageSet> {
   const role = parseRuntimeRoleIdOption(options.roleId);
-  const scopedRoot = role
-    ? `parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}`
-    : null;
-  const scopedRegistry = scopedRoot
-    ? await fetchOptionalJson<PartRegistryInput>(
-      resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/part-registry.json`)
-    )
-    : null;
-  const registry = scopedRegistry
-    ? normalizePartRegistry(scopedRegistry)
-    : normalizePartRegistry(await fetchRuntimeJson(
-      resolveRuntimePackageUrl(baseUrl, "parts/part-registry.json")
-    ) as PartRegistryInput);
-  const characterIndex = scopedRoot
-    ? (
-      await fetchOptionalJson<Character3dIndex>(
-        resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/character3d-index.json`)
-      ) ??
-      await fetchOptionalJson<Character3dIndex>(
-        resolveRuntimePackageUrl(baseUrl, "character3d-index.json")
-      )
-    )
-    : await fetchOptionalJson<Character3dIndex>(
-      resolveRuntimePackageUrl(baseUrl, "character3d-index.json")
-    );
-  const compatibility = role
-    ? null
-    : await fetchOptionalJson<HeadHairCompatibility>(
-      resolveRuntimePackageUrl(baseUrl, "parts/head-hair-compatibility.json")
-    );
+  const scopedRoot = `parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}`;
+  const registry = normalizePartRegistry(await fetchRuntimeMessagePack(
+    resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/part-registry.msgpack.br`)
+  ) as PartRegistryInput);
+  const characterIndex = await fetchRuntimeMessagePack(
+    resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/character3d-index.msgpack.br`)
+  ) as Character3dIndex;
+  const compatibility = null;
   const characterIndexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
   const packages = new Map<string, PartRuntimePackage>();
   if (options.deferDefaultSelection) {
@@ -311,7 +185,7 @@ export async function ensureRoleRuntimePackage(
   if (!entry?.roleRuntimePath) {
     return null;
   }
-  const runtime = await fetchOptionalJson<RoleRuntimePackage>(
+  const runtime = await fetchOptionalRuntimeMessagePack<RoleRuntimePackage>(
     resolveRuntimePackageUrl(partSet.baseUrl, entry.roleRuntimePath)
   );
   if (!runtime) {
@@ -336,7 +210,7 @@ async function loadRoleRuntimePackages(
   );
   const loaded = await Promise.all(entries.map(async (entry) => ({
     entry,
-    runtime: await fetchOptionalJson<RoleRuntimePackage>(
+    runtime: await fetchOptionalRuntimeMessagePack<RoleRuntimePackage>(
       resolveRuntimePackageUrl(baseUrl, entry.roleRuntimePath!)
     ),
   })));
@@ -397,15 +271,16 @@ async function loadPartRuntimePackage(
   partSet.packages.set(entry.packagePath, normalized);
   return normalized;
 }
-
 async function fetchPartRuntime(baseUrl: string, entry: PartRegistryEntry) {
-  const runtime = await fetchRuntimeJson(
-    resolveRuntimePackageUrl(baseUrl, `${entry.packagePath}/part-runtime.json`)
+  const runtime = await fetchRuntimeMessagePack(
+    resolveRuntimePackageUrl(baseUrl, `${entry.packagePath}/part-runtime.msgpack.br`)
   ) as PartRuntimePackage;
-  if (!runtime.corePath) {
-    return runtime;
+  if (!runtime.corePath?.endsWith(".msgpack.br")) {
+    throw new Error(`Part runtime must reference a .msgpack.br shared core: ${entry.packagePath}.`);
   }
-  const core = await fetchRuntimeJson(resolveRuntimePackageUrl(baseUrl, runtime.corePath)) as Record<string, unknown>;
+  const core = await fetchRuntimeMessagePack(
+    resolveRuntimePackageUrl(baseUrl, runtime.corePath)
+  ) as Record<string, unknown>;
   return mergePartRuntimeCore(runtime, core) as PartRuntimePackage;
 }
 
@@ -425,29 +300,22 @@ async function ensureCompatibilityForSelection(
   if (partSet.compatibility) {
     return;
   }
-  const scoped = await fetchOptionalJson<HeadHairCompatibility>(
+  partSet.compatibility = await fetchRuntimeMessagePack(
     resolveRuntimePackageUrl(
       baseUrl,
-      `parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.json`
+      `parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.msgpack.br`
     )
-  );
-  const fallback = scoped ?? await fetchOptionalJson<HeadHairCompatibility>(
-    resolveRuntimePackageUrl(baseUrl, "parts/head-hair-compatibility.json")
-  );
-  if (!fallback) {
-    throw new Error(`Head-hair compatibility registry is required for unit ${unit ?? ""}.`);
-  }
-  partSet.compatibility = fallback;
+  ) as HeadHairCompatibility;
 }
 
-function parseRuntimeRoleIdOption(roleId: string | null | undefined) {
+function parseRuntimeRoleIdOption(roleId: string) {
   if (!roleId) {
-    return null;
+    throw new Error("Runtime role id is required.");
   }
   const [characterIdPart, ...unitParts] = roleId.split(":");
   const characterId = Number(characterIdPart);
   if (!Number.isInteger(characterId) || characterId <= 0) {
-    return null;
+    throw new Error(`Invalid runtime role id: ${roleId}`);
   }
   const unit = unitParts.join(":") || null;
   return { characterId, unit };
@@ -471,55 +339,15 @@ function withPartRuntimePackagePath(
   };
 }
 
-export async function fetchRuntimeJson(url: string) {
-  const messagePackBrotliUrl = runtimeMessagePackBrotliUrl(url);
-  let messagePackBrotliError: Error | null = null;
-  if (messagePackBrotliUrl) {
-    const messagePackBrotliResponse = await fetch(messagePackBrotliUrl, { cache: "no-store" });
-    if (messagePackBrotliResponse.ok) {
-      try {
-        return await readMessagePackBrotliRuntime(messagePackBrotliResponse, messagePackBrotliUrl);
-      } catch (error) {
-        messagePackBrotliError = error instanceof Error
-          ? error
-          : new Error(`Failed to decode ${messagePackBrotliUrl}: ${String(error)}`);
-      }
-    }
+export async function fetchRuntimeMessagePack(url: string) {
+  if (!url.endsWith(".msgpack.br")) {
+    throw new Error(`Runtime metadata must use .msgpack.br: ${url}`);
   }
-
-  const gzipUrl = `${url}.gz`;
-  const gzipResponse = await fetch(gzipUrl, { cache: "no-store" });
-  let gzipError: Error | null = null;
-  if (gzipResponse.ok) {
-    try {
-      return JSON.parse(await readGzipRuntimeJson(gzipResponse, gzipUrl));
-    } catch (error) {
-      gzipError = error instanceof Error
-        ? error
-        : new Error(`Failed to parse ${gzipUrl}: ${String(error)}`);
-    }
-  }
-
   const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
-    if (messagePackBrotliError) {
-      throw messagePackBrotliError;
-    }
-    if (gzipError) {
-      throw gzipError;
-    }
     throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
   }
-  return response.json();
-}
-
-function runtimeMessagePackBrotliUrl(url: string) {
-  if (url.endsWith(".msgpack.br")) {
-    return url;
-  }
-  return url.endsWith(".json")
-    ? `${url.slice(0, -".json".length)}.msgpack.br`
-    : null;
+  return readMessagePackBrotliRuntime(response, url);
 }
 
 async function readMessagePackBrotliRuntime(response: Response, url: string) {
@@ -559,17 +387,9 @@ function isCacheableRuntimeMetadataUrl(url: string) {
     /\/roles\/[^/]+\/[^/]+\/(?:role-runtime|motion\/unity-motion)\.msgpack\.br$/.test(path);
 }
 
-async function readGzipRuntimeJson(response: Response, url: string) {
-  if (!response.body || typeof DecompressionStream === "undefined") {
-    throw new Error(`Failed to load ${url}: gzip runtime JSON requires DecompressionStream.`);
-  }
-  const stream = response.body.pipeThrough(new DecompressionStream("gzip"));
-  return new Response(stream).text();
-}
-
-async function fetchOptionalJson<T>(url: string): Promise<T | null> {
+async function fetchOptionalRuntimeMessagePack<T>(url: string): Promise<T | null> {
   try {
-    return await fetchRuntimeJson(url) as T;
+    return await fetchRuntimeMessagePack(url) as T;
   } catch {
     return null;
   }
@@ -757,462 +577,4 @@ function partTypePriority(entry: PartRegistryEntry) {
     default:
       return 1000;
   }
-}
-
-function asRecord(value: unknown): UnknownRecord {
-  return (value && typeof value === "object" ? value : {}) as UnknownRecord;
-}
-
-function readString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value : fallback;
-}
-
-function readNumber(value: unknown, fallback: number) {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function readBoolean(value: unknown, fallback = false) {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function readRequiredMaterialIdentity(slot: UnknownRecord, context: string) {
-  const materialKey = readString(slot.materialKey ?? slot.MaterialKey);
-  const materialFileId = slot.materialFileId ?? slot.MaterialFileId;
-  const materialPathId = slot.materialPathId ?? slot.MaterialPathId;
-  if (
-    !materialKey ||
-    typeof materialFileId !== "number" ||
-    !Number.isFinite(materialFileId) ||
-    typeof materialPathId !== "number" ||
-    !Number.isFinite(materialPathId)
-  ) {
-    throw new Error(`${context} is missing material identity; regenerate it with Haruki-3D-Exporter materialKey runtime support.`);
-  }
-  return {
-    slotIndex: readNumber(slot.slotIndex ?? slot.SlotIndex, 0),
-    materialKey,
-    materialFileId,
-    materialPathId,
-  };
-}
-
-function readStringArray(value: unknown) {
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string => typeof entry === "string")
-    : [];
-}
-
-function readUnknownArray(value: unknown) {
-  return Array.isArray(value) ? value : [];
-}
-
-function normalizeCharacterId(value: unknown) {
-  const raw = readString(value).trim();
-  return raw ? raw.padStart(2, "0") : undefined;
-}
-
-function inferCharacterIdFromText(value: string | undefined) {
-  if (!value) {
-    return undefined;
-  }
-  const match = value.match(/characterv2[_/-](\d{1,2})\b/i)
-    ?? value.match(/\b(?:body|head|face)-(\d{1,2})\b/i);
-  return match ? match[1].padStart(2, "0") : undefined;
-}
-
-function resolveCharacterHeightMeters(explicit: unknown, characterId: string | undefined) {
-  const value = readNumber(explicit, Number.NaN);
-  if (Number.isFinite(value) && value > 0) {
-    return value > 10 ? value / 100 : value;
-  }
-  return characterId ? characterHeightMetersById[characterId] : undefined;
-}
-
-function readVec3Record(value: unknown, fallback: Vec3): Vec3 {
-  const record = asRecord(value);
-  const readComponent = (camel: string, pascal: string, defaultValue: number) => {
-    const next = record[camel] ?? record[pascal];
-    return typeof next === "number" ? next : defaultValue;
-  };
-  return {
-    x: readComponent("x", "X", fallback.x),
-    y: readComponent("y", "Y", fallback.y),
-    z: readComponent("z", "Z", fallback.z),
-  };
-}
-
-function readMaterialLighting(value: unknown): MaterialLightingSettings {
-  const record = asRecord(value);
-  return {
-    specularPower: readNumber(record.specularPower ?? record.SpecularPower, 0),
-    rimThreshold: readNumber(record.rimThreshold ?? record.RimThreshold, 0.2),
-    shadowTexWeight: readNumber(record.shadowTexWeight ?? record.ShadowTexWeight, 1),
-    fadeMode: readNumber(record.fadeMode ?? record.FadeMode, 0),
-    hueSinAngle: readNumber(record.hueSinAngle ?? record.HueSinAngle, 0),
-    hueCosAngle: readNumber(record.hueCosAngle ?? record.HueCosAngle, 1),
-    saturation: readNumber(record.saturation ?? record.Saturation, 0.5),
-    value: readNumber(record.value ?? record.Value, 0.5),
-    contrast: readNumber(record.contrast ?? record.Contrast, 0.5),
-    partsAmbientColor: readString(record.partsAmbientColor ?? record.PartsAmbientColor, "#ffffff"),
-    reflectionBlendColor: readString(record.reflectionBlendColor ?? record.ReflectionBlendColor, "#ffffff"),
-    outlineWidth: readNumber(record.outlineWidth ?? record.OutlineWidth, 0.001),
-    outlineOffset: readNumber(record.outlineOffset ?? record.OutlineOffset, 0),
-    outlineLightness: readNumber(record.outlineLightness ?? record.OutlineLightness, 0.5),
-    shadowWidth: readNumber(record.shadowWidth ?? record.ShadowWidth, 0),
-    useOutlineSecondNormal: readNumber(record.useOutlineSecondNormal ?? record.UseOutlineSecondNormal, 0),
-    distortionFps: readNumber(record.distortionFps ?? record.DistortionFps, 12),
-    distortionIntensity: readNumber(record.distortionIntensity ?? record.DistortionIntensity, 0),
-    distortionIntensityX: readNumber(record.distortionIntensityX ?? record.DistortionIntensityX, 0),
-    distortionIntensityY: readNumber(record.distortionIntensityY ?? record.DistortionIntensityY, 0),
-    distortionOffsetX: readNumber(record.distortionOffsetX ?? record.DistortionOffsetX, 0),
-    distortionOffsetY: readNumber(record.distortionOffsetY ?? record.DistortionOffsetY, 0),
-    distortionScrollSpeed: readNumber(record.distortionScrollSpeed ?? record.DistortionScrollSpeed, 1),
-    distortionScrollX: readNumber(record.distortionScrollX ?? record.DistortionScrollX, 0),
-    distortionScrollY: readNumber(record.distortionScrollY ?? record.DistortionScrollY, 0),
-    distortionTexTilingX: readNumber(record.distortionTexTilingX ?? record.DistortionTexTilingX, 1),
-    distortionTexTilingY: readNumber(record.distortionTexTilingY ?? record.DistortionTexTilingY, 1),
-    threshold: readNumber(record.threshold ?? record.Threshold, 0.5),
-    lightInfluence: readNumber(record.lightInfluence ?? record.LightInfluence, 1),
-    lightInfluenceForEyeHighlight: readNumber(record.lightInfluenceForEyeHighlight ?? record.LightInfluenceForEyeHighlight, 1),
-  };
-}
-
-function normalizeBodyManifest(
-  raw: unknown,
-  resolvePath: (path: string) => string
-): BodyAssetManifest {
-  const record = asRecord(raw);
-  const source = asRecord(record.source ?? record.Source);
-  const skeleton = asRecord(record.skeleton ?? record.Skeleton);
-  const neckAttach = asRecord(skeleton.neckAttach ?? skeleton.NeckAttach);
-  const proxy = asRecord(record.proxy ?? record.Proxy);
-  const characterId = normalizeCharacterId(record.characterId ?? record.CharacterId)
-    ?? inferCharacterIdFromText(readString(skeleton.skeletonId ?? skeleton.SkeletonId));
-  const bodyMaterialsRaw = readUnknownArray(record.bodyMaterials ?? record.BodyMaterials);
-  const animationUrls = readStringArray(source.animationUrls ?? source.AnimationUrls);
-
-  return {
-    id: readString(record.id ?? record.Id),
-    displayName: readString(record.displayName ?? record.DisplayName),
-    characterId,
-    characterHeightMeters: resolveCharacterHeightMeters(
-      record.characterHeightMeters ?? record.CharacterHeightMeters ?? record.height ?? record.Height,
-      characterId
-    ),
-    materialPipeline: readString(record.materialPipeline ?? record.MaterialPipeline, "embedded") as BodyAssetManifest["materialPipeline"],
-    source: {
-      bundleRoot: readString(source.bundleRoot ?? source.BundleRoot),
-      manifestUrl: readString(source.manifestUrl ?? source.ManifestUrl),
-      meshUrl: resolveRequiredPath(readString(source.meshUrl ?? source.MeshUrl), resolvePath),
-      skeletonUrl: resolveOptionalPath(readString(source.skeletonUrl ?? source.SkeletonUrl), resolvePath),
-      animationUrls: animationUrls.map((path) => resolvePath(path)),
-    },
-    neckAnchor: readVec3Record(record.neckAnchor ?? record.NeckAnchor, { x: 0, y: 1.75, z: 0.15 }),
-    skeleton: {
-      skeletonId: readString(skeleton.skeletonId ?? skeleton.SkeletonId),
-      rootNodeName: readString(skeleton.rootNodeName ?? skeleton.RootNodeName) || undefined,
-      neckAttach: {
-        nodeName: readString(neckAttach.nodeName ?? neckAttach.NodeName) || undefined,
-        fallbackPosition: readVec3Record(
-          neckAttach.fallbackPosition ?? neckAttach.FallbackPosition,
-          { x: 0, y: 1.75, z: 0.15 }
-        ),
-      },
-    },
-    bodyMaterials: bodyMaterialsRaw.map((entry) => {
-      const slot = asRecord(entry);
-      const identity = readRequiredMaterialIdentity(slot, "body material slot");
-      return {
-        meshName: readString(slot.meshName ?? slot.MeshName),
-        ...identity,
-        materialName: readString(slot.materialName ?? slot.MaterialName) || undefined,
-        materialKind: readString(slot.materialKind ?? slot.MaterialKind) || undefined,
-        mainTex: resolveOptionalPath(readString(slot.mainTex ?? slot.MainTex), resolvePath),
-        shadowTex: resolveOptionalPath(readString(slot.shadowTex ?? slot.ShadowTex), resolvePath),
-        valueTex: resolveOptionalPath(readString(slot.valueTex ?? slot.ValueTex), resolvePath),
-        lighting: readMaterialLighting(slot.lighting ?? slot.Lighting),
-      };
-    }),
-    proxy: {
-      bodyColor: readString(proxy.bodyColor ?? proxy.BodyColor, "#f2d0c3"),
-      shadowColor: readString(proxy.shadowColor ?? proxy.ShadowColor, "#bf958a"),
-      bodyScale: readNumber(proxy.bodyScale ?? proxy.BodyScale, 1),
-      torsoLength: readNumber(proxy.torsoLength ?? proxy.TorsoLength, 2.2),
-      shoulderWidth: readNumber(proxy.shoulderWidth ?? proxy.ShoulderWidth, 1.1),
-    },
-  };
-}
-
-function normalizeHeadManifest(
-  raw: unknown,
-  resolvePath: (path: string) => string
-): HeadAssetManifest {
-  const record = asRecord(raw);
-  const source = asRecord(record.source ?? record.Source);
-  const assembly = asRecord(record.assembly ?? record.Assembly);
-  const attachOrigin = asRecord(assembly.attachOrigin ?? assembly.AttachOrigin);
-  const boneRemapRecord = asRecord(assembly.boneRemap ?? assembly.BoneRemap);
-  const proxy = asRecord(record.proxy ?? record.Proxy);
-  const characterId = normalizeCharacterId(record.characterId ?? record.CharacterId)
-    ?? inferCharacterIdFromText(readString(assembly.expectedSkeletonId ?? assembly.ExpectedSkeletonId));
-  const faceMaterialsRaw = readUnknownArray(record.faceMaterials ?? record.FaceMaterials);
-
-  return {
-    id: readString(record.id ?? record.Id),
-    displayName: readString(record.displayName ?? record.DisplayName),
-    characterId,
-    characterHeightMeters: resolveCharacterHeightMeters(
-      record.characterHeightMeters ?? record.CharacterHeightMeters ?? record.height ?? record.Height,
-      characterId
-    ),
-    materialPipeline: readString(record.materialPipeline ?? record.MaterialPipeline, "embedded") as HeadAssetManifest["materialPipeline"],
-    source: {
-      bundleRoot: readString(source.bundleRoot ?? source.BundleRoot),
-      manifestUrl: readString(source.manifestUrl ?? source.ManifestUrl),
-      meshUrl: resolveRequiredPath(readString(source.meshUrl ?? source.MeshUrl), resolvePath),
-      skeletonUrl: resolveOptionalPath(readString(source.skeletonUrl ?? source.SkeletonUrl), resolvePath),
-      animationUrls: readStringArray(source.animationUrls ?? source.AnimationUrls).map((path) => resolvePath(path)),
-    },
-    rawImportOffset: readVec3Record(record.rawImportOffset ?? record.RawImportOffset, { x: 0, y: 0, z: 0 }),
-    assembly: {
-      expectedSkeletonId: readString(assembly.expectedSkeletonId ?? assembly.ExpectedSkeletonId),
-      attachOrigin: {
-        nodeName: readString(attachOrigin.nodeName ?? attachOrigin.NodeName) || undefined,
-        fallbackPosition: readVec3Record(
-          attachOrigin.fallbackPosition ?? attachOrigin.FallbackPosition,
-          { x: 0, y: 0.08, z: 0.02 }
-        ),
-      },
-      rootNodeName: readString(assembly.rootNodeName ?? assembly.RootNodeName) || undefined,
-      boneRemap: Object.fromEntries(
-        Object.entries(boneRemapRecord).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string"
-        )
-      ),
-    },
-    defaultFaceMode: readString(record.defaultFaceMode ?? record.DefaultFaceMode, "clean") as HeadAssetManifest["defaultFaceMode"],
-    morphChannels: readStringArray(record.morphChannels ?? record.MorphChannels),
-    morphChannelBindings: readUnknownArray(record.morphChannelBindings ?? record.MorphChannelBindings)
-      .map((entry) => asRecord(entry))
-      .filter((entry) => typeof entry.nameHash === "number" || typeof entry.NameHash === "number")
-      .map((entry) => ({
-        name: readString(entry.name ?? entry.Name),
-        sourceName: readString(entry.sourceName ?? entry.SourceName),
-        nameHash: Number(entry.nameHash ?? entry.NameHash),
-        curveHash: Number(entry.curveHash ?? entry.CurveHash),
-      })),
-    faceMaterials: faceMaterialsRaw.map((entry) => {
-      const slot = asRecord(entry);
-      const identity = readRequiredMaterialIdentity(slot, "head material slot");
-      return {
-        meshName: readString(slot.meshName ?? slot.MeshName),
-        ...identity,
-        materialName: readString(slot.materialName ?? slot.MaterialName) || undefined,
-        materialKind: readString(slot.materialKind ?? slot.MaterialKind) || undefined,
-        mainTex: resolveOptionalPath(readString(slot.mainTex ?? slot.MainTex), resolvePath),
-        shadowTex: resolveOptionalPath(readString(slot.shadowTex ?? slot.ShadowTex), resolvePath),
-        valueTex: resolveOptionalPath(readString(slot.valueTex ?? slot.ValueTex), resolvePath),
-        faceShadowTex: resolveOptionalPath(readString(slot.faceShadowTex ?? slot.FaceShadowTex), resolvePath),
-        mode: readString(slot.mode ?? slot.Mode, "clean") as HeadAssetManifest["defaultFaceMode"],
-        lighting: readMaterialLighting(slot.lighting ?? slot.Lighting),
-      };
-    }),
-    proxy: {
-      faceColor: readString(proxy.faceColor ?? proxy.FaceColor, "#fde2d9"),
-      faceShadeColor: readString(proxy.faceShadeColor ?? proxy.FaceShadeColor, "#f7cdbf"),
-      skinColorDefault: readString(proxy.skinColorDefault ?? proxy.SkinColorDefault, readString(proxy.faceColor ?? proxy.FaceColor, "#fde2d9")),
-      skinColor1: readString(proxy.skinColor1 ?? proxy.SkinColor1, readString(proxy.faceShadeColor ?? proxy.FaceShadeColor, "#f7cdbf")),
-      skinColor2: readString(proxy.skinColor2 ?? proxy.SkinColor2, readString(proxy.faceShadeColor ?? proxy.FaceShadeColor, "#f7cdbf")),
-      hairColor: readString(proxy.hairColor ?? proxy.HairColor, "#7b5b4a"),
-      hairShadowColor: readString(proxy.hairShadowColor ?? proxy.HairShadowColor, "#513d33"),
-      headRadius: readNumber(proxy.headRadius ?? proxy.HeadRadius, 0.74),
-      faceDepth: readNumber(proxy.faceDepth ?? proxy.FaceDepth, 0.82),
-      hairArc: readNumber(proxy.hairArc ?? proxy.HairArc, 0.98),
-    },
-  };
-}
-
-function resolveOptionalPath(path: string, resolvePath: (path: string) => string) {
-  return path ? resolvePath(path) : undefined;
-}
-
-function resolveRequiredPath(path: string, resolvePath: (path: string) => string) {
-  return path ? resolvePath(path) : "";
-}
-
-function normalizeRuntimeExtension(
-  raw: unknown,
-  resolvePath: (path: string) => string
-) {
-  const extension = asRecord(raw);
-  const bodyAsset = normalizeBodyManifest(
-    extension.bodyManifest ?? extension.BodyManifest,
-    resolvePath
-  );
-  const headAsset = normalizeHeadManifest(
-    extension.headManifest ?? extension.HeadManifest,
-    resolvePath
-  );
-  applyRuntimeMaterialSlots(bodyAsset, headAsset, extension, resolvePath);
-  return { extension, bodyAsset, headAsset };
-}
-
-async function normalizeRuntimeWithUnityRuntimeJson(
-  runtimeExtension: UnknownRecord,
-  unityRuntimeJsonUrl: string | null | undefined,
-  resolvePath: (path: string) => string
-) {
-  if (!unityRuntimeJsonUrl) {
-    return normalizeRuntimeExtension(runtimeExtension, resolvePath);
-  }
-  const unityRuntimeExtension = asRecord(await fetchRuntimeJson(unityRuntimeJsonUrl));
-  return normalizeRuntimeExtension({
-    ...unityRuntimeExtension,
-    ...runtimeExtension,
-    bodyManifest:
-      runtimeExtension.bodyManifest ??
-      runtimeExtension.BodyManifest ??
-      unityRuntimeExtension.bodyManifest ??
-      unityRuntimeExtension.BodyManifest,
-    headManifest:
-      runtimeExtension.headManifest ??
-      runtimeExtension.HeadManifest ??
-      unityRuntimeExtension.headManifest ??
-      unityRuntimeExtension.HeadManifest,
-    materialSlots:
-      runtimeExtension.materialSlots ??
-      runtimeExtension.MaterialSlots ??
-      unityRuntimeExtension.materialSlots ??
-      unityRuntimeExtension.MaterialSlots,
-  }, resolvePath);
-}
-
-function applyRuntimeMaterialSlots(
-  bodyAsset: BodyAssetManifest,
-  headAsset: HeadAssetManifest,
-  runtimeExtension: UnknownRecord,
-  resolvePath: (path: string) => string
-) {
-  const materialSlots = asRecord(runtimeExtension.materialSlots ?? runtimeExtension.MaterialSlots);
-  const bodySlots = readUnknownArray(materialSlots.body ?? materialSlots.Body);
-  const headSlots = readUnknownArray(materialSlots.head ?? materialSlots.Head);
-  const accessorySlots = readUnknownArray(materialSlots.accessory ?? materialSlots.Accessory);
-
-  if (bodySlots.length) {
-    bodyAsset.bodyMaterials = bodySlots.map((entry) => {
-      const slot = asRecord(entry);
-      const identity = readRequiredMaterialIdentity(slot, "runtime body material slot");
-      return {
-        meshName: readString(slot.meshName ?? slot.MeshName),
-        ...identity,
-        materialName: readString(slot.materialName ?? slot.MaterialName) || undefined,
-        materialKind: readString(slot.materialKind ?? slot.MaterialKind) || undefined,
-        mainTex: resolveOptionalPath(readString(slot.mainTex ?? slot.MainTex), resolvePath),
-        shadowTex: resolveOptionalPath(readString(slot.shadowTex ?? slot.ShadowTex), resolvePath),
-        valueTex: resolveOptionalPath(readString(slot.valueTex ?? slot.ValueTex), resolvePath),
-        lighting: readMaterialLighting(slot.lighting ?? slot.Lighting),
-      };
-    });
-  }
-
-  const readHeadMaterialSlot = (entry: unknown, fallbackMaterialKind?: string) => {
-    const slot = asRecord(entry);
-    const identity = readRequiredMaterialIdentity(slot, "runtime head material slot");
-    return {
-      meshName: readString(slot.meshName ?? slot.MeshName),
-      ...identity,
-      materialName: readString(slot.materialName ?? slot.MaterialName) || undefined,
-      materialKind: readString(slot.materialKind ?? slot.MaterialKind) || fallbackMaterialKind || undefined,
-      mainTex: resolveOptionalPath(readString(slot.mainTex ?? slot.MainTex), resolvePath),
-      shadowTex: resolveOptionalPath(readString(slot.shadowTex ?? slot.ShadowTex), resolvePath),
-      valueTex: resolveOptionalPath(readString(slot.valueTex ?? slot.ValueTex), resolvePath),
-      faceShadowTex: resolveOptionalPath(readString(slot.faceShadowTex ?? slot.FaceShadowTex), resolvePath),
-      mode: headAsset.defaultFaceMode,
-      isAccessory: readBoolean(slot.isAccessory ?? slot.IsAccessory) || fallbackMaterialKind === "accessory" || undefined,
-      lighting: readMaterialLighting(slot.lighting ?? slot.Lighting),
-    };
-  };
-
-  if (headSlots.length || accessorySlots.length) {
-    headAsset.faceMaterials = [
-      ...(headSlots.length
-        ? headSlots.map((entry) => readHeadMaterialSlot(entry))
-        : headAsset.faceMaterials),
-      ...accessorySlots.map((entry) => readHeadMaterialSlot(entry, "accessory")),
-    ];
-  }
-}
-
-function readRuntimePreviewLight(extension: UnknownRecord): PreviewLightState | null {
-  const profile = asRecord(extension.sekaiRuntimeMaterialProfile ?? extension.SekaiRuntimeMaterialProfile);
-  const preview = asRecord(profile.viewerTunedPreview ?? profile.ViewerTunedPreview);
-  const pluginPreview = asRecord(profile.pluginPreview ?? profile.PluginPreview);
-  const hasPreview = Object.keys(preview).length > 0;
-  const hasPluginPreview = Object.keys(pluginPreview).length > 0;
-  if (!hasPreview && !hasPluginPreview) {
-    return null;
-  }
-  const pluginDirectionalLocation = readVec3Record(
-    pluginPreview.directionalLocation ?? pluginPreview.DirectionalLocation,
-    {
-      x: previewLightDefaults.x,
-      y: -previewLightDefaults.z,
-      z: previewLightDefaults.y,
-    }
-  );
-  const pluginLightDirection =
-    sekaiPluginLightLocationToThreeDirection(pluginDirectionalLocation);
-  const readProfileNumber = (
-    previewCamel: string,
-    previewPascal: string,
-    pluginCamel: string,
-    pluginPascal: string,
-    fallback: number
-  ) =>
-    readNumber(
-      preview[previewCamel] ?? preview[previewPascal],
-      readNumber(pluginPreview[pluginCamel] ?? pluginPreview[pluginPascal], fallback)
-    );
-  return {
-    x: readNumber(preview.x ?? preview.X, pluginLightDirection.x),
-    y: readNumber(preview.y ?? preview.Y, pluginLightDirection.y),
-    z: readNumber(preview.z ?? preview.Z, pluginLightDirection.z),
-    intensity: readProfileNumber("intensity", "Intensity", "directionalEnergy", "DirectionalEnergy", previewLightDefaults.intensity),
-    ambient: readProfileNumber("ambient", "Ambient", "ambientIntensity", "AmbientIntensity", previewLightDefaults.ambient),
-    shadowThreshold: readProfileNumber("shadowThreshold", "ShadowThreshold", "shadowThreshold", "ShadowThreshold", previewLightDefaults.shadowThreshold),
-    shadowWeight: readProfileNumber("shadowWeight", "ShadowWeight", "shadowWeight", "ShadowWeight", previewLightDefaults.shadowWeight),
-    characterAmbient: readProfileNumber("characterAmbient", "CharacterAmbient", "characterAmbientIntensity", "CharacterAmbientIntensity", previewLightDefaults.characterAmbient),
-    rimIntensity: readProfileNumber("rimIntensity", "RimIntensity", "rimIntensity", "RimIntensity", previewLightDefaults.rimIntensity),
-    rimThreshold: readProfileNumber("rimThreshold", "RimThreshold", "rimThreshold", "RimThreshold", previewLightDefaults.rimThreshold),
-    rimDirectionality: readProfileNumber("rimDirectionality", "RimDirectionality", "rimDirectionality", "RimDirectionality", previewLightDefaults.rimDirectionality),
-    faceSoftness: readNumber(preview.faceSoftness ?? preview.FaceSoftness, previewLightDefaults.faceSoftness),
-    faceSdfUseLightDirection: readNumber(
-      preview.faceSdfUseLightDirection ?? preview.FaceSdfUseLightDirection,
-      previewLightDefaults.faceSdfUseLightDirection
-    ),
-    characterHeight: readNumber(
-      preview.characterHeight ?? preview.CharacterHeight,
-      previewLightDefaults.characterHeight
-    ),
-  };
-}
-
-function readRuntimeMotionPackage(extension: UnknownRecord) {
-  return asRecord(extension.motionPackage ?? extension.MotionPackage);
-}
-
-function readEmbeddedFaceMotion(extension: UnknownRecord): FaceMotionSet | null {
-  const motionPackage = readRuntimeMotionPackage(extension);
-  const faceMotion = motionPackage.faceMotion ?? motionPackage.FaceMotion;
-  return faceMotion ? faceMotion as FaceMotionSet : null;
-}
-
-function readEmbeddedUnityMotionPath(extension: UnknownRecord) {
-  const motionPackage = readRuntimeMotionPackage(extension);
-  return readString(motionPackage.unityMotionJson ?? motionPackage.UnityMotionJson) || null;
-}
-
-function readUnityRuntimeJsonPath(extension: UnknownRecord) {
-  const container = asRecord(extension.container ?? extension.Container);
-  return readString(container.unityRuntimeJson ?? container.UnityRuntimeJson) || null;
 }

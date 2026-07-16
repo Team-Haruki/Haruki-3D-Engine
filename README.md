@@ -4,15 +4,15 @@ Runtime engine for rendering converted Project SEKAI 3D character packages in a 
 
 This package is not a product GUI. It owns the rendering, package loading, animation, SpringBone, camera, and capture behavior. A web app or local test page should call the public API and provide its own interface.
 
-The engine does not parse Unity bundles. It loads offline Haruki runtime packages:
+The engine does not parse Unity bundles. It loads only the final, role-scoped
+Haruki runtime package:
 
-- `character/character.vrm`
-- `pjsk-sekai-runtime.extension.json`
-- `character/unity-runtime.json`
-- `motion/*.json` or `motion/*.glb`, when present
-- `character/textures/**`
-- `parts/part-registry.json` plus `parts/**/part-runtime.json`, for role-aware custom assembly
-- `parts/_cores/**/part-runtime-core.json`, when a light part delta shares heavy mesh/SpringBone data
+- `parts/by-role/<characterId>/<unit>/part-registry.msgpack.br`
+- `parts/by-role/<characterId>/<unit>/character3d-index.msgpack.br`
+- `parts/compat/by-unit/<unit>/head-hair-compatibility.msgpack.br`
+- `parts/**/part-runtime.msgpack.br`
+- `parts/_cores/**/part-runtime-core.msgpack.br`
+- role and motion runtimes referenced by those registries, also as `.msgpack.br`
 
 ## Quick Start
 
@@ -36,6 +36,7 @@ const engine = new Haruki3DEngine({
 
 await engine.loadRuntimePackage({
   baseUrl: "/assets/runtime/001/",
+  roleId: "5:light_sound",
 });
 ```
 
@@ -49,19 +50,13 @@ The repository keeps one intentionally minimal browser harness for automated cap
 npm run dev:capture
 ```
 
-Generate a deterministic browser screenshot from a full runtime package folder:
+The production capture path is the persistent HTTP service:
 
 ```bash
-npm run capture:runtime -- \
-  --input <converter-output-directory> \
-  --out <capture-output.png> \
-  --width 1400 \
-  --height 1000 \
-  --scale 2 \
-  --phase 0.5
+node capture-server.mjs
 ```
 
-Useful capture options:
+Useful capture request fields:
 
 - `--config <json>` loads capture defaults from a JSON config file.
 - `--phase <0..1>` seeks the selected loop phase.
@@ -71,7 +66,6 @@ Useful capture options:
 - `--warmup-mode runtime` freezes animation and only settles runtime systems.
 - `--yaw <0|45|-45|90|-90|180>` sets character yaw.
 - `--spring-runtime-mode unity-prefab` enables the Unity Prefab SpringBone runtime.
-- `--utj-springbone` is kept only as a compatibility alias for `unity-prefab`.
 
 SpringBone defaults to `unity-prefab` in current engine and capture defaults. Use `springRuntimeMode: "off"` or the capture flag when a caller needs a static pose.
 
@@ -86,7 +80,7 @@ The example file is safe for public use and should not contain machine-specific 
 - `chromium.executable` when Chromium is not on `PATH`.
 - `server.port` for the HTTP capture service.
 
-For one-shot capture, pass `--config <json>`. For the HTTP service, set `HARUKI_ENGINE_CONFIG=<json>` or place `haruki-3d-engine.config.json` in the working directory. CLI flags override config values for one-shot capture. Server environment variables such as `HARUKI_RUNTIME_ROOT`, `HARUKI_CAPTURE_OUTPUT_DIR`, `HARUKI_CAPTURE_SCALE`, `HARUKI_CAPTURE_TIMEOUT_MS`, `HARUKI_CAPTURE_IDLE_SHUTDOWN`, `CHROMIUM`, and `PORT` override config values.
+For the HTTP service, set `HARUKI_ENGINE_CONFIG=<json>` or place `haruki-3d-engine.config.json` in the working directory. Server environment variables such as `HARUKI_RUNTIME_ROOT`, `HARUKI_CAPTURE_OUTPUT_DIR`, `HARUKI_CAPTURE_SCALE`, `HARUKI_CAPTURE_TIMEOUT_MS`, `HARUKI_CAPTURE_IDLE_SHUTDOWN`, `CHROMIUM`, and `PORT` override config values.
 
 Current product 3D previews keep FaceSDF disabled by default. Use `capture.faceSdfEnabled: true`, `HARUKI_CAPTURE_FACE_SDF_ENABLED=true`, or a per-request `faceSdfEnabled: true` only for explicit FaceSDF research captures.
 
@@ -103,9 +97,7 @@ The engine reads exact PJSK semantics from `PJSK_sekai_runtime`:
 
 Motion behavior:
 
-- If a runtime motion JSON is present in the runtime extension, it is selected automatically.
-- If `motion/body_motion.glb` is present, the engine can still load it as a GLTF animation source.
-- A merged `body_motion.glb` containing `motion` and `motion_loop` is treated as both the main clip and loop clip.
+- The role runtime selects its Unity motion `.msgpack.br` package.
 - Embedded face clips are promoted with the body loop, so `face_loop` is active when the body loop is active.
 
 Custom wardrobe behavior:
@@ -152,19 +144,9 @@ curl -X POST http://localhost:8080/capture \
 For a runtime root containing region directories such as `/data/runtime/jp` and
 `/data/runtime/tw`, prefix any route with `/regions/<region>`. For example,
 `/regions/jp/capture` uses the JP runtime and
-`/regions/jp/runtime/character3d-index.json` serves its registry. Existing
-unprefixed routes remain unchanged. JSON registry requests also transparently
-read compressed `.msgpack.br` registries when a JSON file is not present.
-Runtime MessagePack accepts both legacy numeric arrays and extension type `42`
-typed arrays emitted by newer exporters.
-
-When rolling out binary-array packages, deploy this Engine image first and only
-then run the newer Exporter. Old packages remain readable, so this order keeps a
-mixed-version runtime safe during the rollout.
-
-The same Engine-first order applies to core+delta part packages. The loader
-continues to accept legacy self-contained part runtimes, while new deltas fetch
-and merge their declared `corePath` before composition.
+`/regions/jp/runtime/parts/by-role/5/light_sound/part-registry.msgpack.br`
+serves its role registry. Runtime metadata is exclusively Brotli-compressed
+MessagePack; part packages must use core+delta and declare `corePath`.
 
 The service starts one persistent headless Chromium page and keeps the engine loaded. Requests reuse that page, write only the final `/data/captures/<imageId>.png`, and atomically replace an existing file with the same id. `width` and `height` control CSS framing; `scale` controls output DPR, so `700x500` with `scale: 2` writes a `1400x1000` PNG. The service-owned Chromium profile/cache directory is removed on shutdown or session restart. Open `http://localhost:8080/capture.html` only when inspecting the harness manually.
 
