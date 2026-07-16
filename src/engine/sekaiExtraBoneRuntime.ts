@@ -128,7 +128,9 @@ export class SekaiExtraBoneRuntime {
         this.targetEuler.z = this.sourceEuler.z * sign;
       }
       this.targetQuaternion.setFromEuler(this.targetEuler);
-      entry.node.quaternion.copy(entry.defaultQuaternion).slerp(
+      lerpQuaternion(
+        entry.node.quaternion,
+        entry.defaultQuaternion,
         this.targetQuaternion,
         Math.abs(entry.coefficient)
       );
@@ -140,6 +142,22 @@ export class SekaiExtraBoneRuntime {
   getControlledTrackNodeNames(): Set<string> {
     return new Set(this.entries.map((entry) => entry.node.name).filter(Boolean));
   }
+}
+
+function lerpQuaternion(
+  target: THREE.Quaternion,
+  from: THREE.Quaternion,
+  to: THREE.Quaternion,
+  alpha: number
+): THREE.Quaternion {
+  const t = THREE.MathUtils.clamp(alpha, 0, 1);
+  const sign = from.dot(to) < 0 ? -1 : 1;
+  return target.set(
+    THREE.MathUtils.lerp(from.x, to.x * sign, t),
+    THREE.MathUtils.lerp(from.y, to.y * sign, t),
+    THREE.MathUtils.lerp(from.z, to.z * sign, t),
+    THREE.MathUtils.lerp(from.w, to.w * sign, t)
+  ).normalize();
 }
 
 function readExtraBoneEntries(extension: unknown): SpringExtraBoneEntry[] {

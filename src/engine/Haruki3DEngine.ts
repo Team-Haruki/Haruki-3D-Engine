@@ -4544,6 +4544,12 @@ export class Haruki3DEngine {
     options: CombinedCharacterImportOptions = {}
   ): Promise<PartImportSnapshot> {
     const revision = ++this.importRevision;
+    const preservedAnimation = options.preserveAnimation
+      ? {
+          activeClipName: this.currentAnimationClipName,
+          currentTime: this.currentAnimationAction?.time ?? 0,
+        }
+      : null;
     if (options.disposeBeforeLoad) {
       this.releaseCurrentCharacterResources({
         preserveAnimationSelection: options.preserveAnimation ?? false,
@@ -4661,10 +4667,37 @@ export class Haruki3DEngine {
         usingFallbackAttach: true,
       };
     }
-    if (options.preserveAnimation) {
+    await this.refreshAnimationPlayback({
+      resetSpring: preservedAnimation === null,
+    });
+    if (preservedAnimation) {
+      if (this.currentAnimationAction) {
+        const restoreLoop = Boolean(
+          this.currentAnimationLoopUrl &&
+          preservedAnimation.activeClipName &&
+          (
+            preservedAnimation.activeClipName === this.queuedLoopClipName ||
+            isLoopClipName(
+              preservedAnimation.activeClipName,
+              this.currentAnimationLoopUrl
+            )
+          )
+        );
+        if (restoreLoop) {
+          this.activateQueuedLoopForSeek();
+        }
+        const duration = Math.max(this.currentAnimationDuration, 0);
+        this.currentAnimationAction.time = duration > 0
+          ? restoreLoop
+            ? THREE.MathUtils.euclideanModulo(preservedAnimation.currentTime, duration)
+            : THREE.MathUtils.clamp(preservedAnimation.currentTime, 0, duration)
+          : Math.max(preservedAnimation.currentTime, 0);
+        this.currentAnimationMixer?.update(0);
+      }
+      this.applyCurrentFaceMotionFrame();
+      this.syncLinkedHeadBones();
+      this.currentExtraBoneRuntime?.update();
       this.resetCurrentSpringRuntimeState();
-    } else {
-      await this.refreshAnimationPlayback();
     }
 
     const bodyStatus = {
@@ -5729,20 +5762,36 @@ export class Haruki3DEngine {
     if (!wardrobe) {
       throw new Error("No custom part package is loaded.");
     }
+    const previousSelection = wardrobe.getCustomSelection();
     const previousCombinedId = wardrobe.getCombinedCharacter()?.id ?? null;
     const combined = await wardrobe.setCustomSelection(selection);
     const sameResolvedSelection = previousCombinedId !== null &&
       previousCombinedId === combined.id &&
       this.currentImportIsCombined;
+    const nextAnimationUrl = combined.bodyAsset.source.animationUrls?.[0] ?? null;
+    const nextAnimationKind = inferBodyAnimationKind(nextAnimationUrl);
+    const nextLoopUrl = nextAnimationUrl && (
+      nextAnimationKind === "unity-json" ||
+      /body[_-]?motion/i.test(nextAnimationUrl.split(/[/?#]/)[0] ?? "")
+    )
+      ? nextAnimationUrl
+      : null;
+    const preserveAnimation = previousCombinedId !== null &&
+      this.currentImportIsCombined &&
+      previousSelection !== null &&
+      runtimeRoleId(previousSelection.characterId, previousSelection.unit) ===
+        runtimeRoleId(selection.characterId, selection.unit) &&
+      this.currentAnimationUrl === nextAnimationUrl &&
+      this.currentAnimationLoopUrl === nextLoopUrl;
     if (!sameResolvedSelection) {
       // Match the official preview update path: preserve the outer engine, rebuild the full character graph.
       await this.importCombinedCharacter(combined, {
-        preserveAnimation: false,
+        preserveAnimation,
         disposeBeforeLoad: true,
         clearAnimationCache: false,
       });
     }
-    await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection);
+    await this.applyCustomRoleDefaultMotion(combined, !preserveAnimation);
     return combined;
   }
 
@@ -5892,7 +5941,7 @@ export class Haruki3DEngine {
       ? animationUrl
       : null;
     const faceMotion = readEmbeddedRuntimeFaceMotion(combined.runtimeExtension);
-    if (faceMotion) {
+    if (faceMotion && (force || !this.currentFaceMotionSet)) {
       this.setFaceMotionSet(
         faceMotion,
         "face",
@@ -8703,15 +8752,20 @@ export class Haruki3DEngine {
     return retargeted.clip;
   }
 
-  private async refreshAnimationPlayback() {
+  private async refreshAnimationPlayback(
+    options: { resetSpring?: boolean } = {}
+  ) {
     const revision = ++this.animationRevision;
+    const resetSpring = options.resetSpring ?? true;
     this.stopAnimationPlayback();
     this.currentAnimationError = null;
 
     if (!this.currentAnimationUrl || !this.currentBodyAnimationRoot) {
       this.syncLinkedHeadBones();
       this.currentExtraBoneRuntime?.update();
-      this.resetCurrentSpringRuntimeState();
+      if (resetSpring) {
+        this.resetCurrentSpringRuntimeState();
+      }
       return;
     }
 
@@ -8871,7 +8925,9 @@ export class Haruki3DEngine {
     this.currentAnimationMixer.update(0);
     this.syncLinkedHeadBones();
     this.currentExtraBoneRuntime?.update();
-    this.resetCurrentSpringRuntimeState();
+    if (resetSpring) {
+      this.resetCurrentSpringRuntimeState();
+    }
   }
 
   private activateQueuedLoopForSeek() {

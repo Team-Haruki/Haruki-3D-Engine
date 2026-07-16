@@ -144,6 +144,25 @@ test("same raw accessory id selects its exact package independent of registry or
   }
 });
 
+test("selecting another role clears the previous combined character", async () => {
+  const fixture = makeFixture();
+  const wardrobe = new CustomWardrobeController({
+    resolveUrl: (value) => value,
+  });
+  wardrobe.loadPartPackageSet(makeComposablePartSet(fixture.registry, [
+    fixture.shared.packagePath,
+    "parts/body",
+    "parts/hair",
+  ]), { composeDefault: false });
+  wardrobe.selectRole(2, "light_sound");
+  await wardrobe.setCustomSelection(selection(fixture.shared.packagePath));
+
+  assert.ok(wardrobe.getCombinedCharacter());
+  wardrobe.selectRole(3, "idol");
+  assert.equal(wardrobe.getCombinedCharacter(), null);
+  assert.equal(wardrobe.getCustomSelection(), null);
+});
+
 test("same raw accessory id without a package path is rejected as ambiguous", async () => {
   const fixture = makeFixture();
   const selected = [];

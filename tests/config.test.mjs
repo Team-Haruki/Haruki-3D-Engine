@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import * as THREE from "three";
+import ts from "typescript";
 
 import { parseArgs } from "../capture-runtime.mjs";
 import {
@@ -896,13 +898,17 @@ test("custom selection mutations use the official full-character update path", (
   assert.match(engineSource, /private async applyCustomSelection/);
   assert.match(engineSource, /previousCombinedId === combined\.id/);
   assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
-  assert.match(engineSource, /preserveAnimation:\s*false/);
+  assert.match(engineSource, /const previousSelection = wardrobe\.getCustomSelection\(\)/);
+  assert.match(engineSource, /const nextAnimationUrl = combined\.bodyAsset\.source\.animationUrls\?\.\[0\] \?\? null/);
+  assert.match(engineSource, /const preserveAnimation = previousCombinedId !== null &&\s+this\.currentImportIsCombined &&\s+previousSelection !== null &&\s+runtimeRoleId\(previousSelection\.characterId, previousSelection\.unit\) ===\s+runtimeRoleId\(selection\.characterId, selection\.unit\) &&\s+this\.currentAnimationUrl === nextAnimationUrl &&\s+this\.currentAnimationLoopUrl === nextLoopUrl/);
+  assert.match(engineSource, /preserveAnimation,\s+disposeBeforeLoad:\s*true/);
   assert.match(engineSource, /clearAnimationCache:\s*false/);
-  assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !sameResolvedSelection\)/);
-  assert.doesNotMatch(engineSource, /captureAnimationPlaybackState|continueAnimationPlaybackState/);
+  assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !preserveAnimation\)/);
+  assert.match(engineSource, /await this\.refreshAnimationPlayback\(\{\s+resetSpring: preservedAnimation === null,\s+\}\);\s+if \(preservedAnimation\)/);
+  assert.match(engineSource, /this\.currentAnimationAction\.time = duration > 0/);
   const sameSelectionBranch = engineSource.slice(
     engineSource.indexOf("const sameResolvedSelection"),
-    engineSource.indexOf("await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection)")
+    engineSource.indexOf("await this.applyCustomRoleDefaultMotion(combined, !preserveAnimation)")
   );
   assert.doesNotMatch(sameSelectionBranch, /resetCurrentSpringRuntimeState/);
   assert.match(engineSource, /if \(isEnabled && !wasEnabled\) \{\s*this\.resetAndSettleCurrentSpringRuntime\(60\);/);
@@ -1200,11 +1206,69 @@ test("Sekai ExtraBone runtime follows official rotation order and coefficient di
 
   assert.match(extraBoneSource, /"XYZ",\s+"XZY",\s+"YXZ",\s+"YZX",\s+"ZXY",\s+"ZYX"/s);
   assert.match(extraBoneSource, /const sign = entry\.coefficient > 0 \? -1 : entry\.coefficient < 0 \? 1 : 0/);
-  assert.match(extraBoneSource, /entry\.node\.quaternion\.copy\(entry\.defaultQuaternion\)\.slerp/);
+  assert.match(extraBoneSource, /function lerpQuaternion/);
+  assert.match(extraBoneSource, /const sign = from\.dot\(to\) < 0 \? -1 : 1/);
+  assert.match(extraBoneSource, /THREE\.MathUtils\.clamp\(alpha, 0, 1\)/);
+  assert.doesNotMatch(extraBoneSource, /\.slerp\(/);
   assert.match(extraBoneSource, /Math\.abs\(entry\.coefficient\)/);
   assert.match(extraBoneSource, /function readExtraBoneEntries/);
   assert.match(extraBoneSource, /partRecord\?\.extraBones \?\? partRecord\?\.ExtraBones/);
   assert.doesNotMatch(extraBoneSource, /EX_/);
+
+  const helperSource = extraBoneSource.match(
+    /function lerpQuaternion\([\s\S]*?\n\}/
+  )?.[0];
+  assert.ok(helperSource);
+  const helperJavaScript = ts.transpileModule(helperSource, {
+    compilerOptions: {
+      module: ts.ModuleKind.None,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  const lerpQuaternion = new Function(
+    "THREE",
+    `${helperJavaScript}\nreturn lerpQuaternion;`
+  )(THREE);
+
+  const identity = new THREE.Quaternion();
+  const halfTurnY = new THREE.Quaternion(0, 1, 0, 0);
+  const half = lerpQuaternion(
+    new THREE.Quaternion(),
+    identity,
+    halfTurnY,
+    0.5
+  );
+  const quarterTurnY = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    Math.PI / 2
+  );
+  assert.ok(half.angleTo(quarterTurnY) < 1e-7);
+  assert.ok(Math.abs(half.length() - 1) < 1e-12);
+
+  const sixtyPercent = lerpQuaternion(
+    new THREE.Quaternion(),
+    identity,
+    halfTurnY,
+    0.6
+  );
+  const sixtyPercentLength = Math.hypot(0.6, 0.4);
+  assert.ok(Math.abs(sixtyPercent.y - 0.6 / sixtyPercentLength) < 1e-12);
+  assert.ok(Math.abs(sixtyPercent.w - 0.4 / sixtyPercentLength) < 1e-12);
+
+  const from = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(0.3, -0.8, 1.2, "ZYX")
+  );
+  const to = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(-1.1, 0.4, 0.7, "XZY")
+  );
+  const normal = lerpQuaternion(new THREE.Quaternion(), from, to, 0.6);
+  const antipodal = lerpQuaternion(
+    new THREE.Quaternion(),
+    from,
+    new THREE.Quaternion(-to.x, -to.y, -to.z, -to.w),
+    0.6
+  );
+  assert.ok(1 - Math.abs(normal.dot(antipodal)) < 1e-12);
 });
 
 test("part runtime loader preserves registry package path on loaded packages", () => {

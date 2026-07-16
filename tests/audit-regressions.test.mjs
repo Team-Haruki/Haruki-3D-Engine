@@ -274,7 +274,7 @@ test("exact repeated selections preserve spring state", () => {
   const branch = sourceSlice(
     engineSource,
     "const sameResolvedSelection",
-    "await this.applyCustomRoleDefaultMotion(combined, !sameResolvedSelection)"
+    "await this.applyCustomRoleDefaultMotion(combined, !preserveAnimation)"
   );
 
   assert.doesNotMatch(branch, /resetCurrentSpringRuntimeState/);
