@@ -742,6 +742,8 @@ test("custom composer filters complete-head hair packages instead of stacking du
   assert.match(composerSource, /composeRuntimeExtension\(\s+contributingRuntimes/);
   assert.match(composerSource, /mergeRuntimeSetup\(contributorRuntimes\)/);
   assert.match(composerSource, /mergeNativeMeshes\(contributorRuntimes/);
+  assert.match(composerSource, /characterControllers: composeCharacterControllers\(contributorRuntimes\)/);
+  assert.match(composerSource, /return head\?\.characterControllers \?\? \{\}/);
   assert.doesNotMatch(composerSource, /runtimes\.flatMap\(\(runtime\) => runtime\.materialSlots \?\? \[\]\)/);
 });
 

@@ -104,6 +104,7 @@ export type PartRuntimePackage = {
   materialSlots?: unknown[];
   textureRoles?: unknown[];
   characterTextures?: Record<string, string>;
+  characterControllers?: Record<string, unknown>;
   springBone?: Record<string, unknown>;
   morphChannelBindings?: unknown[];
   warnings?: string[];
@@ -1147,6 +1148,7 @@ function composeRuntimeExtension(
     },
     textureRoles: contributorRuntimes.flatMap((runtime) => runtime.textureRoles ?? []),
     characterTextures: Object.assign({}, ...contributorRuntimes.map((runtime) => runtime.characterTextures ?? {})),
+    characterControllers: composeCharacterControllers(contributorRuntimes),
     nativeMeshes: mergeNativeMeshes(contributorRuntimes, runtimeSetup),
     motionPackage: roleRuntime?.motionPackage ?? null,
     morphChannelBindings: headAsset.morphChannelBindings ?? [],
@@ -1159,6 +1161,14 @@ function composeRuntimeExtension(
       ...(roleRuntime?.warnings ?? []),
     ],
   };
+}
+
+function composeCharacterControllers(runtimes: PartRuntimePackage[]) {
+  const head = runtimes.find((runtime) => {
+    const slot = runtimePartSlot(runtime.part);
+    return slot === "head" || slot === "hair";
+  });
+  return head?.characterControllers ?? {};
 }
 
 function mergeRuntimeSetup(runtimes: PartRuntimePackage[]): RuntimeSetup {
