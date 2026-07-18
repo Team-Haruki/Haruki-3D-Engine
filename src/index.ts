@@ -30,6 +30,7 @@ export {
   type RuntimeCombinedCharacterAsset,
   type RuntimeDebugSnapshot,
   type SpringBoneRuntimeSnapshot,
+  type SpringTimelineControlState,
   defaultProjectedShadowSettings,
 } from "./engine/Haruki3DEngine";
 export {
@@ -55,6 +56,8 @@ export {
 } from "./parts/runtimePartComposer";
 export {
   previewLightDefaults,
+  sekaiCostumeShopDirectionalLightDirection,
+  sekaiCostumeShopDirectionalLightRotationDegrees,
   type BodyAssetManifest,
   type HeadAssetManifest,
   type PreviewLightState,

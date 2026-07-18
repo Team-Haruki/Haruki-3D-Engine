@@ -2,6 +2,7 @@ import * as THREE from "three";
 import {
   convertUnityDirectionToThree,
   convertUnityPositionToThree,
+  convertUnityQuaternionToThree,
   readUnityVector3,
 } from "./unityCoordinateConversion";
 
@@ -23,10 +24,21 @@ type RuntimeConstraintSource = {
   ownerName?: string | null;
   enabled?: boolean | null;
   active?: boolean | null;
+  weight?: number | null;
+  // Unity documents locked as an editor offset-maintenance switch; it has no
+  // effect while the constraint runs in Play Mode, so runtime evaluation does
+  // not branch on this serialized value.
+  locked?: boolean | null;
+  translationAxis?: number | null;
+  rotationAxis?: number | null;
+  translationAtRest?: UnityVectorLike | null;
+  rotationAtRest?: UnityVectorLike | null;
+  translationOffset?: UnityVectorLike | null;
   rotationOffset?: UnityVectorLike | null;
   aimVector?: UnityVectorLike | null;
   upVector?: UnityVectorLike | null;
   worldUpVector?: UnityVectorLike | null;
+  worldUpType?: number | null;
   worldUpObjectName?: string | null;
   worldUpObjectPath?: string | null;
   sources?: RuntimeConstraintBindingSource[];
@@ -99,6 +111,19 @@ const TEMP_PARENT_QUATERNION = new THREE.Quaternion();
 const TEMP_AIM_DIRECTION = new THREE.Vector3();
 const TEMP_UP_DIRECTION = new THREE.Vector3();
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
+const ALL_AXES = 1 | 2 | 4;
+
+export class UnityConstraintRuntime {
+  constructor(
+    private readonly graph: UnityConstraintRuntimeGraph,
+    private readonly setup: RuntimeConstraintSetupSource,
+    private readonly characterHeight: number
+  ) {}
+
+  update(): RuntimeConstraintDebug {
+    return applyUnityRuntimeConstraints(this.graph, this.setup, this.characterHeight)!;
+  }
+}
 
 export function applyUnityRuntimeConstraints(
   graph: UnityConstraintRuntimeGraph,
@@ -179,20 +204,36 @@ function applyRuntimeConstraint(
   }
 
   const resolvedSources = sources.filter(hasResolvedConstraintSource);
+  const originalLocalPosition = owner.node.position.clone();
+  const originalLocalRotation = owner.node.quaternion.clone();
   if (type === "parent") {
-    const missingOffset = resolvedSources.find((source) => !source.translationOffset);
-    if (missingOffset) {
-      return skipped("skipped", "parent constraint is missing exported translationOffset");
-    }
     if (!applyParentConstraint(owner.node, resolvedSources)) {
       return skipped("skipped", "parent constraint has no positive source weight");
     }
+    applyConstraintWeightAndAxes(
+      owner.node,
+      constraint,
+      characterHeight,
+      originalLocalPosition,
+      originalLocalRotation,
+      true,
+      true
+    );
     return appliedEntry(type, ownerPath, ownerName, sourceDebug, "parent constraint applied with height-scaled translation offsets");
   }
   if (type === "rotation") {
-    if (!applyRotationConstraint(owner.node, resolvedSources)) {
+    if (!applyRotationConstraint(owner.node, resolvedSources, constraint.rotationOffset)) {
       return skipped("skipped", "rotation constraint has no positive source weight");
     }
+    applyConstraintWeightAndAxes(
+      owner.node,
+      constraint,
+      characterHeight,
+      originalLocalPosition,
+      originalLocalRotation,
+      false,
+      true
+    );
     return appliedEntry(type, ownerPath, ownerName, sourceDebug, "rotation constraint applied with weighted source rotations");
   }
   if (type === "aim") {
@@ -203,12 +244,24 @@ function applyRuntimeConstraint(
       readRuntimeString(constraint.worldUpObjectPath),
       readRuntimeString(constraint.worldUpObjectName)
     ).node;
-    const worldUpVector = worldUpObject
-      ? readWorldDirection(worldUpObject, asUnityDirection(constraint.worldUpVector, new THREE.Vector3(0, 1, 0)))
-      : asUnityDirection(constraint.worldUpVector, WORLD_UP);
-    if (!applyAimConstraint(owner.node, resolvedSources, aimVector, upVector, worldUpVector)) {
+    const worldUpVector = resolveAimWorldUpVector(
+      owner.node,
+      worldUpObject,
+      constraint.worldUpType,
+      constraint.worldUpVector
+    );
+    if (!applyAimConstraint(owner.node, resolvedSources, aimVector, upVector, worldUpVector, constraint.rotationOffset)) {
       return skipped("skipped", "aim constraint target direction or source weight was invalid");
     }
+    applyConstraintWeightAndAxes(
+      owner.node,
+      constraint,
+      characterHeight,
+      originalLocalPosition,
+      originalLocalRotation,
+      false,
+      true
+    );
     return appliedEntry(type, ownerPath, ownerName, sourceDebug, "aim constraint applied with exported aim/up vectors");
   }
   return skipped("skipped", `unsupported constraint type ${type}`);
@@ -240,7 +293,7 @@ function resolveConstraintSource(
 ): ResolvedConstraintSource {
   const sourcePath = readRuntimeString(source.sourcePath);
   const sourceName = readRuntimeString(source.sourceName);
-  const resolved = resolveConstraintGraphNode(graph, sourcePath, sourceName);
+  const resolved = resolveReboundConstraintSourceNode(graph, sourcePath, sourceName);
   const weight = readRuntimeNumber(source.weight) ?? 1;
   const translationOffset = asConstraintTranslationOffset(source.translationOffset, characterHeight);
   const rotationOffset = asConstraintRotationOffset(source.rotationOffset);
@@ -262,6 +315,29 @@ function resolveConstraintSource(
         : null,
     },
   };
+}
+
+function resolveReboundConstraintSourceNode(
+  graph: UnityConstraintRuntimeGraph,
+  sourcePath: string | null,
+  sourceName: string | null
+): { node: THREE.Object3D | null; reason: string } {
+  // ModelUtility.ConstraintSetup deliberately discards the source prefab
+  // reference and finds the first transform with the same name under the
+  // currently combined model. Traversing the live root also excludes detached
+  // body/head skeleton branches that remain addressable by their old paths.
+  if (sourceName) {
+    let match: THREE.Object3D | null = null;
+    graph.root.traverse((node) => {
+      if (!match && node.name === sourceName) {
+        match = node;
+      }
+    });
+    if (match) {
+      return { node: match, reason: "rebound by transform name in the combined model" };
+    }
+  }
+  return resolveConstraintGraphNode(graph, sourcePath, sourceName);
 }
 
 function hasResolvedConstraintSource(
@@ -316,12 +392,12 @@ function applyParentConstraint(owner: THREE.Object3D, sources: AppliedConstraint
     source.node.updateMatrixWorld(true);
     source.node.matrixWorld.decompose(TEMP_SOURCE_POSITION, TEMP_SOURCE_QUATERNION, TEMP_SOURCE_SCALE);
     const weightedPosition = TEMP_SOURCE_POSITION.clone().add(
-      source.translationOffset!.clone().applyQuaternion(TEMP_SOURCE_QUATERNION)
+      (source.translationOffset ?? new THREE.Vector3()).clone().applyQuaternion(TEMP_SOURCE_QUATERNION)
     );
     TEMP_TARGET_POSITION.addScaledVector(weightedPosition, weight / totalWeight);
     blendedRotation = blendWeightedQuaternion(
       blendedRotation,
-      TEMP_SOURCE_QUATERNION,
+      applyConstraintRotationOffset(TEMP_SOURCE_QUATERNION, source.rotationOffset),
       accumulatedWeight,
       weight
     );
@@ -334,13 +410,21 @@ function applyParentConstraint(owner: THREE.Object3D, sources: AppliedConstraint
   return false;
 }
 
-function applyRotationConstraint(owner: THREE.Object3D, sources: AppliedConstraintSource[]) {
+function applyRotationConstraint(
+  owner: THREE.Object3D,
+  sources: AppliedConstraintSource[],
+  rotationOffset?: UnityVectorLike | null
+) {
   const rotation = weightedSourceRotation(sources);
   if (!rotation) {
     return false;
   }
   owner.getWorldPosition(TEMP_TARGET_POSITION);
-  applyWorldPositionRotation(owner, TEMP_TARGET_POSITION, rotation);
+  applyWorldPositionRotation(
+    owner,
+    TEMP_TARGET_POSITION,
+    applyConstraintRotationOffset(rotation, asConstraintRotationOffset(rotationOffset))
+  );
   return true;
 }
 
@@ -349,7 +433,8 @@ function applyAimConstraint(
   sources: AppliedConstraintSource[],
   aimVector: THREE.Vector3,
   upVector: THREE.Vector3,
-  worldUpVector: THREE.Vector3
+  worldUpVector: THREE.Vector3 | null,
+  rotationOffset?: UnityVectorLike | null
 ) {
   const totalWeight = sources.reduce((sum, source) => sum + Math.max(0, source.weight), 0);
   if (totalWeight <= 0) {
@@ -374,24 +459,138 @@ function applyAimConstraint(
   TEMP_AIM_DIRECTION.normalize();
   const normalizedAim = normalizeOrFallback(aimVector, new THREE.Vector3(0, 0, 1));
   const normalizedUp = normalizeOrFallback(upVector, new THREE.Vector3(0, 1, 0));
-  const normalizedWorldUp = normalizeOrFallback(worldUpVector, WORLD_UP);
   TEMP_TARGET_QUATERNION.setFromUnitVectors(normalizedAim, TEMP_AIM_DIRECTION);
   TEMP_UP_DIRECTION.copy(normalizedUp).applyQuaternion(TEMP_TARGET_QUATERNION);
-  const projectedCurrentUp = projectOntoPlane(TEMP_UP_DIRECTION, TEMP_AIM_DIRECTION);
-  const projectedDesiredUp = projectOntoPlane(normalizedWorldUp, TEMP_AIM_DIRECTION);
-  if (projectedCurrentUp.lengthSq() > 0.000001 && projectedDesiredUp.lengthSq() > 0.000001) {
-    projectedCurrentUp.normalize();
-    projectedDesiredUp.normalize();
-    const twistAngle = Math.atan2(
-      TEMP_AIM_DIRECTION.dot(new THREE.Vector3().crossVectors(projectedCurrentUp, projectedDesiredUp)),
-      THREE.MathUtils.clamp(projectedCurrentUp.dot(projectedDesiredUp), -1, 1)
-    );
-    TEMP_TARGET_QUATERNION.premultiply(
-      new THREE.Quaternion().setFromAxisAngle(TEMP_AIM_DIRECTION, twistAngle)
-    );
+  if (worldUpVector) {
+    const normalizedWorldUp = normalizeOrFallback(worldUpVector, WORLD_UP);
+    const projectedCurrentUp = projectOntoPlane(TEMP_UP_DIRECTION, TEMP_AIM_DIRECTION);
+    const projectedDesiredUp = projectOntoPlane(normalizedWorldUp, TEMP_AIM_DIRECTION);
+    if (projectedCurrentUp.lengthSq() > 0.000001 && projectedDesiredUp.lengthSq() > 0.000001) {
+      projectedCurrentUp.normalize();
+      projectedDesiredUp.normalize();
+      const twistAngle = Math.atan2(
+        TEMP_AIM_DIRECTION.dot(new THREE.Vector3().crossVectors(projectedCurrentUp, projectedDesiredUp)),
+        THREE.MathUtils.clamp(projectedCurrentUp.dot(projectedDesiredUp), -1, 1)
+      );
+      TEMP_TARGET_QUATERNION.premultiply(
+        new THREE.Quaternion().setFromAxisAngle(TEMP_AIM_DIRECTION, twistAngle)
+      );
+    }
   }
-  applyWorldPositionRotation(owner, TEMP_TARGET_POSITION, TEMP_TARGET_QUATERNION);
+  applyWorldPositionRotation(
+    owner,
+    TEMP_TARGET_POSITION,
+    applyConstraintRotationOffset(TEMP_TARGET_QUATERNION, asConstraintRotationOffset(rotationOffset))
+  );
   return true;
+}
+
+function resolveAimWorldUpVector(
+  owner: THREE.Object3D,
+  worldUpObject: THREE.Object3D | null,
+  worldUpType: number | null | undefined,
+  worldUpVector: UnityVectorLike | null | undefined
+): THREE.Vector3 | null {
+  switch (readRuntimeNumber(worldUpType) ?? 0) {
+    case 1: {
+      if (!worldUpObject) {
+        return WORLD_UP.clone();
+      }
+      owner.getWorldPosition(TEMP_TARGET_POSITION);
+      worldUpObject.getWorldPosition(TEMP_SOURCE_POSITION);
+      return TEMP_SOURCE_POSITION.clone().sub(TEMP_TARGET_POSITION);
+    }
+    case 2:
+      return worldUpObject
+        ? readWorldDirection(worldUpObject, asUnityDirection(worldUpVector, WORLD_UP))
+        : asUnityDirection(worldUpVector, WORLD_UP);
+    case 3:
+      return asUnityDirection(worldUpVector, WORLD_UP);
+    case 4:
+      return null;
+    default:
+      return WORLD_UP.clone();
+  }
+}
+
+function applyConstraintRotationOffset(
+  rotation: THREE.Quaternion,
+  offset: THREE.Vector3 | null
+): THREE.Quaternion {
+  if (!offset) {
+    return rotation.clone();
+  }
+  return rotation.clone().multiply(unityEulerDegreesToThreeQuaternion(offset)).normalize();
+}
+
+function applyConstraintWeightAndAxes(
+  owner: THREE.Object3D,
+  constraint: RuntimeConstraintSource,
+  characterHeight: number,
+  originalPosition: THREE.Vector3,
+  originalRotation: THREE.Quaternion,
+  controlsTranslation: boolean,
+  controlsRotation: boolean
+): void {
+  const weight = THREE.MathUtils.clamp(readRuntimeNumber(constraint.weight) ?? 1, 0, 1);
+  const targetPosition = owner.position.clone();
+  const targetRotation = owner.quaternion.clone();
+  // ModelUtility only height-scales ParentConstraint per-source offsets. The
+  // serialized at-rest pose remains in the owner's local prefab coordinates.
+  const restPosition = asConstraintTranslationOffset(constraint.translationAtRest, 1) ?? originalPosition;
+  const restRotation = constraint.rotationAtRest
+    ? unityEulerDegreesToThreeQuaternion(asRawUnityVector(constraint.rotationAtRest))
+    : originalRotation;
+
+  if (controlsTranslation) {
+    const axes = readRuntimeNumber(constraint.translationAxis) ?? ALL_AXES;
+    const blended = restPosition.clone().lerp(targetPosition, weight);
+    owner.position.set(
+      axisEnabled(axes, 1) ? blended.x : restPosition.x,
+      axisEnabled(axes, 2) ? blended.y : restPosition.y,
+      axisEnabled(axes, 4) ? blended.z : restPosition.z
+    );
+  } else {
+    owner.position.copy(originalPosition);
+  }
+
+  if (controlsRotation) {
+    const axes = readRuntimeNumber(constraint.rotationAxis) ?? ALL_AXES;
+    const restEuler = new THREE.Euler().setFromQuaternion(restRotation, "ZXY");
+    const targetEuler = new THREE.Euler().setFromQuaternion(targetRotation, "ZXY");
+    const axisTarget = new THREE.Euler(
+      axisEnabled(axes, 1) ? targetEuler.x : restEuler.x,
+      axisEnabled(axes, 2) ? targetEuler.y : restEuler.y,
+      axisEnabled(axes, 4) ? targetEuler.z : restEuler.z,
+      "ZXY"
+    );
+    owner.quaternion.copy(restRotation).slerp(
+      new THREE.Quaternion().setFromEuler(axisTarget),
+      weight
+    ).normalize();
+  } else {
+    owner.quaternion.copy(originalRotation);
+  }
+  owner.updateMatrix();
+  owner.updateMatrixWorld(true);
+}
+
+function axisEnabled(mask: number, axis: number): boolean {
+  return (mask & axis) !== 0;
+}
+
+function asRawUnityVector(value: UnityVectorLike): THREE.Vector3 {
+  return readUnityVector3(value, new THREE.Vector3());
+}
+
+function unityEulerDegreesToThreeQuaternion(value: THREE.Vector3): THREE.Quaternion {
+  const unityRotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    THREE.MathUtils.degToRad(value.x),
+    THREE.MathUtils.degToRad(value.y),
+    THREE.MathUtils.degToRad(value.z),
+    "ZXY"
+  ));
+  return convertUnityQuaternionToThree(unityRotation);
 }
 
 function applyWorldPositionRotation(
@@ -473,7 +672,7 @@ function asConstraintRotationOffset(
   if (!value || typeof value !== "object") {
     return null;
   }
-  return convertUnityDirectionToThree(readUnityVector3(value, new THREE.Vector3()));
+  return readUnityVector3(value, new THREE.Vector3());
 }
 
 function asUnityDirection(value: UnityVectorLike | undefined | null, fallback: THREE.Vector3) {
