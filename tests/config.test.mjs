@@ -484,9 +484,8 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.match(engineSource, /private faceSdfEnabled = false;/);
   assert.match(engineSource, /setFaceSdfEnabled\(enabled: boolean\)/);
   assert.match(engineSource, /shouldEnableFaceSdfForCurrentView\(\)/);
-  assert.match(engineSource, /hasFaceSdfUv1Attribute\(mesh: THREE\.Mesh\)/);
   assert.doesNotMatch(engineSource, /ensureFaceSdfUv1Attribute/);
-  assert.match(engineSource, /resolvedEntry\.materialKind === "face_sdf" &&\s+Boolean\(resolvedEntry\.faceShadowTex\) &&\s+faceSdfUv1Available/s);
+  assert.match(engineSource, /resolvedEntry\.materialKind === "face_sdf" &&\s+Boolean\(resolvedEntry\.faceShadowTex\) &&\s+faceLighting\?\.useFaceSdf !== false/s);
   assert.match(engineSource, /shaderUniforms\.uFaceSdfEnabled\.value =\s+this\.shouldEnableFaceSdfForCurrentView\(\) && faceSdfCapable \? 1\.0 : 0\.0/s);
   assert.match(engineSource, /faceSdfCapable/);
   assert.match(engineSource, /faceSdfUv1Available/);
@@ -496,7 +495,12 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.match(shaderSource, /material\.uniforms\.uFaceSdfEnabled\.value = next\.faceSdfEnabled && next\.faceShadowTex \? 1\.0 : 0\.0/);
   assert.match(
     shaderSource,
-    /if \(\(uFaceSdfEnabled > 0\.5 \|\| uFaceDebugMode > 0\.5\) && uUseShadowTex > 0\.5 && uUseFaceShadowTex > 0\.5\)/
+    /if \(\(uFaceSdfEnabled > 0\.5 \|\| uFaceDebugMode > 0\.5\) && uUseFaceShadowTex > 0\.5\)/
+  );
+  assert.match(shaderSource, /vFaceShadowUv = abs\(uv1\.x\) \+ abs\(uv1\.y\) > 0\.000001 \? uv1 : uv;/);
+  assert.match(
+    engineSource,
+    /loadTexture\(\s*slot\.faceShadowTex,\s*THREE\.NoColorSpace\s*\)/
   );
   assert.doesNotMatch(shaderSource, /staticShadowMask/);
 });
@@ -516,14 +520,19 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.match(shaderSource, /uniform vec2 uHeadDotDirectionalLight;/);
   assert.match(shaderSource, /uniform float uUseFaceShadowLimiter;/);
   assert.match(shaderSource, /uniform float uFaceShadowLimitRange;/);
-  assert.match(shaderSource, /float officialSide = clamp\(uHeadDotDirectionalLight\.x, -1\.0, 1\.0\);/);
-  assert.match(shaderSource, /float officialRange = clamp\(uHeadDotDirectionalLight\.y, 0\.0, 1\.0\);/);
+  assert.match(shaderSource, /sdfValue = uFaceSdfMirror \* uHeadDotDirectionalLight\.x <= 0\.0 \? sdf1 : sdf0;/);
+  assert.match(shaderSource, /faceThreshold = min\(/);
+  assert.match(shaderSource, /faceShadow = sekaiFaceShadow\(sdfValue, faceThreshold, uShadowWidth, uFadeMode\);/);
+  assert.match(shaderSource, /shadowBand = max\(shadowBand, faceShadow\);/);
+  assert.doesNotMatch(shaderSource, /acos\(|sideGate|rangeGate/);
+  assert.doesNotMatch(shaderSource, /uFaceSdfUseLightDirection|uFaceSoftness|uFaceRight|uFaceUp|uFaceForward|uFaceDebugLightMode/);
+  assert.doesNotMatch(engineSource, /Math\.acos\(|updateSekaiFaceBasis|faceSdfDebugLightModeToUniform/);
   assert.match(engineSource, /export type FaceSdfDebugMode = "off" \| "sdf" \| "mask" \| "limit" \| "basis" \| "range";/);
   assert.match(engineSource, /-this\.faceUpWorld\.x,\s+-this\.faceUpWorld\.z/s);
-  assert.match(engineSource, /updateSekaiFaceShadowParameters\(\s+material,\s+COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,\s+this\.headDotDirectionalLight/s);
+  assert.match(engineSource, /updateSekaiFaceShadowParameters\(\s+material,\s+faceShadowLightDirection,\s+this\.headDotDirectionalLight/s);
   assert.doesNotMatch(shaderSource, /rangeLimit \* uShadowWeight/);
   assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
-  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /uniform float uFadeMode;/);
   assert.match(shaderSource, /uniform float uHueSinAngle;/);
   assert.match(shaderSource, /uniform float uHueCosAngle;/);
@@ -568,7 +577,7 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
 
   assert.match(shaderSource, /faceSkinLit = mix\(uSkinColor1, uSkinColorDefault, faceSkinRamp\)/);
   assert.match(shaderSource, /faceSkinShadow = mix\(uSkinColor2, uSkinColor1, faceSkinRamp\)/);
-  assert.match(shaderSource, /color = mix\(color, faceSkinLit, faceSkinMask \* 0\.58\)/);
+  assert.match(shaderSource, /mainColor = mix\(mainColor, faceSkinLit, faceSkinMask \* 0\.58\)/);
   assert.match(engineSource, /shaderSkinColorDefault/);
   assert.match(engineSource, /shaderSkinColor1/);
   assert.match(engineSource, /shaderSkinColor2/);
@@ -576,9 +585,9 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
   assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
   assert.match(engineSource, /const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1\.0/);
   assert.match(engineSource, /private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE/);
-  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /float valueShadowInfluence = clamp\(uValueShadowInfluence, 0\.0, 1\.0\);/);
-  assert.match(shaderSource, /float shadowBand = mix\(geometricShadowBand, hAdjustedShadowBand, valueShadowInfluence\);/);
+  assert.match(shaderSource, /float shadowBand = mix\(geometricShadowBand, officialShadowBand, valueShadowInfluence\) \* uShadowWeight;/);
 });
 
 test("native prefab meshes bind with exported Unity inverse bind matrices before fallback", () => {
@@ -628,14 +637,14 @@ test("character shader keeps sssekai-verified C/S/H and vertex color channel sem
   );
 
   assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
-  assert.match(shaderSource, /float skinMask = \(uSkinTintEnabled > 0\.5 && uUseValueTex > 0\.5\) \? step\(0\.5, valueSample\.r\) : 0\.0;/);
-  assert.match(shaderSource, /float hShadowOffset = \(uUseValueTex > 0\.5\) \? \(hMask \* 2\.0 - 1\.0\) : 0\.0;/);
+  assert.match(shaderSource, /float skinMask = \(uSkinTintEnabled > 0\.5 && uHasValueTex > 0\.5\) \? step\(0\.5, valueSample\.r\) : 0\.0;/);
+  assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /vertexOutlineIntensity = clamp\(vColor\.r, 0\.0, 1\.0\);/);
   assert.match(shaderSource, /vertexRimMask = clamp\(vColor\.g, 0\.0, 1\.0\);/);
   assert.match(shaderSource, /float rimMask = vertexRimMask;/);
-  assert.match(shaderSource, /vFaceShadowUv = uv1;/);
-  assert.match(shaderSource, /texture2D\(uFaceShadowTex, sdfUv\)/);
-  assert.match(shaderSource, /sdfMask \*= sideGate \* rangeGate;/);
+  assert.match(shaderSource, /vFaceShadowUv = abs\(uv1\.x\) \+ abs\(uv1\.y\) > 0\.000001 \? uv1 : uv;/);
+  assert.match(shaderSource, /texture2D\(uFaceShadowTex, vFaceShadowUv\)/);
+  assert.match(shaderSource, /texture2D\(uFaceShadowTex, vec2\(-vFaceShadowUv\.x, vFaceShadowUv\.y\)\)/);
 });
 
 test("projected character shadows are separate scene objects", () => {
@@ -724,8 +733,31 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
   assert.match(engineSource, /private hairShadowMode: HairShadowMode = "sekai_head_position";/);
   assert.match(engineSource, /hairShadowMode: this\.hairShadowMode/);
   assert.match(engineSource, /hairShadowWorldPosition: vectorDebugSnapshot\(this\.hairHeadPosition\)/);
+  assert.match(engineSource, /hairShadowEnabled:\s*this\.isHeadProximityHairShadowEnabled\(\) &&\s*Boolean\(options\.hairController\) &&\s*lighting\?\.faceSphereShadowEdge != null/s);
+  assert.match(engineSource, /useLambert: options\.hairController \? true : \(lighting\?\.useLambert \?\? true\)/);
+  assert.match(
+    engineSource,
+    /useLambert:\s*params\.useLambert \?\?\s*params\.lighting\?\.useLambert/
+  );
+  assert.doesNotMatch(engineSource, /lighting\?\.hairShadow === true/);
   assert.match(engineSource, /CharacterDirectionalShadow/);
   assert.match(engineSource, /CharacterCrossShadow/);
+});
+
+test("face shadow updates preserve exported limiter parameters", () => {
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(
+    engineSource,
+    /material\.uniforms\.uUseFaceShadowLimiter\?\.value \?\? 1\.0/
+  );
+  assert.match(
+    engineSource,
+    /material\.uniforms\.uFaceShadowLimitRange\?\.value \?\? 0\.0/
+  );
 });
 
 test("custom composer filters complete-head hair packages instead of stacking duplicate face roots", () => {

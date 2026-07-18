@@ -60,3 +60,11 @@ export {
   type PreviewLightState,
   type Vec3,
 } from "./data/sampleScene";
+export {
+  evaluateSekaiBaseShadow,
+  evaluateSekaiFaceShadow,
+  evaluateSekaiFaceSphereShadow,
+  type SekaiBaseShadowInput,
+  type SekaiFaceShadowInput,
+  type SekaiFaceSphereShadowInput,
+} from "./materials/sekaiCharacterLighting";

@@ -20,7 +20,6 @@ import {
 } from "../materials/sekaiBodyMaterial";
 import {
   createSekaiFaceMaterial,
-  updateSekaiFaceBasis,
   updateSekaiFaceMaterial,
   updateSekaiFaceShadowParameters,
 } from "../materials/sekaiFaceMaterial";
@@ -365,10 +364,7 @@ export type RuntimeMaterialDebug = {
   shaderSkinColor1?: string | null;
   shaderSkinColor2?: string | null;
   shaderBodyDebugMode?: number | null;
-  shaderFaceSoftness?: number | null;
-  shaderFaceSdfUseLightDirection?: number | null;
   shaderFaceDebugMode?: number | null;
-  shaderFaceDebugLightMode?: number | null;
   shaderFaceSdfEnabled?: number | null;
   faceSdfCapable?: boolean | null;
   faceSdfUv1Available?: boolean | null;
@@ -881,6 +877,8 @@ type CharacterEyeMaterialController = {
 
 type CharacterHairMaterialController = {
   offset: THREE.Vector3;
+  headTransformName: string | null;
+  headTransformPath: string | null;
 };
 
 function getErrorMessage(error: unknown) {
@@ -1561,7 +1559,7 @@ function cloneBodyShaderMaterial(
     shadowWidthOverride?: number | null;
     valueShadowInfluence?: number;
     hairShadowEnabled?: boolean;
-    lambertEnabled?: boolean;
+    useLambert?: boolean;
     headPosition?: THREE.Vector3;
     alphaCutoff?: number;
   }
@@ -1586,10 +1584,13 @@ function cloneBodyShaderMaterial(
     mainTex: params.mainTex ?? null,
     shadowTex: params.shadowTex ?? null,
     valueTex: params.valueTex ?? null,
+    useValueTex: params.lighting?.useValueTex ?? Boolean(params.valueTex),
     lightDirection: source.uniforms.uLightDirection.value.clone(),
     lightIntensity: source.uniforms.uLightIntensity.value,
     ambientIntensity: source.uniforms.uAmbientIntensity.value,
-    shadowThreshold: source.uniforms.uShadowThreshold.value,
+    shadowThreshold:
+      params.lighting?.sekaiShadowThreshold ??
+      source.uniforms.uShadowThreshold.value,
     shadowWeight: source.uniforms.uShadowWeight.value,
     characterAmbientIntensity:
       source.uniforms.uCharacterAmbientIntensity?.value ?? 0.3,
@@ -1618,12 +1619,16 @@ function cloneBodyShaderMaterial(
     hairShadowEnabled:
       params.hairShadowEnabled ??
       ((source.uniforms.uHairShadowEnabled?.value ?? 0.0) > 0.5),
-    lambertEnabled:
-      params.lambertEnabled ??
-      ((source.uniforms.uLambertEnabled?.value ?? 0.0) > 0.5),
+    useLambert:
+      params.useLambert ??
+      params.lighting?.useLambert ??
+      ((source.uniforms.uUseLambert?.value ?? 1.0) > 0.5),
     headPosition:
       params.headPosition ??
       source.uniforms.uHeadPosition?.value.clone(),
+    faceSphereShadowEdge: params.lighting?.faceSphereShadowEdge ?? 0.0,
+    faceSphereShadowSmoothness: params.lighting?.faceSphereShadowSmoothness ?? 0.0,
+    faceSphereShadowWeight: params.lighting?.faceSphereShadowWeight ?? 0.0,
     saturation: params.lighting?.saturation ?? source.uniforms.uSaturation.value,
     value: params.lighting?.value ?? source.uniforms.uValue?.value ?? 0.5,
     contrast: params.lighting?.contrast ?? source.uniforms.uContrast?.value ?? 0.5,
@@ -1677,12 +1682,14 @@ function cloneFaceShaderMaterial(
   params: {
     mainTex?: THREE.Texture | null;
     shadowTex?: THREE.Texture | null;
+    valueTex?: THREE.Texture | null;
     faceShadowTex?: THREE.Texture | null;
     baseColor?: THREE.ColorRepresentation;
     warmColor?: THREE.ColorRepresentation;
     skinColorDefault?: THREE.ColorRepresentation;
     skinColor1?: THREE.ColorRepresentation;
     skinColor2?: THREE.ColorRepresentation;
+    lighting?: MaterialLightingSettings;
     faceSdfEnabled?: boolean;
   }
 ) {
@@ -1705,25 +1712,45 @@ function cloneFaceShaderMaterial(
       `#${source.uniforms.uSkinColor2.value.getHexString()}`,
     mainTex: params.mainTex ?? null,
     shadowTex: params.shadowTex ?? null,
+    valueTex: params.valueTex ?? null,
     faceShadowTex: params.faceShadowTex ?? null,
     lightDirection: source.uniforms.uLightDirection.value.clone(),
     lightIntensity: source.uniforms.uLightIntensity.value,
     ambientIntensity: source.uniforms.uAmbientIntensity.value,
-    faceSoftness: source.uniforms.uFaceSoftness.value,
-    faceSdfUseLightDirection: source.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5,
     headDotDirectionalLight: source.uniforms.uHeadDotDirectionalLight?.value,
-    useFaceShadowLimiter: (source.uniforms.uUseFaceShadowLimiter?.value ?? 1.0) > 0.5,
-    faceShadowLimitRange: source.uniforms.uFaceShadowLimitRange?.value ?? 0,
     faceDebugMode: source.uniforms.uFaceDebugMode?.value ?? 0,
-    faceDebugLightMode: source.uniforms.uFaceDebugLightMode?.value ?? 0,
-    faceSdfEnabled: params.faceSdfEnabled ?? false,
+    faceSdfEnabled:
+      (params.faceSdfEnabled ?? false) &&
+      params.lighting?.useFaceSdf !== false,
+    useValueTex: params.lighting?.useValueTex ?? Boolean(params.valueTex),
+    shadowThreshold:
+      params.lighting?.sekaiShadowThreshold ??
+      source.uniforms.uShadowThreshold?.value ??
+      0.5,
+    shadowWeight: source.uniforms.uShadowWeight?.value ?? 1.0,
+    shadowWidth: params.lighting?.shadowWidth ?? source.uniforms.uShadowWidth?.value ?? 0.0,
+    fadeMode: params.lighting?.fadeMode ?? source.uniforms.uFadeMode?.value ?? 0.0,
+    useLambert: params.lighting?.useLambert ?? true,
+    shadowTexWeight:
+      params.lighting?.shadowTexWeight ??
+      source.uniforms.uShadowTexWeight?.value ??
+      1.0,
+    faceSdfMirror:
+      params.lighting?.faceSdfMirror ??
+      source.uniforms.uFaceSdfMirror?.value ??
+      1.0,
+    faceSdfBias:
+      params.lighting?.faceSdfBias ??
+      source.uniforms.uFaceSdfBias?.value ??
+      0.0,
+    useFaceShadowLimiter:
+      params.lighting?.useFaceShadowLimiter ??
+      ((source.uniforms.uUseFaceShadowLimiter?.value ?? 1.0) > 0.5),
+    faceShadowLimitRange:
+      params.lighting?.rangeLimit ??
+      source.uniforms.uFaceShadowLimitRange?.value ??
+      0,
   });
-  updateSekaiFaceBasis(
-    material,
-    source.uniforms.uFaceRight?.value ?? new THREE.Vector3(1, 0, 0),
-    source.uniforms.uFaceUp?.value ?? new THREE.Vector3(0, 1, 0),
-    source.uniforms.uFaceForward?.value ?? new THREE.Vector3(0, 0, 1)
-  );
   return material;
 }
 
@@ -2040,21 +2067,6 @@ function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
   }
 }
 
-function faceSdfDebugLightModeToUniform(mode: FaceSdfDebugLightMode) {
-  switch (mode) {
-    case "front":
-      return 1;
-    case "left":
-      return 2;
-    case "right":
-      return 3;
-    case "back":
-      return 4;
-    default:
-      return 0;
-  }
-}
-
 function asRuntimeRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
@@ -2172,11 +2184,18 @@ function readCharacterHairMaterialController(
   if (!Object.keys(hair).length) {
     return null;
   }
+  const headTransform = asRuntimeRecord(hair.headTransform ?? hair.HeadTransform);
   return {
     offset: readUnityVector3(
       (hair.offset ?? hair.Offset) as RuntimePrefabTransformSource["localPosition"] | undefined,
       new THREE.Vector3()
     ),
+    headTransformName: typeof (headTransform.name ?? headTransform.Name) === "string"
+      ? String(headTransform.name ?? headTransform.Name)
+      : null,
+    headTransformPath: typeof (headTransform.transformPath ?? headTransform.TransformPath) === "string"
+      ? String(headTransform.transformPath ?? headTransform.TransformPath)
+      : null,
   };
 }
 
@@ -4026,6 +4045,7 @@ export class Haruki3DEngine {
   private readonly headDotDirectionalLight = new THREE.Vector2();
   private readonly hairHeadPosition = new THREE.Vector3();
   private currentHairOffset = new THREE.Vector3();
+  private currentHairHeadTransform: THREE.Object3D | null = null;
   private hairShadowMode: HairShadowMode = "sekai_head_position";
   private bodyDebugMode: BodyDebugMode = "off";
   private toonShadowWidthOverride: number | null = null;
@@ -4143,7 +4163,7 @@ export class Haruki3DEngine {
       rimDirection: getSekaiPreviewRimDirection(),
       skinTintEnabled: false,
       hairShadowEnabled: false,
-      lambertEnabled: false,
+      useLambert: true,
       headPosition: this.hairHeadPosition,
     });
     this.faceMaterial = createSekaiFaceMaterial({
@@ -4152,11 +4172,12 @@ export class Haruki3DEngine {
       lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
       lightIntensity: light.intensity,
       ambientIntensity: light.ambient,
-      faceSoftness: light.faceSoftness,
-      faceSdfUseLightDirection: light.faceSdfUseLightDirection,
       headDotDirectionalLight: this.headDotDirectionalLight,
       useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
       faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
+      shadowThreshold: light.shadowThreshold,
+      shadowWeight: light.shadowWeight,
+      useLambert: true,
     });
 
     this.characterRoot = new THREE.Group();
@@ -4227,6 +4248,7 @@ export class Haruki3DEngine {
     this.currentHeadMorphRuntimes.length = 0;
     this.currentBodyAnimationRoot = null;
     this.currentPrefabSourceGraph = null;
+    this.currentHairHeadTransform = null;
     this.currentPrefabHeadFollowDebug = {
       active: false,
       sourcePath: null,
@@ -4339,6 +4361,7 @@ export class Haruki3DEngine {
 
   setFaceSdfDebugLightMode(mode: FaceSdfDebugLightMode) {
     this.faceSdfDebugLightMode = mode;
+    this.updateShaderFaceBasis();
     this.applyFaceSdfDebugUniforms();
   }
 
@@ -4620,9 +4643,7 @@ export class Haruki3DEngine {
 
   private applyFaceSdfDebugUniforms() {
     const debugUniform = faceSdfDebugModeToUniform(this.faceSdfDebugMode);
-    const debugLightUniform = faceSdfDebugLightModeToUniform(this.faceSdfDebugLightMode);
     this.faceMaterial.uniforms.uFaceDebugMode.value = debugUniform;
-    this.faceMaterial.uniforms.uFaceDebugLightMode.value = debugLightUniform;
     for (const slot of [this.bodySlot, this.headSlot]) {
       slot.traverse((node) => {
         const mesh = node as THREE.Mesh;
@@ -4633,7 +4654,6 @@ export class Haruki3DEngine {
         for (const material of materials) {
           if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceDebugMode) {
             material.uniforms.uFaceDebugMode.value = debugUniform;
-            material.uniforms.uFaceDebugLightMode.value = debugLightUniform;
           }
         }
       });
@@ -4642,7 +4662,6 @@ export class Haruki3DEngine {
       for (const entry of entries) {
         if (entry.resolvedKind === "face_sdf" || entry.shaderFaceDebugMode !== undefined) {
           entry.shaderFaceDebugMode = debugUniform;
-          entry.shaderFaceDebugLightMode = debugLightUniform;
         }
       }
     }
@@ -4778,7 +4797,7 @@ export class Haruki3DEngine {
 
   getFaceLightDebugSnapshot(): RuntimeFaceLightDebug {
     const previewLightDirection = this.directionalLight.position.clone().normalize();
-    const lightDirection = COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
+    const lightDirection = this.getFaceShadowLightDirection();
     const headHorizontalFromUp = new THREE.Vector2();
     const headHorizontalFromRight = new THREE.Vector2();
     const headHorizontalFromForward = new THREE.Vector2();
@@ -4828,13 +4847,16 @@ export class Haruki3DEngine {
     );
     const faceSide = faceTbnLight.x / faceLightLength;
     const faceFront = faceTbnLight.z / faceLightLength;
-    const faceSdfUseLightDirection =
-      this.faceMaterial.uniforms.uFaceSdfUseLightDirection?.value ?? 0.5;
+    const useLimiter = (this.faceMaterial.uniforms.uUseFaceShadowLimiter?.value ?? 1) > 0.5;
+    const rangeLimit = this.faceMaterial.uniforms.uFaceShadowLimitRange?.value ?? 0;
+    const faceSdfBias = this.faceMaterial.uniforms.uFaceSdfBias?.value ?? 0;
+    const headDotY = this.headDotDirectionalLight.y;
     const faceSdfLimit = THREE.MathUtils.clamp(
-      (Math.acos(Math.max(faceFront, 0.0)) / 1.5707963) *
-        THREE.MathUtils.clamp(faceSdfUseLightDirection, 0.0, 1.0),
-      0.015,
-      0.985
+      (useLimiter
+        ? Math.min(Math.max((1 - Math.abs(2 * headDotY - 1)) * 0.5, 0), rangeLimit)
+        : headDotY) + faceSdfBias,
+      0,
+      1
     );
     return {
       lightDirection: vectorDebugSnapshot(lightDirection),
@@ -5679,7 +5701,7 @@ export class Haruki3DEngine {
       controllerRimEdgeSmoothness: this.hairMaterial.uniforms.uControllerRimEdgeSmoothness.value,
       controllerRimShadowSharpness: this.hairMaterial.uniforms.uControllerRimShadowSharpness.value,
       skinTintEnabled: false,
-      hairShadowEnabled: this.isHeadProximityHairShadowEnabled(),
+      hairShadowEnabled: false,
     });
     updateSekaiFaceMaterial(this.faceMaterial, {
       baseColor: this.currentHeadAsset?.proxy.faceColor ?? "#ffe4dc",
@@ -5699,8 +5721,6 @@ export class Haruki3DEngine {
       lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
       lightIntensity: next.intensity,
       ambientIntensity: next.ambient,
-      faceSoftness: next.faceSoftness,
-      faceSdfUseLightDirection: next.faceSdfUseLightDirection,
       headDotDirectionalLight: this.headDotDirectionalLight,
       useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
       faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
@@ -5874,6 +5894,7 @@ export class Haruki3DEngine {
             continue;
           }
           const uniforms = material.uniforms;
+          const lighting = material.userData.pjskLighting as MaterialLightingSettings | undefined;
           const isFaceShadowMaterial = Boolean(uniforms.uFaceShadowTex || uniforms.uHeadDotDirectionalLight);
           uniforms.uLightDirection?.value.copy(
             isFaceShadowMaterial ? faceShadowLightDirection : lightDirection
@@ -5885,7 +5906,8 @@ export class Haruki3DEngine {
             uniforms.uAmbientIntensity.value = next.ambient;
           }
           if (uniforms.uShadowThreshold) {
-            uniforms.uShadowThreshold.value = next.shadowThreshold;
+            uniforms.uShadowThreshold.value =
+              lighting?.sekaiShadowThreshold ?? next.shadowThreshold;
           }
           if (uniforms.uShadowWeight) {
             uniforms.uShadowWeight.value = next.shadowWeight;
@@ -5903,12 +5925,6 @@ export class Haruki3DEngine {
             uniforms.uRimDirectionality.value = next.rimDirectionality;
           }
           uniforms.uRimDirection?.value.copy(rimDirection);
-          if (uniforms.uFaceSoftness) {
-            uniforms.uFaceSoftness.value = next.faceSoftness;
-          }
-          if (uniforms.uFaceSdfUseLightDirection) {
-            uniforms.uFaceSdfUseLightDirection.value = next.faceSdfUseLightDirection;
-          }
         }
       });
     }
@@ -6456,7 +6472,7 @@ export class Haruki3DEngine {
               shaderUniforms?.uShadowWidthOverride?.value ?? null,
             shaderValueShadowInfluence:
               shaderUniforms?.uValueShadowInfluence?.value ?? null,
-            shaderLambertEnabled: shaderUniforms?.uLambertEnabled?.value ?? null,
+            shaderLambertEnabled: shaderUniforms?.uUseLambert?.value ?? null,
             shaderSpecularPower: shaderUniforms?.uSpecularPower?.value ?? null,
             shaderRimThreshold: shaderUniforms?.uRimThreshold?.value ?? null,
             shaderControllerRimThreshold:
@@ -6503,6 +6519,21 @@ export class Haruki3DEngine {
   ) {
     this.runtimeDebug.head = [];
     this.currentHairOffset.copy(options.hairController?.offset ?? new THREE.Vector3());
+    this.currentHairHeadTransform = null;
+    const hairHeadTransformPath = options.hairController?.headTransformPath;
+    if (hairHeadTransformPath) {
+      root.traverse((node) => {
+        if (
+          !this.currentHairHeadTransform &&
+          node.userData.pjskTransformPath === hairHeadTransformPath
+        ) {
+          this.currentHairHeadTransform = node;
+        }
+      });
+    }
+    this.currentHairHeadTransform ??= options.hairController?.headTransformName
+      ? this.findNodeByImportedName(root, options.hairController.headTransformName)
+      : null;
     const slotEntries: Array<{
       key: string;
       meshKey: string;
@@ -6535,7 +6566,10 @@ export class Haruki3DEngine {
       const mainTex = await this.loadTexture(slot.mainTex);
       const shadowTex = await this.loadTexture(slot.shadowTex);
       const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      const faceShadowTex = await this.loadTexture(slot.faceShadowTex);
+      const faceShadowTex = await this.loadTexture(
+        slot.faceShadowTex,
+        THREE.NoColorSpace
+      );
       if (!slot.materialKind) {
         throw new Error(`Head material ${slot.materialName ?? slot.materialKey} is missing materialKind.`);
       }
@@ -6730,8 +6764,13 @@ export class Haruki3DEngine {
           shadowColor: headAsset.proxy.hairShadowColor,
           lighting,
           skinTintEnabled: false,
-          hairShadowEnabled: this.isHeadProximityHairShadowEnabled(),
-          lambertEnabled: false,
+          hairShadowEnabled:
+            this.isHeadProximityHairShadowEnabled() &&
+            Boolean(options.hairController) &&
+            lighting?.faceSphereShadowEdge != null &&
+            lighting.faceSphereShadowSmoothness != null &&
+            lighting.faceSphereShadowWeight != null,
+          useLambert: options.hairController ? true : (lighting?.useLambert ?? true),
           headPosition: this.hairHeadPosition,
           bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
           alphaCutoff: HAIR_ALPHA_CUTOFF,
@@ -6757,17 +6796,18 @@ export class Haruki3DEngine {
         material = cloneFaceShaderMaterial(this.faceMaterial, {
           mainTex,
           shadowTex,
+          valueTex,
           faceShadowTex,
           baseColor: headAsset.proxy.faceColor,
           warmColor: headAsset.proxy.faceShadeColor,
           skinColorDefault: headAsset.proxy.skinColorDefault ?? headAsset.proxy.faceColor,
           skinColor1: headAsset.proxy.skinColor1 ?? headAsset.proxy.faceShadeColor,
           skinColor2: headAsset.proxy.skinColor2 ?? headAsset.proxy.faceShadeColor,
+          lighting,
           faceSdfEnabled: false,
         });
         if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceDebugMode) {
           material.uniforms.uFaceDebugMode.value = faceSdfDebugModeToUniform(this.faceSdfDebugMode);
-          material.uniforms.uFaceDebugLightMode.value = faceSdfDebugLightModeToUniform(this.faceSdfDebugLightMode);
         }
         material.side = THREE.FrontSide;
         configureBaseStencilClear(material);
@@ -6887,10 +6927,11 @@ export class Haruki3DEngine {
               ? resolvedEntry.material.uniforms
               : null;
           const faceSdfUv1Available = hasFaceSdfUv1Attribute(mesh);
+          const faceLighting = resolvedEntry.material.userData.pjskLighting as MaterialLightingSettings | undefined;
           const faceSdfCapable =
             resolvedEntry.materialKind === "face_sdf" &&
             Boolean(resolvedEntry.faceShadowTex) &&
-            faceSdfUv1Available;
+            faceLighting?.useFaceSdf !== false;
           if (resolvedEntry.material instanceof THREE.ShaderMaterial && shaderUniforms?.uFaceShadowTex) {
             resolvedEntry.material.userData.pjskFaceSdfCapable = faceSdfCapable;
             resolvedEntry.material.userData.pjskFaceSdfUv1Available = faceSdfUv1Available;
@@ -6926,7 +6967,7 @@ export class Haruki3DEngine {
               resolvedEntry.materialKind === "hair"
                 ? shaderUniforms?.uHairShadowEnabled?.value ?? null
                 : null,
-            shaderLambertEnabled: shaderUniforms?.uLambertEnabled?.value ?? null,
+            shaderLambertEnabled: shaderUniforms?.uUseLambert?.value ?? null,
             shaderBodyDebugMode:
               shaderUniforms?.uBodyDebugMode?.value ?? null,
             shaderSpecularPower: shaderUniforms?.uSpecularPower?.value ?? null,
@@ -6950,11 +6991,7 @@ export class Haruki3DEngine {
             shaderSkinColor2: shaderUniforms?.uSkinColor2?.value
               ? `#${shaderUniforms.uSkinColor2.value.getHexString()}`
               : null,
-            shaderFaceSoftness: shaderUniforms?.uFaceSoftness?.value ?? null,
-            shaderFaceSdfUseLightDirection:
-              shaderUniforms?.uFaceSdfUseLightDirection?.value ?? null,
             shaderFaceDebugMode: shaderUniforms?.uFaceDebugMode?.value ?? null,
-            shaderFaceDebugLightMode: shaderUniforms?.uFaceDebugLightMode?.value ?? null,
             shaderFaceSdfEnabled: shaderUniforms?.uFaceSdfEnabled?.value ?? null,
             faceSdfCapable,
             faceSdfUv1Available,
@@ -7456,8 +7493,24 @@ export class Haruki3DEngine {
     }
   }
 
+  private getFaceShadowLightDirection() {
+    switch (this.faceSdfDebugLightMode) {
+      case "front":
+        return this.faceForwardWorld.clone();
+      case "left":
+        return this.faceRightWorld.clone().negate();
+      case "right":
+        return this.faceRightWorld.clone();
+      case "back":
+        return this.faceForwardWorld.clone().negate();
+      default:
+        return COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
+    }
+  }
+
   private updateShaderFaceBasis() {
     const headNode =
+      this.currentHairHeadTransform ??
       this.findFaceSdfHeadBone() ??
       this.findNodeByImportedName(this.bodySlot, "Head") ??
       this.findNodeByImportedName(this.headSlot, "Head") ??
@@ -7470,6 +7523,7 @@ export class Haruki3DEngine {
     this.faceForwardWorld.set(0, 0, 1).applyQuaternion(this.tempQuaternion).normalize();
     this.faceRightWorld.crossVectors(this.faceUpWorld, this.faceForwardWorld).normalize();
     this.faceUpWorld.crossVectors(this.faceForwardWorld, this.faceRightWorld).normalize();
+    const faceShadowLightDirection = this.getFaceShadowLightDirection();
     normalizeFaceShadowHorizontal(
       this.faceShadowHeadHorizontal,
       -this.faceUpWorld.x,
@@ -7477,8 +7531,8 @@ export class Haruki3DEngine {
     );
     normalizeFaceShadowHorizontal(
       this.faceShadowLightHorizontal,
-      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.x,
-      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.z
+      faceShadowLightDirection.x,
+      faceShadowLightDirection.z
     );
     const headYawDegrees = THREE.MathUtils.radToDeg(
       Math.atan2(this.faceForwardWorld.x, this.faceForwardWorld.z)
@@ -7494,15 +7548,9 @@ export class Haruki3DEngine {
     headNode.localToWorld(this.hairHeadPosition);
     this.runtimeDebug.hairShadowOffset = vectorDebugSnapshot(this.currentHairOffset);
     this.runtimeDebug.hairShadowWorldPosition = vectorDebugSnapshot(this.hairHeadPosition);
-    updateSekaiFaceBasis(
-      this.faceMaterial,
-      this.faceRightWorld,
-      this.faceUpWorld,
-      this.faceForwardWorld
-    );
     updateSekaiFaceShadowParameters(
       this.faceMaterial,
-      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+      faceShadowLightDirection,
       this.headDotDirectionalLight,
       COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
       COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE
@@ -7518,19 +7566,13 @@ export class Haruki3DEngine {
           if (!(material instanceof THREE.ShaderMaterial)) {
             continue;
           }
-          if (material.uniforms.uFaceRight) {
-            updateSekaiFaceBasis(
-              material,
-              this.faceRightWorld,
-              this.faceUpWorld,
-              this.faceForwardWorld
-            );
+          if (material.uniforms.uHeadDotDirectionalLight) {
             updateSekaiFaceShadowParameters(
               material,
-              COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+              faceShadowLightDirection,
               this.headDotDirectionalLight,
-              COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
-              COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE
+              (material.uniforms.uUseFaceShadowLimiter?.value ?? 1.0) > 0.5,
+              material.uniforms.uFaceShadowLimitRange?.value ?? 0.0
             );
           }
           if (material.uniforms.uHeadPosition) {

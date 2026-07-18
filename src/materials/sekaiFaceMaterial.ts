@@ -1,6 +1,5 @@
 export {
   createSekaiFaceMaterial,
-  updateSekaiFaceBasis,
   updateSekaiFaceMaterial,
   updateSekaiFaceShadowParameters,
 } from "./sekaiCharacterShader";

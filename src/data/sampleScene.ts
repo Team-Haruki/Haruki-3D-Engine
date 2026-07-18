@@ -16,8 +16,6 @@ export type PreviewLightState = {
   rimIntensity: number;
   rimThreshold: number;
   rimDirectionality: number;
-  faceSoftness: number;
-  faceSdfUseLightDirection: number;
   characterHeight: number;
 };
 
@@ -124,6 +122,21 @@ export type MaterialLightingSettings = {
   threshold: number;
   lightInfluence: number;
   lightInfluenceForEyeHighlight: number;
+  sekaiShadowThreshold?: number | null;
+  useLambert?: boolean | null;
+  useValueTex?: boolean | null;
+  useFaceSdf?: boolean | null;
+  useSkinColor?: boolean | null;
+  skinMaskMode?: number | null;
+  faceSdfMirror?: number | null;
+  faceSdfBias?: number | null;
+  useFaceShadowLimiter?: boolean | null;
+  rangeLimit?: number | null;
+  faceSkinShadowStrength?: number | null;
+  faceSphereShadowEdge?: number | null;
+  faceSphereShadowSmoothness?: number | null;
+  faceSphereShadowWeight?: number | null;
+  hairShadow?: boolean | null;
 };
 
 export type BodyMaterialSlot = {
@@ -269,8 +282,6 @@ export const previewLightDefaults: PreviewLightState = {
   rimIntensity: 0.18,
   rimThreshold: 0.18,
   rimDirectionality: 0.85,
-  faceSoftness: 0.96,
-  faceSdfUseLightDirection: 0.5,
   characterHeight: 1,
 };
 
