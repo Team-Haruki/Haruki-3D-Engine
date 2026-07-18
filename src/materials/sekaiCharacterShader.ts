@@ -372,7 +372,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
           } else if (uBodyDebugMode > 10.5 && uBodyDebugMode < 11.5) {
             debugValue = halfNdl;
           } else if (uBodyDebugMode > 11.5 && uBodyDebugMode < 12.5) {
-            debugValue = hAdjustedShadowBand;
+            debugValue = officialShadowBand;
           }
           gl_FragColor = vec4(outputColor(vec3(debugValue)), 1.0);
           return;
