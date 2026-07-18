@@ -1298,3 +1298,18 @@ test("composed spring setup keeps duplicate head and hair prefab paths part scop
   assert.match(springSource, /target\.runtimePartIndex \?\? bone\.runtimePartIndex/);
   assert.match(springSource, /partPathKey\(runtimePartIndex, sourcePath\)/);
 });
+
+test("capture returns the rendered canvas directly instead of racing a page screenshot", () => {
+  const harnessSource = fs.readFileSync(
+    path.join(repoRoot, "src/captureHarness.ts"),
+    "utf8"
+  );
+  const serverSource = fs.readFileSync(
+    path.join(repoRoot, "capture-server.mjs"),
+    "utf8"
+  );
+
+  assert.match(harnessSource, /engine\.getCanvas\(\)\.toDataURL\("image\/png"\)/);
+  assert.match(serverSource, /data:image\/png;base64,/);
+  assert.doesNotMatch(serverSource, /Page\.captureScreenshot/);
+});

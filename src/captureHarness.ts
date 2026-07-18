@@ -25,7 +25,7 @@ type CaptureWindow = Window & {
   __PJSK_CAPTURE_SNAPSHOT__?: unknown;
   __HARUKI_CAPTURE_REQUEST__?: (
     request: HarukiCaptureRolePartsRequest
-  ) => Promise<HarukiCaptureRolePartsResult>;
+  ) => Promise<HarukiCaptureRolePartsResult & { pngDataUrl: string }>;
 };
 
 type CaptureCharacterYawMode = CharacterYawMode | "face-camera";
@@ -351,29 +351,16 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       ...result,
       snapshots,
     };
-    await waitForAnimationFrames(2);
+    const pngDataUrl = engine.getCanvas().toDataURL("image/png");
     getCaptureWindow().__PJSK_CAPTURE_SNAPSHOT__ = snapshots;
     getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
     document.body.dataset.captureReady = "true";
-    return resultWithTrace;
+    return { ...resultWithTrace, pngDataUrl };
   } catch (error) {
     setCaptureError(error);
     throw error;
   }
 };
-
-function waitForAnimationFrames(count: number) {
-  return new Promise<void>((resolve) => {
-    const step = (remaining: number) => {
-      if (remaining <= 0) {
-        resolve();
-        return;
-      }
-      requestAnimationFrame(() => step(remaining - 1));
-    };
-    step(count);
-  });
-}
 
 async function bootstrapCapture() {
   const config = readCaptureConfig();

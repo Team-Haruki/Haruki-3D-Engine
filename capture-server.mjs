@@ -813,17 +813,14 @@ class CaptureRuntimeSession {
     if (result.exceptionDetails) {
       throw new Error(result.exceptionDetails.text ?? "Capture request failed.");
     }
-    await this.client.send("Runtime.evaluate", {
-      expression: "new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
-      awaitPromise: true,
-    }, request.timeoutMs);
-    const image = await this.client.send("Page.captureScreenshot", {
-      format: "png",
-      fromSurface: true,
-    }, request.timeoutMs);
+    const capture = result.result?.value;
+    const pngDataUrl = capture?.pngDataUrl;
+    if (typeof pngDataUrl !== "string" || !pngDataUrl.startsWith("data:image/png;base64,")) {
+      throw new Error("Capture page did not return PNG canvas data.");
+    }
     return {
-      png: Buffer.from(image.data, "base64"),
-      snapshots: result.result?.value?.snapshots ?? null,
+      png: Buffer.from(pngDataUrl.slice("data:image/png;base64,".length), "base64"),
+      snapshots: capture.snapshots ?? null,
     };
   }
 }

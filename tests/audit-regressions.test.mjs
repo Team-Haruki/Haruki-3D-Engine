@@ -145,10 +145,14 @@ test("capture runtime forwards the exact head source into the browser", async ()
           -1
         );
         browserRequest = JSON.parse(serialized);
-        return { result: { value: { snapshots: null } } };
-      }
-      if (method === "Page.captureScreenshot") {
-        return { data: Buffer.from("png").toString("base64") };
+        return {
+          result: {
+            value: {
+              snapshots: null,
+              pngDataUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}`,
+            },
+          },
+        };
       }
       return {};
     },
