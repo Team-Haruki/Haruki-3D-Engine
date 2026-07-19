@@ -1,7 +1,7 @@
 import brotliWasm from "brotli-wasm";
 import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
 import { mergePartRuntimeCore } from "../../part-runtime-core.mjs";
-import type { RuntimeCombinedCharacterAsset } from "../engine/Haruki3DEngine";
+import type { RuntimeCombinedCharacterAsset } from "./runtimeTypes";
 import { CustomWardrobeController } from "../parts/customWardrobeController";
 import {
   getCharacterIndexEntries,

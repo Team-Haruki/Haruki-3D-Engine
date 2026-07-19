@@ -263,14 +263,15 @@ test("runtime package URLs cannot escape their region root", () => {
 test("multi-region capture and runtime candidate keys stay consistent", () => {
   const harnessSource = readSource("src/captureHarness.ts");
   const loaderSource = readSource("src/runtime/runtimePackageLoader.ts");
-  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const captureTypesSource = readSource("src/capture/captureTypes.ts");
+  const captureAdapterSource = readSource("src/capture/captureAdapter.ts");
 
   assert.match(harnessSource, /let settledCapturePackageKey: string \| null = null;/);
   assert.match(harnessSource, /settledCapturePackageKey === packageKey/);
   assert.match(harnessSource, /settledCapturePackageKey = packageKey;/);
   assert.match(loaderSource, /return !seen\.has\(entry\.packagePath\);/);
-  assert.match(engineSource, /warmupMs\?: number;/);
-  assert.match(engineSource, /warmupMs: request\.warmupMs,/);
+  assert.match(captureTypesSource, /warmupMs\?: number;/);
+  assert.match(captureAdapterSource, /warmupMs: request\.warmupMs,/);
 });
 
 test("exact repeated selections preserve spring state", () => {
@@ -327,7 +328,7 @@ test("same raw head id requires an exact package instead of slot priority", () =
   assert.doesNotMatch(wardrobeSource, /findHeadRegistryEntry/);
   assert.match(composerSource, /headPackagePath: selectedHeadEntry\.packagePath/);
   assert.match(composerSource, /encodeURIComponent\(resolvedSelection\.headPackagePath\)/);
-  assert.match(engineSource, /headPackagePath: request\.headPackagePath \?\? null/);
+  assert.match(engineSource, /headPackagePath: normalized\.headPackagePath/);
 });
 
 test("capture output and idle cleanup use request-owned paths", () => {

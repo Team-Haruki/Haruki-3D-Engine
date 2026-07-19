@@ -5,7 +5,7 @@ import {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
   evaluateSekaiFaceSphereShadow,
-} from "../dist/haruki-3d-engine.js";
+} from "../dist/haruki-3d-engine-internal.js";
 
 test("official base toon uses half Lambert only when enabled", () => {
   assert.equal(evaluateSekaiBaseShadow({

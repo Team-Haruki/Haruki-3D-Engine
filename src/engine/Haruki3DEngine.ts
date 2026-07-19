@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import {
   ensureRoleRuntimePackage,
   fetchRuntimeMessagePack,
@@ -52,6 +51,11 @@ import type {
   RuntimePartType,
 } from "../parts/runtimePartComposer";
 import { runtimeRoleId } from "../parts/runtimePartComposer";
+import {
+  normalizeHarukiRenderRecipe,
+  type HarukiRuntimeRenderRecipe,
+} from "../kernel/renderRecipe";
+import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
 
 const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241);
 const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
@@ -161,14 +165,31 @@ export type PjskPresentationMode = "interactive" | "capture";
 export type PjskCameraPreset = "default" | "capture";
 export type PjskCameraProfile = "official-default" | "full-body";
 
+export type HarukiCameraControls = {
+  readonly target: THREE.Vector3;
+  readonly minPolarAngle: number;
+  readonly maxPolarAngle: number;
+  update(): void;
+  dispose(): void;
+};
+
+export type HarukiCameraControlsFactory = (options: {
+  camera: THREE.PerspectiveCamera;
+  canvas: HTMLCanvasElement;
+  target: THREE.Vector3;
+  onChange: (target: THREE.Vector3) => void;
+}) => HarukiCameraControls;
+
 export type PjskEngineOptions = {
-  container: HTMLElement;
+  container?: HTMLElement;
+  canvas?: HTMLCanvasElement;
   initialLight: PreviewLightState;
   presentationMode?: PjskPresentationMode;
   cameraPreset?: PjskCameraPreset;
   cameraProfile?: PjskCameraProfile;
   autoRender?: boolean;
   manageResize?: boolean;
+  controlsFactory?: HarukiCameraControlsFactory;
 };
 
 export type PjskViewerEngineOptions = PjskEngineOptions;
@@ -180,58 +201,9 @@ export type HarukiRuntimePackageRequest = RuntimePackageLoadOptions & {
   applyFaceMotion?: boolean;
 };
 
-export type HarukiCaptureRolePartsRequest = {
-  runtimeBaseUrl?: string;
-  region?: string | null;
-  roleId: string;
-  bodyCostume3dId: number;
-  headCostume3dId: number;
-  headPackagePath?: string | null;
-  hairCostume3dId: number;
-  headOptionalCostume3dId?: number | null;
-  imageId?: string;
-  phase?: number;
-  warmupMs?: number;
-  warmupFrames?: number;
-  warmupMode?: "animation" | "runtime";
-  cameraPreset?: PjskCameraPreset;
-  cameraProfile?: PjskCameraProfile;
-  characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
-  traceUtjBones?: string[];
-  traceUtjMaxEvents?: number;
-  springDebugBones?: string[];
-  springDebugAllOffsets?: boolean;
-  bodyDebugMode?: BodyDebugMode;
-  faceSdfEnabled?: boolean;
-  faceSdfDebugMode?: FaceSdfDebugMode;
-  faceSdfDebugLightMode?: FaceSdfDebugLightMode;
-  projectedShadow?: ProjectedShadowSettingsInput;
-};
-
-export type HarukiPrepareCaptureFrameRequest = {
-  phase?: number;
-  clip?: "motion" | "motion_loop";
-  warmupMs?: number;
-  warmupFrames?: number;
-  warmupMode?: "animation" | "runtime";
-  cameraPreset?: PjskCameraPreset;
-  cameraProfile?: PjskCameraProfile;
-  characterYawMode?: "0" | "45" | "-45" | "90" | "-90" | "180" | "face-camera";
-  traceUtjBones?: string[];
-  traceUtjMaxEvents?: number;
-  springDebugBones?: string[];
-  springDebugAllOffsets?: boolean;
-  bodyDebugMode?: BodyDebugMode;
-  faceSdfEnabled?: boolean;
-  faceSdfDebugMode?: FaceSdfDebugMode;
-  faceSdfDebugLightMode?: FaceSdfDebugLightMode;
-  projectedShadow?: ProjectedShadowSettingsInput;
-};
-
-export type HarukiCaptureRolePartsResult = {
+export type HarukiRenderResult = {
   selection: CustomPartSelection;
   combinedCharacter: RuntimeCombinedCharacterAsset;
-  snapshots: HarukiEngineSnapshots;
 };
 
 export type HarukiEngineSnapshots = {
@@ -529,20 +501,6 @@ export type SpringBoneRuntimeSnapshot = {
   vrmSpringBoneManagerPresent: boolean;
   utjRuntime?: UtjSpringBoneRuntimeSnapshot | null;
   source: "PJSK_sekai_runtime" | "none";
-};
-
-export type RuntimeCombinedCharacterAsset = {
-  id: string;
-  displayName: string;
-  meshUrl: string;
-  prefabRuntimeMeshUrl?: string;
-  unityRuntimeJsonUrl?: string;
-  unityRuntimeJsonPath?: string;
-  unityMotionJsonUrl?: string;
-  unityMotionJsonPath?: string;
-  bodyAsset: BodyAssetManifest;
-  headAsset: HeadAssetManifest;
-  runtimeExtension?: unknown;
 };
 
 type CombinedCharacterImportOptions = {
@@ -3955,11 +3913,13 @@ class CharacterProjectedShadowController {
 }
 
 export class Haruki3DEngine {
-  private readonly container: HTMLElement;
+  private readonly container: HTMLElement | null;
+  private readonly ownsCanvas: boolean;
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly controls: OrbitControls;
+  private readonly controls: HarukiCameraControls | null;
+  private readonly cameraTarget = new THREE.Vector3();
   private readonly autoRender: boolean;
   private readonly manageResize: boolean;
   private readonly clock = new THREE.Clock();
@@ -4085,36 +4045,55 @@ export class Haruki3DEngine {
       throw new Error("Missing initial light state for Haruki 3D engine.");
     }
     const light = options.initialLight;
-    this.container = options.container;
+    if (!options.container && !options.canvas) {
+      throw new Error("Haruki 3D engine requires a container or canvas.");
+    }
+    this.container = options.container ?? null;
+    this.ownsCanvas = options.canvas === undefined;
     this.autoRender = options.autoRender ?? true;
-    this.manageResize = options.manageResize ?? true;
+    this.manageResize = options.manageResize ?? options.canvas === undefined;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color("#7f8d95");
     this.scene.fog = new THREE.Fog("#7f8d95", 5.5, 15);
 
-    const width = Math.max(this.container.clientWidth, 320);
-    const height = Math.max(this.container.clientHeight, 320);
+    const viewport = options.canvas ?? options.container!;
+    const viewportMinimum = this.ownsCanvas ? 320 : 1;
+    const width = Math.max(viewport.clientWidth, viewportMinimum);
+    const height = Math.max(viewport.clientHeight, viewportMinimum);
     this.camera = new THREE.PerspectiveCamera(DEFAULT_CAMERA_FOV, width / height, 0.1, 100);
     this.camera.position.copy(getDefaultCameraPosition(light.characterHeight));
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      stencil: true,
+      canvas: options.canvas,
+    });
     this.renderer.autoClearStencil = true;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(width, height);
+    this.renderer.setSize(width, height, this.ownsCanvas);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.container.appendChild(this.renderer.domElement);
+    if (this.container && this.renderer.domElement.parentElement !== this.container) {
+      this.container.appendChild(this.renderer.domElement);
+    }
     this.updateCaptureBackgroundTexture();
 
-    this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.minPolarAngle = THREE.MathUtils.degToRad(82);
-    this.controls.maxPolarAngle = THREE.MathUtils.degToRad(100);
-    this.controls.target.copy(getDefaultCameraTarget(light.characterHeight));
-    this.controls.addEventListener("change", () => {
-      this.cameraDebugChangeCallback?.();
-    });
-    this.controls.update();
+    this.cameraTarget.copy(getDefaultCameraTarget(light.characterHeight));
+    if (options.controlsFactory) {
+      this.controls = options.controlsFactory({
+        camera: this.camera,
+        canvas: this.renderer.domElement,
+        target: this.cameraTarget,
+        onChange: (target) => {
+          this.cameraTarget.copy(target);
+          this.cameraDebugChangeCallback?.();
+        },
+      });
+      this.controls.update();
+    } else {
+      this.controls = null;
+      this.camera.lookAt(this.cameraTarget);
+    }
 
     this.directionalLight = new THREE.DirectionalLight(
       "#fffaf2",
@@ -4379,28 +4358,7 @@ export class Haruki3DEngine {
     this.updateShaderFaceBasis();
   }
 
-  private applyCaptureCharacterYawMode(
-    mode: HarukiPrepareCaptureFrameRequest["characterYawMode"]
-  ) {
-    switch (mode) {
-      case "45":
-      case "-45":
-      case "90":
-      case "-90":
-      case "180":
-      case "0":
-        this.setCharacterYawDegrees(Number(mode));
-        return;
-      case "face-camera":
-        this.faceCharacterTowardCamera();
-        return;
-      case undefined:
-      default:
-        return;
-    }
-  }
-
-  private faceCharacterTowardCamera() {
+  faceCharacterTowardCamera() {
     this.characterRoot.updateMatrixWorld(true);
     const root = this.currentBodyAnimationRoot ?? this.characterRoot;
     root.updateMatrixWorld(true);
@@ -4900,7 +4858,7 @@ export class Haruki3DEngine {
 
   getCameraDebugSnapshot(): RuntimeCameraDebug {
     const position = this.camera.position;
-    const target = this.controls.target;
+    const target = this.controls?.target ?? this.cameraTarget;
     const offset = position.clone().sub(target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
     const costumeShopPose = this.currentCameraPreset === "capture"
@@ -4944,8 +4902,8 @@ export class Haruki3DEngine {
       fovDegrees: Number(this.camera.fov.toFixed(3)),
       aspect: Number(this.camera.aspect.toFixed(4)),
       zoom: Number(this.camera.zoom.toFixed(4)),
-      minPolarDegrees: Number(THREE.MathUtils.radToDeg(this.controls.minPolarAngle).toFixed(3)),
-      maxPolarDegrees: Number(THREE.MathUtils.radToDeg(this.controls.maxPolarAngle).toFixed(3)),
+      minPolarDegrees: Number(THREE.MathUtils.radToDeg(this.controls?.minPolarAngle ?? THREE.MathUtils.degToRad(82)).toFixed(3)),
+      maxPolarDegrees: Number(THREE.MathUtils.radToDeg(this.controls?.maxPolarAngle ?? THREE.MathUtils.degToRad(100)).toFixed(3)),
       characterHeight: Number(this.characterHeight.toFixed(4)),
     };
   }
@@ -5233,12 +5191,13 @@ export class Haruki3DEngine {
   }
 
   setViewportSize(width: number, height: number) {
-    const nextWidth = Math.max(Math.trunc(width) || 0, 320);
-    const nextHeight = Math.max(Math.trunc(height) || 0, 320);
+    const viewportMinimum = this.ownsCanvas ? 320 : 1;
+    const nextWidth = Math.max(Math.trunc(width) || 0, viewportMinimum);
+    const nextHeight = Math.max(Math.trunc(height) || 0, viewportMinimum);
     this.camera.aspect = nextWidth / nextHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(nextWidth, nextHeight);
+    this.renderer.setSize(nextWidth, nextHeight, this.ownsCanvas);
     this.updateCaptureBackgroundTexture(nextWidth, nextHeight);
   }
 
@@ -5348,6 +5307,14 @@ export class Haruki3DEngine {
     });
   }
 
+  async loadRenderRecipe(
+    recipe: HarukiRuntimeRenderRecipe
+  ): Promise<HarukiRenderResult> {
+    return this.enqueueCustomSelectionMutation(() =>
+      this.loadRenderRecipeInternal(recipe)
+    );
+  }
+
   private enqueueCustomSelectionMutation<T>(
     operation: () => Promise<T>
   ): Promise<T> {
@@ -5394,137 +5361,56 @@ export class Haruki3DEngine {
     return combined;
   }
 
-  async captureRoleParts(
-    request: HarukiCaptureRolePartsRequest
-  ): Promise<HarukiCaptureRolePartsResult> {
-    return this.enqueueCustomSelectionMutation(() =>
-      this.captureRolePartsInternal(request)
-    );
-  }
+  private async loadRenderRecipeInternal(
+    recipe: HarukiRuntimeRenderRecipe
+  ): Promise<HarukiRenderResult> {
+    const baseUrl = String(recipe.baseUrl ?? "").trim();
+    if (!baseUrl) {
+      throw new Error("baseUrl is required to load a render recipe.");
+    }
+    const normalized = normalizeHarukiRenderRecipe(recipe);
+    const requestedRole = parseRuntimeRoleId(normalized.roleId);
+    const nextRoleId = runtimeRoleId(requestedRole.characterId, requestedRole.unit);
+    const currentPackage = this.currentLoadedRuntimePackage;
+    const currentBaseUrl = currentPackage?.partSet?.baseUrl ?? null;
+    const currentRoleId = currentPackage?.wardrobe?.getActiveRoleId() ?? null;
 
-  private async captureRolePartsInternal(
-    request: HarukiCaptureRolePartsRequest
-  ): Promise<HarukiCaptureRolePartsResult> {
+    if (!currentPackage?.wardrobe || currentBaseUrl !== baseUrl || currentRoleId !== nextRoleId) {
+      await this.loadRuntimePackage({
+        baseUrl,
+        roleId: nextRoleId,
+        deferDefaultSelection: true,
+        applyDefaultAnimation: false,
+        applyFaceMotion: false,
+      });
+    }
+
     const wardrobe = this.currentLoadedRuntimePackage?.wardrobe;
     if (!wardrobe) {
       throw new Error("No custom part package is loaded.");
     }
-    const role = parseRuntimeRoleId(request.roleId);
-    const activeRoleId = wardrobe.getActiveRoleId();
-    const nextRoleId = runtimeRoleId(role.characterId, role.unit);
+    if (wardrobe.getActiveRoleId() !== nextRoleId) {
+      wardrobe.selectRole(requestedRole.characterId, requestedRole.unit);
+    }
     const partSet = wardrobe.getPartPackageSet();
-    if (activeRoleId !== nextRoleId) {
-      wardrobe.selectRole(role.characterId, role.unit);
-    }
     if (partSet) {
-      await ensureRoleRuntimePackage(partSet, role.characterId, role.unit);
+      await ensureRoleRuntimePackage(partSet, requestedRole.characterId, requestedRole.unit);
     }
+
     const selection: CustomPartSelection = {
-      characterId: role.characterId,
-      unit: role.unit,
-      bodyCostume3dId: request.bodyCostume3dId,
-      headCostume3dId: request.headCostume3dId,
-      headPackagePath: request.headPackagePath ?? null,
-      hairCostume3dId: request.hairCostume3dId,
-      headOptionalCostume3dId: request.headOptionalCostume3dId ?? null,
+      characterId: requestedRole.characterId,
+      unit: requestedRole.unit,
+      bodyCostume3dId: normalized.bodyCostume3dId,
+      headCostume3dId: normalized.headCostume3dId,
+      headPackagePath: normalized.headPackagePath,
+      hairCostume3dId: normalized.hairCostume3dId,
+      headOptionalCostume3dId: normalized.headOptionalCostume3dId,
       origin: "custom",
     };
-    const combinedCharacter = await this.applyCustomSelection(selection);
-    await this.prepareCaptureFrame({
-      phase: request.phase,
-      clip: "motion_loop",
-      warmupMs: request.warmupMs,
-      warmupFrames: request.warmupFrames,
-      warmupMode: request.warmupMode,
-      cameraPreset: request.cameraPreset,
-      cameraProfile: request.cameraProfile,
-      characterYawMode: request.characterYawMode,
-      bodyDebugMode: request.bodyDebugMode,
-      faceSdfEnabled: request.faceSdfEnabled,
-      faceSdfDebugMode: request.faceSdfDebugMode,
-      faceSdfDebugLightMode: request.faceSdfDebugLightMode,
-      projectedShadow: request.projectedShadow,
-      traceUtjBones: request.traceUtjBones,
-      traceUtjMaxEvents: request.traceUtjMaxEvents,
-      springDebugBones: request.springDebugBones,
-      springDebugAllOffsets: request.springDebugAllOffsets,
-    });
     return {
       selection,
-      combinedCharacter,
-      snapshots: this.getSnapshots({
-        springDebugBones: request.springDebugBones,
-        springDebugAllOffsets: request.springDebugAllOffsets,
-      }),
+      combinedCharacter: await this.applyCustomSelection(selection),
     };
-  }
-
-  async prepareCaptureFrame(request: HarukiPrepareCaptureFrameRequest = {}) {
-    this.setPresentationMode("capture");
-    this.setSpringRuntimeMode("unity-prefab");
-    if (request.bodyDebugMode !== undefined) {
-      this.setBodyDebugMode(request.bodyDebugMode);
-    }
-    if (request.faceSdfEnabled !== undefined) {
-      this.setFaceSdfEnabled(request.faceSdfEnabled);
-    }
-    if (request.faceSdfDebugMode !== undefined) {
-      this.setFaceSdfDebugMode(request.faceSdfDebugMode);
-    }
-    if (request.faceSdfDebugLightMode !== undefined) {
-      this.setFaceSdfDebugLightMode(request.faceSdfDebugLightMode);
-    }
-    if (request.projectedShadow !== undefined) {
-      this.setProjectedShadowSettings(request.projectedShadow);
-    }
-    this.setUtjSpringBoneTraceFilters(
-      request.traceUtjBones ?? [],
-      request.traceUtjMaxEvents
-    );
-    this.setAnimationPaused(true);
-
-    const phase = THREE.MathUtils.clamp(
-      Number.isFinite(request.phase) ? request.phase! : 0.5,
-      0,
-      1
-    );
-    const clip = request.clip ?? "motion_loop";
-    const warmupFrames = Math.max(Math.trunc(request.warmupFrames ?? 0), 0);
-    const warmupMs = Math.max(Math.trunc(request.warmupMs ?? 0), 0);
-    const warmupMode = request.warmupMode ?? "animation";
-    const advanceWarmupAnimation = warmupMode === "animation";
-    const duration = Math.max(this.currentAnimationDuration, 0);
-    const seekTargetPhase = (targetPhase: number) => clip === "motion"
-      ? this.seekAnimationPhase(targetPhase)
-      : this.seekAnimationLoopPhase(targetPhase);
-    const startPhase = advanceWarmupAnimation && warmupFrames > 0 && duration > 0
-      ? THREE.MathUtils.euclideanModulo(
-        phase - warmupFrames / (60 * duration),
-        1
-      )
-      : phase;
-
-    seekTargetPhase(startPhase);
-
-    if (warmupFrames > 0) {
-      this.setAnimationPaused(!advanceWarmupAnimation);
-      for (let index = 0; index < warmupFrames; index += 1) {
-        this.stepCharacterDynamics(1 / 60, advanceWarmupAnimation);
-        this.updateProjectedShadows();
-      }
-      this.setAnimationPaused(true);
-    } else if (warmupMs > 0) {
-      this.setAnimationPaused(warmupMode === "runtime");
-      await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, warmupMs);
-      });
-      this.setAnimationPaused(true);
-    }
-
-    this.applyCameraPreset(request.cameraPreset ?? "capture", request.cameraProfile);
-    this.applyCaptureCharacterYawMode(request.characterYawMode);
-    this.stepCaptureFrame(0, false);
-    this.renderFrame();
   }
 
   private async applyCustomRoleDefaultMotion(
@@ -5939,13 +5825,29 @@ export class Haruki3DEngine {
     if (this.manageResize) {
       window.removeEventListener("resize", this.handleResize);
     }
-    this.controls.dispose();
+    this.controls?.dispose();
     this.captureBackgroundTexture?.dispose();
     this.renderer.dispose();
-    this.container.replaceChildren();
+    if (this.ownsCanvas && this.renderer.domElement.parentElement === this.container) {
+      this.renderer.domElement.remove();
+    }
   }
 
   private addSceneReference() {
+  }
+
+  private setCameraTarget(target: THREE.Vector3) {
+    this.cameraTarget.copy(target);
+    this.controls?.target.copy(target);
+  }
+
+  private syncCameraTarget() {
+    if (this.controls) {
+      this.controls.update();
+      this.cameraTarget.copy(this.controls.target);
+      return;
+    }
+    this.camera.lookAt(this.cameraTarget);
   }
 
   private applyCharacterHeight(height: number) {
@@ -5955,9 +5857,9 @@ export class Haruki3DEngine {
     }
     this.characterHeight = nextHeight;
     this.characterRoot.scale.setScalar(nextHeight);
-    this.controls.target.copy(getDefaultCameraTarget(nextHeight));
+    this.setCameraTarget(getDefaultCameraTarget(nextHeight));
     this.camera.position.copy(getDefaultCameraPosition(nextHeight));
-    this.controls.update();
+    this.syncCameraTarget();
   }
 
   applyCameraPreset(preset: PjskCameraPreset, profile: PjskCameraProfile = "full-body") {
@@ -5965,19 +5867,19 @@ export class Haruki3DEngine {
     if (preset === "capture") {
       this.currentCameraProfile = profile;
       const pose = calculateCostumeShopCameraPose(getCostumeShopCameraState(profile));
-      this.controls.target.copy(pose.target);
+      this.setCameraTarget(pose.target);
       this.camera.position.copy(pose.position);
       this.camera.fov = COSTUME_SHOP_CAMERA.fov;
     } else {
       this.currentCameraProfile = null;
       const target = getDefaultCameraTarget(this.characterHeight);
       const offset = DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(this.characterHeight);
-      this.controls.target.copy(target);
+      this.setCameraTarget(target);
       this.camera.position.copy(target).add(offset);
       this.camera.fov = DEFAULT_CAMERA_FOV;
     }
     this.camera.updateProjectionMatrix();
-    this.controls.update();
+    this.syncCameraTarget();
     this.cameraDebugChangeCallback?.();
   }
 
@@ -5985,14 +5887,15 @@ export class Haruki3DEngine {
     if (!Number.isFinite(amount) || amount === 0) {
       return;
     }
-    const offset = this.camera.position.clone().sub(this.controls.target);
-    const forward = this.controls.target.clone().sub(this.camera.position).normalize();
+    const target = this.controls?.target ?? this.cameraTarget;
+    const offset = this.camera.position.clone().sub(target);
+    const forward = target.clone().sub(this.camera.position).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(forward, up).normalize();
     const shift = right.multiplyScalar(CAPTURE_CAMERA_LATERAL_SHIFT_SCALE * amount * this.characterHeight);
-    this.controls.target.add(shift);
+    this.setCameraTarget(target.clone().add(shift));
     this.camera.position.add(shift);
-    this.controls.update();
+    this.syncCameraTarget();
     this.cameraDebugChangeCallback?.();
     void offset;
   }
@@ -7451,18 +7354,20 @@ export class Haruki3DEngine {
   }
 
   private handleResize() {
-    const width = Math.max(this.container.clientWidth, 320);
-    const height = Math.max(this.container.clientHeight, 320);
+    const viewport = this.container ?? this.renderer.domElement;
+    const width = Math.max(viewport.clientWidth, 320);
+    const height = Math.max(viewport.clientHeight, 320);
     this.setViewportSize(width, height);
   }
 
   private updateCaptureBackgroundTexture(width?: number, height?: number) {
+    const viewport = this.container ?? this.renderer.domElement;
     const textureWidth = Math.max(
-      Math.round(width ?? this.container.clientWidth),
+      Math.round(width ?? viewport.clientWidth),
       320
     );
     const textureHeight = Math.max(
-      Math.round(height ?? this.container.clientHeight),
+      Math.round(height ?? viewport.clientHeight),
       320
     );
     this.captureBackgroundTexture?.dispose();
@@ -7642,7 +7547,7 @@ export class Haruki3DEngine {
     const delta = this.clock.getDelta();
     const elapsedTime = this.clock.elapsedTime;
     this.stepRuntimeFrame(delta, { advanceAnimation: true, elapsedTime });
-    this.controls.update();
+    this.controls?.update();
     this.renderFrame();
     this.animationFrame = requestAnimationFrame(() => this.render());
   }

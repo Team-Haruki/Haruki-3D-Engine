@@ -4,9 +4,14 @@ import { fileURLToPath } from "node:url";
 export default defineConfig({
   build: {
     lib: {
-      entry: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+      entry: {
+        index: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+        internal: fileURLToPath(new URL("./src/internal.ts", import.meta.url)),
+      },
       formats: ["es"],
-      fileName: () => "haruki-3d-engine.js",
+      fileName: (_format, entryName) => entryName === "index"
+        ? "haruki-3d-engine.js"
+        : "haruki-3d-engine-internal.js",
     },
     rollupOptions: {
       external: ["three", "@pixiv/three-vrm"],

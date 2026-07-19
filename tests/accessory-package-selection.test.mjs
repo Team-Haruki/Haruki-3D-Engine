@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CustomWardrobeController } from "../dist/haruki-3d-engine.js";
+import { CustomWardrobeController } from "../dist/haruki-3d-engine-internal.js";
 
 function makePartSet(registry) {
   return {

@@ -188,6 +188,10 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
     path.join(repoRoot, "src/captureHarness.ts"),
     "utf8"
   );
+  const captureAdapterSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureAdapter.ts"),
+    "utf8"
+  );
 
   assert.ok(loaderSource.includes("parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}"));
   assert.ok(loaderSource.includes("parts/compat/by-unit/${runtimePathUnitSegment(unit)}/head-hair-compatibility.msgpack.br"));
@@ -195,9 +199,9 @@ test("runtime package loader supports role-scoped registries and lazy compatibil
   assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head", entry.headCostume3dId, entry.unit))'));
   assert.ok(loaderSource.includes('addEntry(findRegistryEntry(entry.characterId, "head_optional", entry.headCostume3dId, entry.unit))'));
   assert.ok(wardrobeSource.includes("ensureCompatibility?: (selection: CustomPartSelection) => Promise<void>;"));
-  assert.ok(captureHarnessSource.includes("captureRuntimePackageKey"));
-  assert.ok(captureHarnessSource.includes("const packageKey = `${baseUrl}|${roleId}`;"));
-  assert.ok(captureHarnessSource.includes("roleId,"));
+  assert.ok(captureHarnessSource.includes("const packageKey = `${baseUrl}|${request.roleId}`;"));
+  assert.ok(captureAdapterSource.includes("await this.engine.loadRenderRecipe"));
+  assert.ok(captureAdapterSource.includes("roleId: request.roleId"));
 });
 
 test("runtime part composer treats head_optional rows as official preset heads", () => {
@@ -275,6 +279,14 @@ test("persistent capture server propagates config defaults into role parts captu
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const captureTypesSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureTypes.ts"),
+    "utf8"
+  );
+  const captureAdapterSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureAdapter.ts"),
+    "utf8"
+  );
 
   assert.match(serverSource, /defaultPhase/);
   assert.match(serverSource, /defaultCameraPreset/);
@@ -292,13 +304,13 @@ test("persistent capture server propagates config defaults into role parts captu
   assert.match(harnessSource, /faceSdfDebugMode: request\.faceSdfDebugMode \?\? config\.faceSdfDebugMode/);
   assert.match(serverSource, /faceSdfEnabled: input\.faceSdfEnabled === undefined\s+\? defaultFaceSdfEnabled\s+: readBoolean\(input\.faceSdfEnabled\)/);
   assert.match(serverSource, /faceSdfDebugMode: normalizeFaceSdfDebugMode\(input\.faceSdfDebugMode\)/);
-  assert.match(engineSource, /cameraPreset\?: PjskCameraPreset/);
-  assert.match(engineSource, /cameraProfile\?: PjskCameraProfile/);
-  assert.match(engineSource, /faceSdfEnabled\?: boolean/);
-  assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
-  assert.match(engineSource, /characterYawMode\?: "0" \| "45" \| "-45" \| "90" \| "-90" \| "180" \| "face-camera"/);
-  assert.match(engineSource, /this\.applyCameraPreset\(request\.cameraPreset \?\? "capture", request\.cameraProfile\)/);
-  assert.match(engineSource, /this\.applyCaptureCharacterYawMode\(request\.characterYawMode\)/);
+  assert.match(captureTypesSource, /cameraPreset\?: PjskCameraPreset/);
+  assert.match(captureTypesSource, /cameraProfile\?: PjskCameraProfile/);
+  assert.match(captureTypesSource, /faceSdfEnabled\?: boolean/);
+  assert.match(captureTypesSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
+  assert.match(captureTypesSource, /characterYawMode\?: "0" \| "45" \| "-45" \| "90" \| "-90" \| "180" \| "face-camera"/);
+  assert.match(captureAdapterSource, /this\.engine\.applyCameraPreset\(request\.cameraPreset \?\? "capture", request\.cameraProfile\)/);
+  assert.match(captureAdapterSource, /this\.engine\.faceCharacterTowardCamera\(\)/);
 });
 
 test("docker runtime image includes capture server support modules", () => {
@@ -331,6 +343,14 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const captureTypesSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureTypes.ts"),
+    "utf8"
+  );
+  const captureAdapterSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureAdapter.ts"),
+    "utf8"
+  );
 
   assert.match(serverSource, /warmupFrames:\s*readIntInRange\(\s*input\.warmupFrames/);
   assert.match(serverSource, /warmupMs:\s*readIntInRange\(input\.warmupMs/);
@@ -339,11 +359,10 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
   assert.match(harnessSource, /warmupMs:\s*request\.warmupMs \?\? config\.warmupMs/);
   assert.match(harnessSource, /warmupFrames,\s*warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
   assert.match(harnessSource, /warmupMode:\s*request\.warmupMode \?\? config\.warmupMode/);
-  assert.match(engineSource, /warmupFrames\?: number/);
-  assert.match(engineSource, /warmupMode\?: "animation" \| "runtime"/);
-  assert.match(engineSource, /for \(let index = 0; index < warmupFrames; index \+= 1\)/);
-  assert.match(engineSource, /this\.stepCharacterDynamics\(1 \/ 60, advanceWarmupAnimation\)/);
-  assert.match(engineSource, /this\.stepCharacterDynamics\(1 \/ 60, advanceWarmupAnimation\);\s*this\.updateProjectedShadows\(\)/);
+  assert.match(captureTypesSource, /warmupFrames\?: number/);
+  assert.match(captureTypesSource, /warmupMode\?: "animation" \| "runtime"/);
+  assert.match(captureAdapterSource, /for \(let index = 0; index < warmupFrames; index \+= 1\)/);
+  assert.match(captureAdapterSource, /this\.engine\.stepRuntimeFrame\(1 \/ 60, \{ advanceAnimation: advanceWarmupAnimation \}\)/);
   const dynamicsBody = engineSource.match(
     /private stepCharacterDynamics\([^]*?\n  \}\n\n  stepCaptureFrame/
   )?.[0] ?? "";
@@ -434,7 +453,7 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
   assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_OFFSET_SCALE/);
   assert.match(
     engineSource,
-    /this\.controls\.target\.copy\(pose\.target\);\s+this\.camera\.position\.copy\(pose\.position\);\s+this\.camera\.fov = COSTUME_SHOP_CAMERA\.fov;/s
+    /this\.setCameraTarget\(pose\.target\);\s+this\.camera\.position\.copy\(pose\.position\);\s+this\.camera\.fov = COSTUME_SHOP_CAMERA\.fov;/s
   );
   assert.match(
     engineSource,
@@ -574,6 +593,10 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
     path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
     "utf8"
   );
+  const captureTypesSource = fs.readFileSync(
+    path.join(repoRoot, "src/capture/captureTypes.ts"),
+    "utf8"
+  );
 
   assert.match(shaderSource, /faceSkinLit = mix\(uSkinColor1, uSkinColorDefault, faceSkinRamp\)/);
   assert.match(shaderSource, /faceSkinShadow = mix\(uSkinColor2, uSkinColor1, faceSkinRamp\)/);
@@ -581,8 +604,8 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
   assert.match(engineSource, /shaderSkinColorDefault/);
   assert.match(engineSource, /shaderSkinColor1/);
   assert.match(engineSource, /shaderSkinColor2/);
-  assert.match(engineSource, /bodyDebugMode\?: BodyDebugMode/);
-  assert.match(engineSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
+  assert.match(captureTypesSource, /bodyDebugMode\?: BodyDebugMode/);
+  assert.match(captureTypesSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
   assert.match(engineSource, /const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1\.0/);
   assert.match(engineSource, /private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE/);
   assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
@@ -818,8 +841,8 @@ test("custom selection mutations use the official full-character update path", (
   assert.doesNotMatch(sameSelectionBranch, /resetCurrentSpringRuntimeState/);
   assert.match(engineSource, /if \(isEnabled && !wasEnabled\) \{\s*this\.resetAndSettleCurrentSpringRuntime\(60\);/);
   assert.doesNotMatch(engineSource, /settleCurrentPose\(\)/);
-  assert.match(engineSource, /private async captureRolePartsInternal/);
-  assert.match(engineSource, /activeRoleId !== nextRoleId[\s\S]*wardrobe\.selectRole/);
+  assert.match(engineSource, /private async loadRenderRecipeInternal/);
+  assert.match(engineSource, /wardrobe\.getActiveRoleId\(\) !== nextRoleId[\s\S]*wardrobe\.selectRole/);
   assert.doesNotMatch(engineSource, /partSet\?\.packages\.clear\(\)/);
   assert.doesNotMatch(engineSource, /partSet\?\.roleRuntimes\.clear\(\)/);
   assert.doesNotMatch(engineSource, /await this\.setCustomSelection\(selection\)/);
@@ -929,6 +952,8 @@ test("custom capture exposes SpringBone trace and named offset diagnostics", () 
   const serverSource = fs.readFileSync(path.join(repoRoot, "capture-server.mjs"), "utf8");
   const harnessSource = fs.readFileSync(path.join(repoRoot, "src/captureHarness.ts"), "utf8");
   const engineSource = fs.readFileSync(path.join(repoRoot, "src/engine/Haruki3DEngine.ts"), "utf8");
+  const captureTypesSource = fs.readFileSync(path.join(repoRoot, "src/capture/captureTypes.ts"), "utf8");
+  const captureAdapterSource = fs.readFileSync(path.join(repoRoot, "src/capture/captureAdapter.ts"), "utf8");
   const springSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
     "utf8"
@@ -938,9 +963,9 @@ test("custom capture exposes SpringBone trace and named offset diagnostics", () 
   assert.match(serverSource, /springDebugBones/);
   assert.match(harnessSource, /utjSpringBoneTrace: engine\.getUtjSpringBoneTraceSnapshot\(\)/);
   assert.match(harnessSource, /engine\.setUtjSpringBoneTraceFilters\(/);
-  assert.match(engineSource, /traceUtjBones\?: string\[\]/);
-  assert.match(engineSource, /springDebugBones\?: string\[\]/);
-  assert.match(engineSource, /getSnapshots\(\{\s+springDebugBones: request\.springDebugBones/s);
+  assert.match(captureTypesSource, /traceUtjBones\?: string\[\]/);
+  assert.match(captureTypesSource, /springDebugBones\?: string\[\]/);
+  assert.match(captureAdapterSource, /getSnapshots\(\{\s+springDebugBones: request\.springDebugBones/s);
   assert.match(springSource, /debugOffsets/);
   assert.match(springSource, /springDebugAllOffsets/);
 });

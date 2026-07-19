@@ -2,7 +2,7 @@ import type {
   BodyAssetManifest,
   HeadAssetManifest,
 } from "../data/sampleScene";
-import type { RuntimeCombinedCharacterAsset } from "../engine/Haruki3DEngine";
+import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
 
 export type RuntimePartType = "body" | "head" | "hair" | "head_optional";
 export type CustomPartSelectionOrigin = "custom" | "official_preset";

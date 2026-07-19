@@ -2,13 +2,16 @@ import {
   Haruki3DEngine,
   previewLightDefaults,
   type BodyDebugMode,
-  type HarukiCaptureRolePartsRequest,
-  type HarukiCaptureRolePartsResult,
   type PjskCameraProfile,
   type PjskCameraPreset,
   type ProjectedShadowSettingsInput,
   type RenderIsolationMode,
-} from "./index";
+} from "./internal";
+import { HarukiCaptureAdapter } from "./capture/captureAdapter";
+import type {
+  HarukiCaptureRolePartsRequest,
+  HarukiCaptureRolePartsResult,
+} from "./capture/captureTypes";
 import {
   type FaceSdfDebugLightMode,
   type FaceSdfDebugMode,
@@ -64,11 +67,11 @@ const engine = new Haruki3DEngine({
   cameraPreset: "capture",
   autoRender: false,
   manageResize: false,
+  enableControls: false,
 });
+const captureAdapter = new HarukiCaptureAdapter(engine);
 
 const ROLE_ENTRY_WARMUP_FRAMES = 60;
-let captureRuntimePackagePromise: Promise<void> | null = null;
-let captureRuntimePackageKey: string | null = null;
 let settledCapturePackageKey: string | null = null;
 
 function getCaptureWindow() {
@@ -284,29 +287,6 @@ function setCaptureError(error: unknown) {
   getCaptureWindow().__PJSK_CAPTURE_ERROR__ = message;
 }
 
-async function ensureCaptureRuntimePackage(config: CaptureConfig, roleId: string, baseUrl = config.baseUrl) {
-  const packageKey = `${baseUrl}|${roleId}`;
-  if (captureRuntimePackagePromise && captureRuntimePackageKey !== packageKey) {
-    captureRuntimePackagePromise = null;
-    captureRuntimePackageKey = null;
-  }
-  if (!captureRuntimePackagePromise) {
-    captureRuntimePackageKey = packageKey;
-    captureRuntimePackagePromise = engine.loadRuntimePackage({
-      baseUrl,
-      deferDefaultSelection: true,
-      roleId,
-      applyDefaultAnimation: false,
-      applyFaceMotion: false,
-    }).then(() => undefined, (error) => {
-      captureRuntimePackagePromise = null;
-      captureRuntimePackageKey = null;
-      throw error;
-    });
-  }
-  await captureRuntimePackagePromise;
-}
-
 getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
   request: HarukiCaptureRolePartsRequest
 ) => {
@@ -321,14 +301,14 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
     document.body.dataset.captureError = "";
     const baseUrl = request.runtimeBaseUrl ?? config.baseUrl;
     const packageKey = `${baseUrl}|${request.roleId}`;
-    await ensureCaptureRuntimePackage(config, request.roleId, baseUrl);
     engine.setViewportSize(root.clientWidth, root.clientHeight);
     const requestedWarmupFrames = request.warmupFrames ?? config.warmupFrames;
     const warmupFrames = settledCapturePackageKey === packageKey
       ? requestedWarmupFrames
       : Math.max(requestedWarmupFrames, ROLE_ENTRY_WARMUP_FRAMES);
-    const result = await engine.captureRoleParts({
+    const result = await captureAdapter.captureRoleParts({
       ...request,
+      runtimeBaseUrl: baseUrl,
       phase: request.phase ?? config.phase,
       warmupMs: request.warmupMs ?? config.warmupMs,
       warmupFrames,

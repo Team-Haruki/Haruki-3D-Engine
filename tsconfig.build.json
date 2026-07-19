@@ -8,6 +8,10 @@
   },
   "include": [
     "src/index.ts",
+    "src/internal.ts",
+    "src/kernel/**/*.ts",
+    "src/capture/**/*.ts",
+    "src/host/**/*.ts",
     "src/engine/**/*.ts",
     "src/runtime/**/*.ts",
     "src/parts/**/*.ts",

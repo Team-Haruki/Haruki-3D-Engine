@@ -2,7 +2,7 @@
 
 Runtime engine for rendering converted Project SEKAI 3D character packages in a browser.
 
-This package is not a product GUI. It owns the rendering, package loading, animation, SpringBone, camera, and capture behavior. A web app or local test page should call the public API and provide its own interface.
+This package is not a product GUI. Its public entry is a browser rendering kernel that owns package loading, scene assembly, animation, SpringBone, camera state, and rendering. The capture stack uses a separate internal adapter around the same kernel implementation.
 
 The engine does not parse Unity bundles. It loads only the final, role-scoped
 Haruki runtime package:
@@ -25,19 +25,22 @@ Use the public entry from `src/index.ts` during local development, or from the b
 
 ```ts
 import {
-  Haruki3DEngine,
-  previewLightDefaults,
+  createHaruki3DKernel,
 } from "haruki-3d-engine";
 
-const engine = new Haruki3DEngine({
-  container: document.querySelector("#viewer")!,
-  initialLight: { ...previewLightDefaults },
+const kernel = createHaruki3DKernel({
+  canvas: document.querySelector("canvas")!,
+  assetBaseUrl: "/assets/runtime/jp/",
 });
 
-await engine.loadRuntimePackage({
-  baseUrl: "/assets/runtime/001/",
+await kernel.load({
   roleId: "5:light_sound",
+  bodyCostume3dId: 10,
+  headCostume3dId: 105,
+  hairCostume3dId: 205,
+  headOptionalCostume3dId: null,
 });
+kernel.play();
 ```
 
 Full API notes are in [docs/api.md](docs/api.md).

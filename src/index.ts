@@ -1,70 +1,10 @@
 export {
-  Haruki3DEngine,
-  type AnimationPlaybackSnapshot,
-  type BodyAnimationKind,
-  type BodyAnimationSelection,
-  type BodyDebugMode,
-  type CompositionMode,
-  type CompositionStatus,
-  type FaceMotionClip,
-  type FaceMotionCurve,
-  type FaceMotionKeyframe,
-  type FaceMotionPlaybackSnapshot,
-  type FaceMotionSet,
-  type HairShadowMode,
-  type Haruki3DEngineOptions,
-  type HarukiCaptureRolePartsRequest,
-  type HarukiCaptureRolePartsResult,
-  type HarukiEngineSnapshots,
-  type HarukiRuntimePackageRequest,
-  type PartImportSnapshot,
-  type PjskCameraProfile,
-  type PjskCameraPreset,
-  type PjskPresentationMode,
-  type ProjectedShadowSettings,
-  type ProjectedShadowSettingsInput,
-  type PjskViewerEngineOptions,
-  type PjskEngineOptions,
-  type RenderIsolationMode,
-  type RuntimeCameraDebug,
-  type RuntimeCombinedCharacterAsset,
-  type RuntimeDebugSnapshot,
-  type SpringBoneRuntimeSnapshot,
-  defaultProjectedShadowSettings,
-} from "./engine/Haruki3DEngine";
-export {
-  loadRuntimePackageFromBaseUrl,
-  resolveRuntimePackageUrl,
-  type RuntimePackageLoadOptions,
-  type RuntimePackageLoadResult,
-} from "./runtime/runtimePackageLoader";
-export {
-  CustomWardrobeController,
-  type CustomWardrobeControllerOptions,
-} from "./parts/customWardrobeController";
-export {
-  type Character3dIndex,
-  type Character3dIndexEntry,
-  type CustomPartSelection,
-  type HeadHairCompatibility,
-  type PartPackageSet,
-  type PartRegistryEntry,
-  type PartRuntimePackage,
-  type RoleRuntimePackage,
-  type RuntimePartType,
-} from "./parts/runtimePartComposer";
-export {
   previewLightDefaults,
-  type BodyAssetManifest,
-  type HeadAssetManifest,
   type PreviewLightState,
-  type Vec3,
 } from "./data/sampleScene";
+export type { HarukiRenderRecipe } from "./kernel/renderRecipe";
 export {
-  evaluateSekaiBaseShadow,
-  evaluateSekaiFaceShadow,
-  evaluateSekaiFaceSphereShadow,
-  type SekaiBaseShadowInput,
-  type SekaiFaceShadowInput,
-  type SekaiFaceSphereShadowInput,
-} from "./materials/sekaiCharacterLighting";
+  createHaruki3DKernel,
+  type Haruki3DKernel,
+  type Haruki3DKernelOptions,
+} from "./kernel/Haruki3DKernel";

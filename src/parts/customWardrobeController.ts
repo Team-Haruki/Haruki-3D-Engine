@@ -1,4 +1,4 @@
-import type { RuntimeCombinedCharacterAsset } from "../engine/Haruki3DEngine";
+import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
 import {
   composeRuntimeCombinedCharacterAsset,
   getDefaultCustomSelection,

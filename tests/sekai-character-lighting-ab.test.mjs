@@ -5,7 +5,7 @@ import {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
   evaluateSekaiFaceSphereShadow,
-} from "../dist/haruki-3d-engine.js";
+} from "../dist/haruki-3d-engine-internal.js";
 
 function saturate(value) {
   return Math.min(Math.max(value, 0), 1);
