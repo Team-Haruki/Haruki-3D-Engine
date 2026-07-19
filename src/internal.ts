@@ -117,6 +117,11 @@ export {
   readEmbeddedRuntimeFaceMotion,
 } from "./engine/faceMotionRuntime";
 export {
+  CharacterLightingRuntime,
+  bodyDebugModeToUniform,
+  faceSdfDebugModeToUniform,
+} from "./engine/characterLightingRuntime";
+export {
   buildUnityPrefabSourceGraph,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,
@@ -136,4 +141,5 @@ export {
   type CharacterEyeMaterialController,
 } from "./engine/headMaterialRuntime";
 export { createSekaiBodyMaterial } from "./materials/sekaiBodyMaterial";
+export { createSekaiFaceMaterial } from "./materials/sekaiFaceMaterial";
 export { createSekaiLayerMaterial } from "./materials/sekaiCharacterShader";

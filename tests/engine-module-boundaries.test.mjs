@@ -86,13 +86,23 @@ test("body and head material binding are isolated from engine state", () => {
   assert.match(materialSource, /export async function bindBodyRuntimeMaterials/);
   assert.match(materialSource, /original\.userData\.pjskMaterialKey/);
   assert.match(materialSource, /THREE\.NoColorSpace/);
-  assert.match(
-    engineSource,
-    /this\.runtimeDebug\.body = \[\];\s+await bindBodyRuntimeMaterials/
-  );
+  assert.match(engineSource, /this\.runtimeDebug\.body = \[\]/);
+  assert.match(engineSource, /await bindBodyRuntimeMaterials/);
   assert.doesNotMatch(engineSource, /Head mesh '\$\{mesh\.name\}' material key/);
   assert.match(headMaterialSource, /export async function bindHeadRuntimeMaterials/);
   assert.match(engineSource, /await bindHeadRuntimeMaterials\(/);
+});
+
+test("character lighting and material view state are isolated from the engine orchestrator", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const lightingSource = readSource("src/engine/characterLightingRuntime.ts");
+
+  assert.match(lightingSource, /export class CharacterLightingRuntime/);
+  assert.match(engineSource, /private readonly characterLighting/);
+  assert.doesNotMatch(engineSource, /private faceSdfEnabled/);
+  assert.doesNotMatch(engineSource, /private hairShadowMode/);
+  assert.doesNotMatch(engineSource, /private applyRenderIsolationMode/);
+  assert.doesNotMatch(engineSource, /private updateLoadedMaterialLight/);
 });
 
 test("through-hair pass policy and submesh cloning are isolated from engine state", () => {

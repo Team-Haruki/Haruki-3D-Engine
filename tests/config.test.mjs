@@ -495,14 +495,18 @@ test("face sdf is default-off and only enabled for explicit capable face materia
     path.join(repoRoot, "src/engine/headMaterialRuntime.ts"),
     "utf8"
   );
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
+    "utf8"
+  );
   const shaderSource = fs.readFileSync(
     path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /private faceSdfEnabled = false;/);
+  assert.match(lightingSource, /private faceSdfEnabled = false;/);
   assert.match(engineSource, /setFaceSdfEnabled\(enabled: boolean\)/);
-  assert.match(engineSource, /shouldEnableFaceSdfForCurrentView\(\)/);
+  assert.match(lightingSource, /private shouldEnableFaceSdf\(\)/);
   assert.doesNotMatch(engineSource, /ensureFaceSdfUv1Attribute/);
   assert.match(headMaterialSource, /resolvedSlot\.materialKind === "face_sdf" &&\s+Boolean\(resolvedSlot\.faceShadowTex\) &&\s+faceLighting\?\.useFaceSdf !== false/s);
   assert.match(headMaterialSource, /uniforms\.uFaceSdfEnabled\.value = view\.faceSdfEnabled && faceSdfCapable \? 1 : 0/);
@@ -533,6 +537,10 @@ test("face sdf uses official face-only head light parameters", () => {
     path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
     "utf8"
   );
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(engineSource, /COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE\.Vector3\(-15, 50, 0\)/);
   assert.match(engineSource, /COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree/);
@@ -546,9 +554,9 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.doesNotMatch(shaderSource, /acos\(|sideGate|rangeGate/);
   assert.doesNotMatch(shaderSource, /uFaceSdfUseLightDirection|uFaceSoftness|uFaceRight|uFaceUp|uFaceForward|uFaceDebugLightMode/);
   assert.doesNotMatch(engineSource, /Math\.acos\(|updateSekaiFaceBasis|faceSdfDebugLightModeToUniform/);
-  assert.match(engineSource, /export type FaceSdfDebugMode = "off" \| "sdf" \| "mask" \| "limit" \| "basis" \| "range";/);
+  assert.match(lightingSource, /export type FaceSdfDebugMode = "off" \| "sdf" \| "mask" \| "limit" \| "basis" \| "range";/);
   assert.match(engineSource, /-this\.faceUpWorld\.x,\s+-this\.faceUpWorld\.z/s);
-  assert.match(engineSource, /updateSekaiFaceShadowParameters\(\s+material,\s+faceShadowLightDirection,\s+this\.headDotDirectionalLight/s);
+  assert.match(lightingSource, /updateSekaiFaceShadowParameters\(material, faceShadowLightDirection, headDot,/);
   assert.doesNotMatch(shaderSource, /rangeLimit \* uShadowWeight/);
   assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
   assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
@@ -558,7 +566,7 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.match(shaderSource, /uniform float uValue;/);
   assert.match(shaderSource, /uniform float uContrast;/);
   assert.match(shaderSource, /vec3 applyMaterialHsvc\(vec3 color\)/);
-  assert.match(engineSource, /if \(material\.uniforms\.uHeadPosition\) \{\s+material\.uniforms\.uHeadPosition\.value\.copy\(this\.hairHeadPosition\);\s+\}/s);
+  assert.match(lightingSource, /if \(material\.uniforms\.uHeadPosition\) material\.uniforms\.uHeadPosition\.value\.copy\(hairHeadPosition\);/);
 });
 
 test("head material binding requires exporter material kinds", () => {
@@ -605,6 +613,10 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
     path.join(repoRoot, "src/capture/captureTypes.ts"),
     "utf8"
   );
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(shaderSource, /faceSkinLit = mix\(uSkinColor1, uSkinColorDefault, faceSkinRamp\)/);
   assert.match(shaderSource, /faceSkinShadow = mix\(uSkinColor2, uSkinColor1, faceSkinRamp\)/);
@@ -615,7 +627,8 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
   assert.match(captureTypesSource, /bodyDebugMode\?: BodyDebugMode/);
   assert.match(captureTypesSource, /faceSdfDebugMode\?: FaceSdfDebugMode/);
   assert.match(engineSource, /const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1\.0/);
-  assert.match(engineSource, /private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE/);
+  assert.match(engineSource, /valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE/);
+  assert.match(lightingSource, /this\.toonValueShadowInfluence = options\.valueShadowInfluence \?\? 1/);
   assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /float valueShadowInfluence = clamp\(uValueShadowInfluence, 0\.0, 1\.0\);/);
   assert.match(shaderSource, /float shadowBand = mix\(geometricShadowBand, officialShadowBand, valueShadowInfluence\) \* uShadowWeight;/);
@@ -784,13 +797,17 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
     path.join(repoRoot, "src/engine/projectedShadow.ts"),
     "utf8"
   );
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(shadowSource, /export type RuntimeProjectedShadowDebug =/);
   assert.match(engineSource, /projectedShadow\?: RuntimeProjectedShadowDebug/);
   assert.match(engineSource, /projectedShadow: this\.projectedShadow\.getDebugSnapshot/);
-  assert.match(engineSource, /export type HairShadowMode = "off" \| "sekai_head_position" \| "head_proximity";/);
-  assert.match(engineSource, /private hairShadowMode: HairShadowMode = "sekai_head_position";/);
-  assert.match(engineSource, /hairShadowMode: this\.hairShadowMode/);
+  assert.match(lightingSource, /export type HairShadowMode = "off" \| "sekai_head_position" \| "head_proximity";/);
+  assert.match(lightingSource, /private hairShadowMode: HairShadowMode = "sekai_head_position";/);
+  assert.match(lightingSource, /options\.debug\.hairShadowMode = this\.hairShadowMode/);
   assert.match(engineSource, /hairShadowWorldPosition: vectorDebugSnapshot\(this\.hairHeadPosition\)/);
   assert.match(headMaterialSource, /hairShadowEnabled:\s*hair\.proximityShadowEnabled &&\s*hair\.controllerPresent &&\s*lighting\?\.faceSphereShadowEdge != null/s);
   assert.match(headMaterialSource, /useLambert: hair\.controllerPresent \? true : \(lighting\?\.useLambert \?\? true\)/);
@@ -804,18 +821,18 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
 });
 
 test("face shadow updates preserve exported limiter parameters", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
     "utf8"
   );
 
   assert.match(
-    engineSource,
-    /material\.uniforms\.uUseFaceShadowLimiter\?\.value \?\? 1\.0/
+    lightingSource,
+    /material\.uniforms\.uUseFaceShadowLimiter\?\.value \?\? 1/
   );
   assert.match(
-    engineSource,
-    /material\.uniforms\.uFaceShadowLimitRange\?\.value \?\? 0\.0/
+    lightingSource,
+    /material\.uniforms\.uFaceShadowLimitRange\?\.value \?\? 0/
   );
 });
 

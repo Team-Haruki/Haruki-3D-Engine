@@ -13,13 +13,9 @@ import type {
 } from "../data/sampleScene";
 import {
   createSekaiBodyMaterial,
-  updateSekaiBodyCamera,
-  updateSekaiBodyMaterial,
 } from "../materials/sekaiBodyMaterial";
 import {
   createSekaiFaceMaterial,
-  updateSekaiFaceMaterial,
-  updateSekaiFaceShadowParameters,
 } from "../materials/sekaiFaceMaterial";
 import type { SekaiLayerAtlas } from "../materials/sekaiLayerMaterial";
 import {
@@ -95,13 +91,28 @@ import {
   bindBodyRuntimeMaterials,
   getSekaiPreviewRimDirection,
   normalizeMeshSlotName,
-  updateSekaiEyelashPassView,
   type RuntimeMaterialDebug,
 } from "./characterMaterialRuntime";
 import {
   bindHeadRuntimeMaterials,
   type CharacterEyeMaterialController,
 } from "./headMaterialRuntime";
+import {
+  CharacterLightingRuntime,
+  type BodyDebugMode,
+  type FaceSdfDebugLightMode,
+  type FaceSdfDebugMode,
+  type HairShadowMode,
+  type RenderIsolationMode,
+} from "./characterLightingRuntime";
+
+export type {
+  BodyDebugMode,
+  FaceSdfDebugLightMode,
+  FaceSdfDebugMode,
+  HairShadowMode,
+  RenderIsolationMode,
+} from "./characterLightingRuntime";
 
 export type {
   PjskCameraProfile,
@@ -215,62 +226,6 @@ export type CompositionStatus = {
   missingBodyBones: string[];
   missingHeadBones: string[];
 };
-
-export type BodyDebugMode =
-  | "off"
-  | "skin"
-  | "h_r"
-  | "h_g"
-  | "h_b"
-  | "h_a"
-  | "vertex_r"
-  | "vertex_g"
-  | "base_shadow"
-  | "ndotl_raw"
-  | "h_b_adjusted_shadow"
-  | "ambient_target"
-  | "ambient_weight"
-  | "ambient_tint"
-  | "specular"
-  | "specular_mask"
-  | "specular_add"
-  | "rim_raw"
-  | "rim_add"
-  | "rim_gate"
-  | "rim_color"
-  | "rim_scalar"
-  | "toon_luma"
-  | "shadow_mask"
-  | "shadow_target";
-export type FaceSdfDebugMode = "off" | "sdf" | "mask" | "limit" | "basis" | "range";
-export type FaceSdfDebugLightMode = "scene" | "front" | "left" | "right" | "back";
-export type RenderIsolationMode =
-  | "normal"
-  | "face_sdf"
-  | "no_face_sdf"
-  | "no_face_layers"
-  | "no_eye_through_hair"
-  | "eye_through_hair_only"
-  | "eye_through_hair_eye_only"
-  | "eye_through_hair_eyebrow_only"
-  | "eye_through_hair_eyelash_only"
-  | "no_eye_through_hair_eye"
-  | "no_eye_through_hair_eyebrow"
-  | "no_eye_through_hair_eyelash"
-  | "no_eye_through_hair_eyelash_overlay"
-  | "no_eye_through_hair_eyelash_prepass"
-  | "eyelight_only"
-  | "no_eyelight"
-  | "outline_only"
-  | "no_outline"
-  | "no_body_outline"
-  | "no_hair_outline"
-  | "no_face_outline";
-export type HairShadowMode = "off" | "sekai_head_position" | "head_proximity";
-
-function normalizeHairShadowMode(mode: HairShadowMode): HairShadowMode {
-  return mode === "head_proximity" ? "sekai_head_position" : mode;
-}
 
 export type BodyAnimationSelection = RuntimeBodyAnimationSelection;
 export type AnimationPlaybackSnapshot = RuntimeAnimationPlaybackSnapshot;
@@ -581,45 +536,6 @@ function isFaceLayerMaterialKind(kind: unknown) {
     kind === "eyelight";
 }
 
-function isFaceOrFaceLayerMaterialKind(kind: unknown) {
-  return kind === "face" ||
-    kind === "face_sdf" ||
-    isFaceLayerMaterialKind(kind);
-}
-
-function isEyeThroughHairSourceAllowed(sourceKind: string, mode: RenderIsolationMode) {
-  switch (mode) {
-    case "eye_through_hair_eye_only":
-      return sourceKind === "eye";
-    case "eye_through_hair_eyebrow_only":
-      return sourceKind === "eyebrow";
-    case "eye_through_hair_eyelash_only":
-      return sourceKind === "eyelash";
-    case "no_eye_through_hair_eye":
-      return sourceKind !== "eye";
-    case "no_eye_through_hair_eyebrow":
-      return sourceKind !== "eyebrow";
-    case "no_eye_through_hair_eyelash":
-      return sourceKind !== "eyelash";
-    default:
-      return true;
-  }
-}
-
-function isEyeThroughHairPassAllowed(
-  sourceKind: string,
-  passKind: string,
-  mode: RenderIsolationMode
-) {
-  if (mode === "no_eye_through_hair_eyelash_overlay") {
-    return sourceKind !== "eyelash" || passKind !== "overlay";
-  }
-  if (mode === "no_eye_through_hair_eyelash_prepass") {
-    return sourceKind !== "eyelash" || passKind !== "stencil_prepass";
-  }
-  return true;
-}
-
 function getOutlineSourceMaterialKinds(mesh: THREE.Mesh) {
   const kinds = new Set<string>();
   if (typeof mesh.userData.pjskMaterialKind === "string") {
@@ -649,20 +565,6 @@ function chooseOutlineSourceMaterialKind(kinds: string[]) {
 
 function shouldSkipOutlineMaterialKinds(kinds: unknown[]) {
   return kinds.length > 0 && kinds.every(isFaceLayerMaterialKind);
-}
-
-function isOutlineHiddenByIsolation(kind: string, mode: RenderIsolationMode) {
-  switch (mode) {
-    case "no_body_outline":
-      return kind === "body";
-    case "no_hair_outline":
-      return kind === "hair";
-    case "no_face_layers":
-    case "no_face_outline":
-      return isFaceOrFaceLayerMaterialKind(kind);
-    default:
-      return false;
-  }
 }
 
 function createSekaiOutlineMaterial(
@@ -764,78 +666,6 @@ function normalizeFaceShadowHorizontal(
 function faceShadowYawRangeFactor(headYawDegrees: number, lightYawDegrees: number) {
   const delta = Math.abs(lightYawDegrees - headYawDegrees);
   return THREE.MathUtils.clamp(1.0 - Math.abs(delta - 180.0) / 180.0, 0.0, 1.0);
-}
-
-function bodyDebugModeToUniform(mode: BodyDebugMode) {
-  switch (mode) {
-    case "skin":
-      return 1;
-    case "h_r":
-      return 4;
-    case "h_g":
-      return 5;
-    case "h_b":
-      return 6;
-    case "h_a":
-      return 7;
-    case "vertex_r":
-      return 8;
-    case "vertex_g":
-      return 9;
-    case "base_shadow":
-      return 10;
-    case "ndotl_raw":
-      return 11;
-    case "h_b_adjusted_shadow":
-      return 12;
-    case "ambient_target":
-      return 13;
-    case "ambient_weight":
-      return 14;
-    case "ambient_tint":
-      return 15;
-    case "specular":
-      return 16;
-    case "specular_mask":
-      return 22;
-    case "specular_add":
-      return 23;
-    case "rim_raw":
-      return 17;
-    case "rim_add":
-      return 18;
-    case "rim_gate":
-      return 19;
-    case "rim_color":
-      return 20;
-    case "rim_scalar":
-      return 21;
-    case "toon_luma":
-      return 24;
-    case "shadow_mask":
-      return 25;
-    case "shadow_target":
-      return 26;
-    default:
-      return 0;
-  }
-}
-
-function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
-  switch (mode) {
-    case "sdf":
-      return 1;
-    case "mask":
-      return 2;
-    case "limit":
-      return 3;
-    case "basis":
-      return 4;
-    case "range":
-      return 5;
-    default:
-      return 0;
-  }
 }
 
 function asRuntimeRecord(value: unknown): Record<string, unknown> {
@@ -1000,6 +830,7 @@ export class Haruki3DEngine {
   private readonly bodyMaterial: THREE.ShaderMaterial;
   private readonly hairMaterial: THREE.ShaderMaterial;
   private readonly faceMaterial: THREE.ShaderMaterial;
+  private readonly characterLighting: CharacterLightingRuntime;
   private readonly projectedShadow: CharacterProjectedShadowController;
   private readonly characterRoot: THREE.Group;
   private readonly bodySlot: THREE.Group;
@@ -1023,8 +854,6 @@ export class Haruki3DEngine {
   private currentBodyAnimationRoot: THREE.Object3D | null = null;
   private readonly faceMotion = new FaceMotionRuntime();
   private readonly animationPlayback: AnimationPlaybackRuntime;
-  private controllerOutlineColor: THREE.Color | null = null;
-  private controllerOutlineBlending = 0;
   private currentRuntimeExtension: unknown = null;
   private currentSpringRuntime: SpringRuntimeController | null = null;
   private currentExtraBoneRuntime: SekaiExtraBoneRuntime | null = null;
@@ -1053,23 +882,15 @@ export class Haruki3DEngine {
   private readonly hairHeadPosition = new THREE.Vector3();
   private currentHairOffset = new THREE.Vector3();
   private currentHairHeadTransform: THREE.Object3D | null = null;
-  private hairShadowMode: HairShadowMode = "sekai_head_position";
-  private bodyDebugMode: BodyDebugMode = "off";
-  private toonShadowWidthOverride: number | null = null;
-  private toonValueShadowInfluence = COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE;
   private currentCameraPreset: PjskCameraPreset = "default";
   private currentCameraProfile: PjskCameraProfile | null = null;
-  private faceSdfEnabled = false;
-  private faceSdfDebugMode: FaceSdfDebugMode = "off";
-  private faceSdfDebugLightMode: FaceSdfDebugLightMode = "scene";
-  private renderIsolationMode: RenderIsolationMode = "normal";
   private cameraDebugChangeCallback: (() => void) | null = null;
   private currentLoadedRuntimePackage: RuntimePackageLoadResult | null = null;
   private lastNativeMeshInstallDiagnostics: NativeMeshInstallDiagnostics | null = null;
   private lastConstraintSetupDiagnostics: RuntimeConstraintDebug | null = null;
   private readonly runtimeDebug: RuntimeDebugSnapshot = {
     materialBindingMode: "manifest",
-    hairShadowMode: this.hairShadowMode,
+    hairShadowMode: "sekai_head_position",
     hairShadowOffset: vectorDebugSnapshot(this.currentHairOffset),
     hairShadowWorldPosition: vectorDebugSnapshot(this.hairHeadPosition),
     funit: readRuntimeFUnitDebug(null),
@@ -1169,7 +990,7 @@ export class Haruki3DEngine {
       ambientIntensity: light.ambient,
       shadowThreshold: light.shadowThreshold,
       shadowWeight: light.shadowWeight,
-      valueShadowInfluence: this.toonValueShadowInfluence,
+      valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE,
       characterAmbientIntensity: light.characterAmbient,
       rimIntensity: light.rimIntensity,
       controllerRimThreshold: light.rimThreshold,
@@ -1185,7 +1006,7 @@ export class Haruki3DEngine {
       ambientIntensity: light.ambient,
       shadowThreshold: light.shadowThreshold,
       shadowWeight: light.shadowWeight,
-      valueShadowInfluence: this.toonValueShadowInfluence,
+      valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE,
       characterAmbientIntensity: light.characterAmbient,
       rimIntensity: light.rimIntensity,
       controllerRimThreshold: light.rimThreshold,
@@ -1215,6 +1036,17 @@ export class Haruki3DEngine {
     this.headSlot = new THREE.Group();
     this.characterRoot.add(this.bodySlot);
     this.characterRoot.add(this.headSlot);
+    this.characterLighting = new CharacterLightingRuntime({
+      bodyMaterial: this.bodyMaterial,
+      hairMaterial: this.hairMaterial,
+      faceMaterial: this.faceMaterial,
+      bodySlot: this.bodySlot,
+      headSlot: this.headSlot,
+      directionalLight: this.directionalLight,
+      fillLight: this.fillLight,
+      debug: this.runtimeDebug,
+      valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE,
+    });
     this.applyCharacterHeight(light.characterHeight);
     this.scene.add(this.characterRoot);
     this.projectedShadow = new CharacterProjectedShadowController();
@@ -1331,14 +1163,12 @@ export class Haruki3DEngine {
       composition: this.currentCompositionStatus,
     };
     this.currentImportSnapshot = snapshot;
-    this.applyRenderIsolationMode();
+    this.characterLighting.applyCharacterView();
     return snapshot;
   }
 
   setHairShadowMode(mode: HairShadowMode) {
-    this.hairShadowMode = normalizeHairShadowMode(mode);
-    this.runtimeDebug.hairShadowMode = this.hairShadowMode;
-    this.applyHairShadowModeUniforms();
+    this.characterLighting.setHairShadowMode(mode);
   }
 
   setProjectedShadowSettings(settings: ProjectedShadowSettingsInput = {}) {
@@ -1346,36 +1176,28 @@ export class Haruki3DEngine {
   }
 
   setFaceSdfDebugMode(mode: FaceSdfDebugMode) {
-    this.faceSdfDebugMode = mode;
-    this.applyFaceSdfDebugUniforms();
+    this.characterLighting.setFaceSdfDebugMode(mode);
   }
 
   setFaceSdfEnabled(enabled: boolean) {
-    this.faceSdfEnabled = enabled;
-    this.applyFaceSdfRuntimeUniforms();
+    this.characterLighting.setFaceSdfEnabled(enabled);
   }
 
   setBodyDebugMode(mode: BodyDebugMode) {
-    this.bodyDebugMode = mode;
-    this.applyBodyDebugUniforms();
+    this.characterLighting.setBodyDebugMode(mode);
   }
 
   setToonShadowPreview(shadowWidthOverride: number | null, valueShadowInfluence: number) {
-    this.toonShadowWidthOverride =
-      shadowWidthOverride === null ? null : Math.max(0.0, shadowWidthOverride);
-    this.toonValueShadowInfluence = THREE.MathUtils.clamp(valueShadowInfluence, 0.0, 1.0);
-    this.applyToonShadowPreviewUniforms();
+    this.characterLighting.setToonShadowPreview(shadowWidthOverride, valueShadowInfluence);
   }
 
   setFaceSdfDebugLightMode(mode: FaceSdfDebugLightMode) {
-    this.faceSdfDebugLightMode = mode;
+    this.characterLighting.setFaceSdfDebugLightMode(mode);
     this.updateShaderFaceBasis();
-    this.applyFaceSdfDebugUniforms();
   }
 
   setRenderIsolationMode(mode: RenderIsolationMode) {
-    this.renderIsolationMode = mode;
-    this.applyRenderIsolationMode();
+    this.characterLighting.setRenderIsolationMode(mode);
   }
 
   setCharacterYawDegrees(degrees: number) {
@@ -1428,324 +1250,6 @@ export class Haruki3DEngine {
     this.updateShaderFaceBasis();
   }
 
-  private applyRenderIsolationMode() {
-    const faceSdfEnabled = this.shouldEnableFaceSdfForCurrentView();
-    const eyelightOnly = this.renderIsolationMode === "eyelight_only";
-    const noEyelight = this.renderIsolationMode === "no_eyelight";
-    const faceLayersVisible = this.renderIsolationMode !== "no_face_layers";
-    const outlineOnly = this.renderIsolationMode === "outline_only";
-    const outlineVisible = this.renderIsolationMode !== "no_outline";
-    const noEyeThroughHair = this.renderIsolationMode === "no_eye_through_hair";
-    const eyeThroughHairOnly =
-      this.renderIsolationMode === "eye_through_hair_only" ||
-      this.renderIsolationMode === "eye_through_hair_eye_only" ||
-      this.renderIsolationMode === "eye_through_hair_eyebrow_only" ||
-      this.renderIsolationMode === "eye_through_hair_eyelash_only";
-    const apply = (node: THREE.Object3D) => {
-      const mesh = node as THREE.Mesh;
-      if (!mesh.isMesh) {
-        return;
-      }
-      if (
-        mesh.userData.pjskEyeThroughHairOverlay ||
-        mesh.userData.pjskEyeThroughHairStencilPrepass
-      ) {
-        const source = mesh.userData.pjskEyeThroughHairSource;
-        const sourceKind = typeof mesh.userData.pjskEyeThroughHairSourceKind === "string"
-          ? mesh.userData.pjskEyeThroughHairSourceKind
-          : "";
-        const passKind = typeof mesh.userData.pjskEyeThroughHairPassKind === "string"
-          ? mesh.userData.pjskEyeThroughHairPassKind
-          : "";
-        const sourceVisible = source instanceof THREE.Object3D
-          ? source.visible
-          : true;
-        if (source instanceof THREE.Object3D) {
-          mesh.layers.mask = source.layers.mask;
-        }
-        mesh.visible =
-          sourceVisible &&
-          !outlineOnly &&
-          !eyelightOnly &&
-          !noEyeThroughHair &&
-          isEyeThroughHairSourceAllowed(sourceKind, this.renderIsolationMode) &&
-          isEyeThroughHairPassAllowed(sourceKind, passKind, this.renderIsolationMode) &&
-          faceLayersVisible &&
-          (!noEyelight || sourceKind !== "eyelight");
-        mesh.userData.pjskEyeThroughHairBaseVisible = mesh.visible;
-        return;
-      }
-      if (mesh.userData.pjskOutlineShell) {
-        const sourceKind = typeof mesh.userData.pjskSourceMaterialKind === "string"
-          ? mesh.userData.pjskSourceMaterialKind
-          : "";
-        const isFaceLayerOutline = isFaceOrFaceLayerMaterialKind(sourceKind);
-        if (eyelightOnly) {
-          mesh.visible = sourceKind === "eye" || sourceKind === "eyelight";
-          return;
-        }
-        mesh.visible =
-          !eyeThroughHairOnly &&
-          outlineVisible &&
-          !isOutlineHiddenByIsolation(sourceKind, this.renderIsolationMode) &&
-          (!noEyelight || sourceKind !== "eyelight") &&
-          (!isFaceLayerOutline || faceLayersVisible);
-        return;
-      }
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      let isFaceLayer = false;
-      let isEyelightLayer = false;
-      for (const material of materials) {
-        if (material instanceof THREE.ShaderMaterial) {
-          const materialDraws = material.visible !== false && material.colorWrite !== false;
-          if (material.uniforms.uFaceSdfEnabled) {
-            material.uniforms.uFaceSdfEnabled.value =
-              faceSdfEnabled && this.isFaceSdfCapableMaterial(material) ? 1.0 : 0.0;
-            isFaceLayer = true;
-          }
-          if (material.uniforms.uMode && !material.uniforms.uFaceSdfEnabled) {
-            isFaceLayer = true;
-            isEyelightLayer = isEyelightLayer || (materialDraws && material.uniforms.uMode.value > 1.5);
-          }
-        }
-      }
-      if (outlineOnly) {
-        mesh.visible = false;
-      } else if (eyeThroughHairOnly) {
-        mesh.visible = false;
-      } else if (eyelightOnly) {
-        mesh.visible = isFaceLayer && materials.some((material) => {
-          const kind = material.userData.pjskMaterialKind;
-          return kind === "eye" || kind === "eyelight";
-        });
-      } else if (isFaceLayer) {
-        mesh.visible = faceLayersVisible && (!noEyelight || !isEyelightLayer);
-      } else {
-        mesh.visible = !eyelightOnly;
-      }
-      const source = mesh.userData.pjskEyeThroughHairSource;
-      if (source instanceof THREE.Object3D) {
-        mesh.visible = mesh.visible && source.visible;
-        mesh.layers.mask = source.layers.mask;
-      }
-    };
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse(apply);
-    }
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        if (entry.shaderFaceSdfEnabled !== undefined || entry.resolvedKind === "face_sdf") {
-          const capable = entry.faceSdfCapable === true;
-          entry.shaderFaceSdfEnabled = faceSdfEnabled && capable ? 1.0 : 0.0;
-        }
-      }
-    }
-  }
-
-  private shouldEnableFaceSdfForCurrentView() {
-    if (this.renderIsolationMode === "no_face_sdf") {
-      return false;
-    }
-    return this.faceSdfEnabled || this.renderIsolationMode === "face_sdf";
-  }
-
-  private isFaceSdfCapableMaterial(material: THREE.ShaderMaterial) {
-    return material.userData.pjskFaceSdfCapable === true;
-  }
-
-  private applyFaceSdfRuntimeUniforms() {
-    const enabled = this.shouldEnableFaceSdfForCurrentView();
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceSdfEnabled) {
-            material.uniforms.uFaceSdfEnabled.value =
-              enabled && this.isFaceSdfCapableMaterial(material) ? 1.0 : 0.0;
-          }
-        }
-      });
-    }
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        if (entry.shaderFaceSdfEnabled !== undefined || entry.resolvedKind === "face_sdf") {
-          entry.shaderFaceSdfEnabled = enabled && entry.faceSdfCapable === true ? 1.0 : 0.0;
-        }
-      }
-    }
-  }
-
-  private updateEyeThroughHairViewGate() {
-    this.tempVector.copy(this.camera.position).sub(this.faceHeadWorldPosition);
-    const cameraSideValid = this.tempVector.lengthSq() > 0.000001;
-    const cameraDirection = cameraSideValid
-      ? this.tempVector.normalize()
-      : this.tempVector.set(0, 0, 1);
-    const faceCameraDot = cameraSideValid
-      ? cameraDirection.dot(this.faceForwardWorld)
-      : 1.0;
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (
-          !mesh.isMesh ||
-          (
-            !mesh.userData.pjskEyeThroughHairOverlay &&
-            !mesh.userData.pjskEyeThroughHairStencilPrepass
-          )
-        ) {
-          return;
-        }
-        const baseVisible = mesh.userData.pjskEyeThroughHairBaseVisible;
-        const sourceVisible = typeof baseVisible === "boolean" ? baseVisible : mesh.visible;
-        if (mesh.userData.pjskEyeThroughHairStencilPrepass) {
-          mesh.visible = sourceVisible;
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        let passVisible = false;
-        for (const material of materials) {
-          const alpha = updateSekaiEyelashPassView(material, faceCameraDot);
-          passVisible ||= alpha === null || alpha > 0.001;
-        }
-        mesh.visible = sourceVisible && passVisible;
-      });
-    }
-  }
-
-  private applyFaceSdfDebugUniforms() {
-    const debugUniform = faceSdfDebugModeToUniform(this.faceSdfDebugMode);
-    this.faceMaterial.uniforms.uFaceDebugMode.value = debugUniform;
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial && material.uniforms.uFaceDebugMode) {
-            material.uniforms.uFaceDebugMode.value = debugUniform;
-          }
-        }
-      });
-    }
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        if (entry.resolvedKind === "face_sdf" || entry.shaderFaceDebugMode !== undefined) {
-          entry.shaderFaceDebugMode = debugUniform;
-        }
-      }
-    }
-  }
-
-  private applyBodyDebugUniforms() {
-    const debugUniform = bodyDebugModeToUniform(this.bodyDebugMode);
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial && material.uniforms.uBodyDebugMode) {
-            material.uniforms.uBodyDebugMode.value = debugUniform;
-          }
-        }
-      });
-    }
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        if (entry.shaderBodyDebugMode !== undefined || entry.resolvedKind === "body") {
-          entry.shaderBodyDebugMode = debugUniform;
-        }
-      }
-    }
-  }
-
-  private applyToonShadowPreviewUniforms() {
-    const shadowWidthUniform = this.toonShadowWidthOverride ?? -1.0;
-    const applyUniforms = (material: THREE.Material) => {
-      if (!(material instanceof THREE.ShaderMaterial)) {
-        return;
-      }
-      if (material.uniforms.uShadowWidthOverride) {
-        material.uniforms.uShadowWidthOverride.value = shadowWidthUniform;
-      }
-      if (material.uniforms.uValueShadowInfluence) {
-        material.uniforms.uValueShadowInfluence.value = this.toonValueShadowInfluence;
-      }
-    };
-
-    applyUniforms(this.bodyMaterial);
-    applyUniforms(this.hairMaterial);
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          applyUniforms(material);
-        }
-      });
-    }
-
-    for (const entries of [this.runtimeDebug.body, this.runtimeDebug.head]) {
-      for (const entry of entries) {
-        const hasToonShadowPreviewUniforms =
-          entry.shaderShadowWidthOverride !== undefined &&
-          entry.shaderShadowWidthOverride !== null &&
-          entry.shaderValueShadowInfluence !== undefined &&
-          entry.shaderValueShadowInfluence !== null;
-        if (hasToonShadowPreviewUniforms) {
-          entry.shaderShadowWidthOverride = shadowWidthUniform;
-          entry.shaderValueShadowInfluence = this.toonValueShadowInfluence;
-        }
-      }
-    }
-  }
-
-  private isHeadProximityHairShadowEnabled() {
-    return this.hairShadowMode === "sekai_head_position";
-  }
-
-  private applyHairShadowModeUniforms() {
-    const enabled = this.isHeadProximityHairShadowEnabled() ? 1.0 : 0.0;
-    if (this.hairMaterial.uniforms.uHairShadowEnabled) {
-      this.hairMaterial.uniforms.uHairShadowEnabled.value = enabled;
-    }
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (
-            material instanceof THREE.ShaderMaterial &&
-            material.userData.pjskMaterialKind === "hair" &&
-            material.uniforms.uHairShadowEnabled
-          ) {
-            material.uniforms.uHairShadowEnabled.value = enabled;
-          }
-        }
-      });
-    }
-    for (const entry of this.runtimeDebug.head) {
-      if (entry.resolvedKind === "hair" && entry.shaderHairShadowEnabled !== undefined) {
-        entry.shaderHairShadowEnabled = enabled;
-      }
-    }
-  }
-
   getRuntimeDebugSnapshot() {
     return {
       ...structuredClone(this.runtimeDebug),
@@ -1773,7 +1277,11 @@ export class Haruki3DEngine {
 
   getFaceLightDebugSnapshot(): RuntimeFaceLightDebug {
     const previewLightDirection = this.directionalLight.position.clone().normalize();
-    const lightDirection = this.getFaceShadowLightDirection();
+    const lightDirection = this.characterLighting.resolveFaceShadowLightDirection(
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+      this.faceRightWorld,
+      this.faceForwardWorld
+    );
     const headHorizontalFromUp = new THREE.Vector2();
     const headHorizontalFromRight = new THREE.Vector2();
     const headHorizontalFromForward = new THREE.Vector2();
@@ -2161,7 +1669,6 @@ export class Haruki3DEngine {
     options: { advanceAnimation?: boolean; elapsedTime?: number } = {}
   ) {
     this.stepCaptureFrame(delta, options.advanceAnimation ?? true);
-    this.updateEyeThroughHairViewGate();
     this.updateLayerMaterialTime(options.elapsedTime ?? this.clock.elapsedTime);
   }
 
@@ -2423,136 +1930,17 @@ export class Haruki3DEngine {
 
   updatePreviewLight(next: PreviewLightState) {
     this.applyCharacterHeight(next.characterHeight);
-    this.directionalLight.position.set(
-      next.x,
-      next.y,
-      next.z
+    this.characterLighting.updatePreviewLight(
+      next,
+      this.currentBodyAsset,
+      this.currentHeadAsset,
+      this.headDotDirectionalLight,
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION
     );
-    this.directionalLight.intensity = next.intensity;
-    this.fillLight.intensity = next.ambient;
-    updateSekaiBodyMaterial(this.bodyMaterial, {
-      baseColor: this.currentBodyAsset?.proxy.bodyColor ?? "#f5d6d0",
-      shadowColor: this.currentBodyAsset?.proxy.shadowColor ?? "#c79b95",
-      skinColorDefault:
-        this.currentHeadAsset?.proxy.skinColorDefault ??
-        this.currentHeadAsset?.proxy.faceColor ??
-        this.currentBodyAsset?.proxy.bodyColor ??
-        "#f5d6d0",
-      skinColor1:
-        this.currentHeadAsset?.proxy.skinColor1 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        this.currentBodyAsset?.proxy.shadowColor ??
-        "#c79b95",
-      skinColor2:
-        this.currentHeadAsset?.proxy.skinColor2 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        this.currentBodyAsset?.proxy.shadowColor ??
-        "#c79b95",
-      lightDirection: this.directionalLight.position.clone(),
-      lightIntensity: next.intensity,
-      ambientIntensity: next.ambient,
-      shadowThreshold: next.shadowThreshold,
-      shadowWeight: next.shadowWeight,
-      characterAmbientIntensity: next.characterAmbient,
-      rimIntensity: next.rimIntensity,
-      controllerRimThreshold: next.rimThreshold,
-      rimDirectionality: next.rimDirectionality,
-      rimDirection: getSekaiPreviewRimDirection(),
-      specularPower: this.bodyMaterial.uniforms.uSpecularPower.value,
-      rimThreshold: this.bodyMaterial.uniforms.uRimThreshold.value,
-      shadowTexWeight: this.bodyMaterial.uniforms.uShadowTexWeight.value,
-      shadowWidthOverride: this.toonShadowWidthOverride,
-      valueShadowInfluence: this.toonValueShadowInfluence,
-      saturation: this.bodyMaterial.uniforms.uSaturation.value,
-      partsAmbientColor: `#${this.bodyMaterial.uniforms.uPartsAmbientColor.value.getHexString()}`,
-      reflectionBlendColor: `#${this.bodyMaterial.uniforms.uReflectionBlendColor.value.getHexString()}`,
-      globalShadowColor: `#${this.bodyMaterial.uniforms.uGlobalShadowColor.value.getHexString()}`,
-      controllerAmbientColor: `#${this.bodyMaterial.uniforms.uControllerAmbientColor.value.getHexString()}`,
-      controllerRimColor: `#${this.bodyMaterial.uniforms.uControllerRimColor.value.getHexString()}`,
-      controllerShadowRimColor: `#${this.bodyMaterial.uniforms.uControllerShadowRimColor.value.getHexString()}`,
-      controllerRimColorWeight: this.bodyMaterial.uniforms.uControllerRimColorWeight.value,
-      controllerShadowRimColorWeight: this.bodyMaterial.uniforms.uControllerShadowRimColorWeight.value,
-      controllerRimEdgeSmoothness: this.bodyMaterial.uniforms.uControllerRimEdgeSmoothness.value,
-      controllerRimShadowSharpness: this.bodyMaterial.uniforms.uControllerRimShadowSharpness.value,
-      bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
-      skinTintEnabled: true,
-    });
-    updateSekaiBodyMaterial(this.hairMaterial, {
-      baseColor: this.currentHeadAsset?.proxy.hairColor ?? "#7b5b4a",
-      shadowColor: this.currentHeadAsset?.proxy.hairShadowColor ?? "#513d33",
-      lightDirection: this.directionalLight.position.clone(),
-      lightIntensity: next.intensity,
-      ambientIntensity: next.ambient,
-      shadowThreshold: next.shadowThreshold,
-      shadowWeight: next.shadowWeight,
-      characterAmbientIntensity: next.characterAmbient,
-      rimIntensity: next.rimIntensity,
-      controllerRimThreshold: next.rimThreshold,
-      rimDirectionality: next.rimDirectionality,
-      rimDirection: getSekaiPreviewRimDirection(),
-      specularPower: this.hairMaterial.uniforms.uSpecularPower.value,
-      rimThreshold: this.hairMaterial.uniforms.uRimThreshold.value,
-      shadowTexWeight: this.hairMaterial.uniforms.uShadowTexWeight.value,
-      shadowWidthOverride: this.toonShadowWidthOverride,
-      valueShadowInfluence: this.toonValueShadowInfluence,
-      saturation: this.hairMaterial.uniforms.uSaturation.value,
-      partsAmbientColor: `#${this.hairMaterial.uniforms.uPartsAmbientColor.value.getHexString()}`,
-      reflectionBlendColor: `#${this.hairMaterial.uniforms.uReflectionBlendColor.value.getHexString()}`,
-      globalShadowColor: `#${this.hairMaterial.uniforms.uGlobalShadowColor.value.getHexString()}`,
-      controllerAmbientColor: `#${this.hairMaterial.uniforms.uControllerAmbientColor.value.getHexString()}`,
-      controllerRimColor: `#${this.hairMaterial.uniforms.uControllerRimColor.value.getHexString()}`,
-      controllerShadowRimColor: `#${this.hairMaterial.uniforms.uControllerShadowRimColor.value.getHexString()}`,
-      controllerRimColorWeight: this.hairMaterial.uniforms.uControllerRimColorWeight.value,
-      controllerShadowRimColorWeight: this.hairMaterial.uniforms.uControllerShadowRimColorWeight.value,
-      controllerRimEdgeSmoothness: this.hairMaterial.uniforms.uControllerRimEdgeSmoothness.value,
-      controllerRimShadowSharpness: this.hairMaterial.uniforms.uControllerRimShadowSharpness.value,
-      skinTintEnabled: false,
-      hairShadowEnabled: false,
-    });
-    updateSekaiFaceMaterial(this.faceMaterial, {
-      baseColor: this.currentHeadAsset?.proxy.faceColor ?? "#ffe4dc",
-      warmColor: this.currentHeadAsset?.proxy.faceShadeColor ?? "#ffd4c8",
-      skinColorDefault:
-        this.currentHeadAsset?.proxy.skinColorDefault ??
-        this.currentHeadAsset?.proxy.faceColor ??
-        "#ffe4dc",
-      skinColor1:
-        this.currentHeadAsset?.proxy.skinColor1 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        "#ffd4c8",
-      skinColor2:
-        this.currentHeadAsset?.proxy.skinColor2 ??
-        this.currentHeadAsset?.proxy.faceShadeColor ??
-        "#ffd4c8",
-      lightDirection: COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone(),
-      lightIntensity: next.intensity,
-      ambientIntensity: next.ambient,
-      headDotDirectionalLight: this.headDotDirectionalLight,
-      useFaceShadowLimiter: COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
-      faceShadowLimitRange: COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE,
-    });
-    this.updateLoadedMaterialLight(next);
   }
 
   updateGlobalShadowColor(color: THREE.ColorRepresentation) {
-    const nextColor = new THREE.Color(color);
-    for (const material of [this.bodyMaterial, this.hairMaterial]) {
-      material.uniforms.uGlobalShadowColor?.value.copy(nextColor);
-    }
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial) {
-            material.uniforms.uGlobalShadowColor?.value.copy(nextColor);
-          }
-        }
-      });
-    }
+    this.characterLighting.updateGlobalShadowColor(color);
   }
 
   updateLightControllerColors(colors: {
@@ -2560,180 +1948,21 @@ export class Haruki3DEngine {
     rimColor?: THREE.ColorRepresentation | null;
     shadowRimColor?: THREE.ColorRepresentation | null;
   }) {
-    const ambientColor = new THREE.Color(colors.ambientColor ?? "#ffffff");
-    const rimColor = new THREE.Color(colors.rimColor ?? "#e6edf9");
-    const shadowRimColor = new THREE.Color(colors.shadowRimColor ?? "#ffffff");
-    const rimColorWeight = colors.rimColor ? 1.0 : 0.0;
-    const shadowRimColorWeight = colors.shadowRimColor ? 1.0 : 0.0;
-    const applyUniforms = (material: THREE.ShaderMaterial) => {
-      material.uniforms.uControllerAmbientColor?.value.copy(ambientColor);
-      material.uniforms.uControllerRimColor?.value.copy(rimColor);
-      material.uniforms.uControllerShadowRimColor?.value.copy(shadowRimColor);
-      if (material.uniforms.uControllerRimColorWeight) {
-        material.uniforms.uControllerRimColorWeight.value = rimColorWeight;
-      }
-      if (material.uniforms.uControllerShadowRimColorWeight) {
-        material.uniforms.uControllerShadowRimColorWeight.value = shadowRimColorWeight;
-      }
-    };
-    for (const material of [this.bodyMaterial, this.hairMaterial]) {
-      applyUniforms(material);
-    }
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial) {
-            applyUniforms(material);
-          }
-        }
-      });
-    }
+    this.characterLighting.updateControllerColors(colors);
   }
 
   updateLightControllerRimShape(shape: {
     edgeSmoothness?: number | null;
     shadowSharpness?: number | null;
   }) {
-    const edgeSmoothness = THREE.MathUtils.clamp(
-      shape.edgeSmoothness ?? 0.38,
-      0.02,
-      1.0
-    );
-    const shadowSharpness = THREE.MathUtils.clamp(
-      shape.shadowSharpness ?? 0.0,
-      0.0,
-      1.0
-    );
-    const applyUniforms = (material: THREE.ShaderMaterial) => {
-      if (material.uniforms.uControllerRimEdgeSmoothness) {
-        material.uniforms.uControllerRimEdgeSmoothness.value = edgeSmoothness;
-      }
-      if (material.uniforms.uControllerRimShadowSharpness) {
-        material.uniforms.uControllerRimShadowSharpness.value = shadowSharpness;
-      }
-    };
-    for (const material of [this.bodyMaterial, this.hairMaterial]) {
-      applyUniforms(material);
-    }
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial) {
-            applyUniforms(material);
-          }
-        }
-      });
-    }
+    this.characterLighting.updateControllerRimShape(shape);
   }
 
   updateLightControllerOutline(outline: {
     color?: THREE.ColorRepresentation | null;
     blending?: number | null;
   }) {
-    this.controllerOutlineColor = outline.color ? new THREE.Color(outline.color) : null;
-    this.controllerOutlineBlending = THREE.MathUtils.clamp(
-      outline.blending ?? (this.controllerOutlineColor ? 1.0 : 0.0),
-      0.0,
-      1.0
-    );
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh || !mesh.userData.pjskOutlineShell) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.MeshBasicMaterial) {
-            this.applyLightControllerOutlineMaterial(material);
-          }
-        }
-      });
-    }
-  }
-
-  private applyLightControllerOutlineMaterial(material: THREE.MeshBasicMaterial) {
-    if (material.name !== "pjsk_shell_outline") {
-      return;
-    }
-    const baseColor = new THREE.Color(
-      typeof material.userData.pjskBaseOutlineColor === "string"
-        ? material.userData.pjskBaseOutlineColor
-        : "#1f1b1b"
-    );
-    if (!this.controllerOutlineColor) {
-      material.color.copy(baseColor);
-      material.opacity = typeof material.userData.pjskBaseOutlineOpacity === "number"
-        ? material.userData.pjskBaseOutlineOpacity
-        : 0.5;
-      return;
-    }
-    material.color.copy(baseColor.lerp(this.controllerOutlineColor, this.controllerOutlineBlending));
-    material.opacity = typeof material.userData.pjskBaseOutlineOpacity === "number"
-      ? material.userData.pjskBaseOutlineOpacity
-      : 0.5;
-  }
-
-  private updateLoadedMaterialLight(next: PreviewLightState) {
-    const lightDirection = this.directionalLight.position.clone().normalize();
-    const faceShadowLightDirection = COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
-    const rimDirection = getSekaiPreviewRimDirection();
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (!(material instanceof THREE.ShaderMaterial)) {
-            continue;
-          }
-          const uniforms = material.uniforms;
-          const lighting = material.userData.pjskLighting as MaterialLightingSettings | undefined;
-          const isFaceShadowMaterial = Boolean(uniforms.uFaceShadowTex || uniforms.uHeadDotDirectionalLight);
-          uniforms.uLightDirection?.value.copy(
-            isFaceShadowMaterial ? faceShadowLightDirection : lightDirection
-          );
-          if (uniforms.uLightIntensity) {
-            uniforms.uLightIntensity.value = next.intensity;
-          }
-          if (uniforms.uAmbientIntensity) {
-            uniforms.uAmbientIntensity.value = next.ambient;
-          }
-          if (uniforms.uShadowThreshold) {
-            uniforms.uShadowThreshold.value =
-              lighting?.sekaiShadowThreshold ?? next.shadowThreshold;
-          }
-          if (uniforms.uShadowWeight) {
-            uniforms.uShadowWeight.value = next.shadowWeight;
-          }
-          if (uniforms.uCharacterAmbientIntensity) {
-            uniforms.uCharacterAmbientIntensity.value = next.characterAmbient;
-          }
-          if (uniforms.uRimIntensity) {
-            uniforms.uRimIntensity.value = next.rimIntensity;
-          }
-          if (uniforms.uControllerRimThreshold) {
-            uniforms.uControllerRimThreshold.value = next.rimThreshold;
-          }
-          if (uniforms.uRimDirectionality) {
-            uniforms.uRimDirectionality.value = next.rimDirectionality;
-          }
-          uniforms.uRimDirection?.value.copy(rimDirection);
-        }
-      });
-    }
+    this.characterLighting.updateControllerOutline(outline);
   }
 
   destroy() {
@@ -3049,7 +2278,7 @@ export class Haruki3DEngine {
         lighting,
         useSecondNormal
       );
-      this.applyLightControllerOutlineMaterial(outlineMaterial);
+      this.characterLighting.applyOutlineMaterial(outlineMaterial);
       const outline = mesh instanceof THREE.SkinnedMesh
         ? new THREE.SkinnedMesh(mesh.geometry, outlineMaterial)
         : new THREE.Mesh(mesh.geometry, outlineMaterial);
@@ -3085,13 +2314,14 @@ export class Haruki3DEngine {
     bodyAsset: BodyAssetManifest
   ) {
     this.runtimeDebug.body = [];
+    const view = this.characterLighting.getBindingView();
     await bindBodyRuntimeMaterials({
       root,
       bodyAsset,
       headAsset: this.currentHeadAsset,
       textureLoader: this.textureLoader,
       template: this.bodyMaterial,
-      bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
+      bodyDebugMode: view.bodyDebugMode,
       debug: this.runtimeDebug.body,
     });
   }
@@ -3103,6 +2333,7 @@ export class Haruki3DEngine {
       hairController?: CharacterHairMaterialController | null;
     } = {}
   ) {
+    const view = this.characterLighting.getBindingView();
     this.runtimeDebug.head = [];
     this.currentHairOffset.copy(options.hairController?.offset ?? new THREE.Vector3());
     this.currentHairHeadTransform = null;
@@ -3130,13 +2361,13 @@ export class Haruki3DEngine {
         face: this.faceMaterial,
       },
       view: {
-        bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
-        faceDebugMode: faceSdfDebugModeToUniform(this.faceSdfDebugMode),
-        faceSdfEnabled: this.shouldEnableFaceSdfForCurrentView(),
+        bodyDebugMode: view.bodyDebugMode,
+        faceDebugMode: view.faceDebugMode,
+        faceSdfEnabled: view.faceSdfEnabled,
       },
       hair: {
         controllerPresent: Boolean(options.hairController),
-        proximityShadowEnabled: this.isHeadProximityHairShadowEnabled(),
+        proximityShadowEnabled: view.proximityHairShadowEnabled,
         headPosition: this.hairHeadPosition,
       },
       eyeController: options.eyeController,
@@ -3170,38 +2401,7 @@ export class Haruki3DEngine {
   }
 
   private updateShaderCameraPositions() {
-    const cameraPosition = this.camera.position;
-    updateSekaiBodyCamera(this.bodyMaterial, cameraPosition);
-    updateSekaiBodyCamera(this.hairMaterial, cameraPosition);
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (material instanceof THREE.ShaderMaterial && material.uniforms.uCameraPosition) {
-            updateSekaiBodyCamera(material, cameraPosition);
-          }
-        }
-      });
-    }
-  }
-
-  private getFaceShadowLightDirection() {
-    switch (this.faceSdfDebugLightMode) {
-      case "front":
-        return this.faceForwardWorld.clone();
-      case "left":
-        return this.faceRightWorld.clone().negate();
-      case "right":
-        return this.faceRightWorld.clone();
-      case "back":
-        return this.faceForwardWorld.clone().negate();
-      default:
-        return COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION.clone();
-    }
+    this.characterLighting.updateCamera(this.camera.position);
   }
 
   private updateShaderFaceBasis() {
@@ -3219,7 +2419,11 @@ export class Haruki3DEngine {
     this.faceForwardWorld.set(0, 0, 1).applyQuaternion(this.tempQuaternion).normalize();
     this.faceRightWorld.crossVectors(this.faceUpWorld, this.faceForwardWorld).normalize();
     this.faceUpWorld.crossVectors(this.faceForwardWorld, this.faceRightWorld).normalize();
-    const faceShadowLightDirection = this.getFaceShadowLightDirection();
+    const faceShadowLightDirection = this.characterLighting.resolveFaceShadowLightDirection(
+      COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION,
+      this.faceRightWorld,
+      this.faceForwardWorld
+    );
     normalizeFaceShadowHorizontal(
       this.faceShadowHeadHorizontal,
       -this.faceUpWorld.x,
@@ -3244,39 +2448,16 @@ export class Haruki3DEngine {
     headNode.localToWorld(this.hairHeadPosition);
     this.runtimeDebug.hairShadowOffset = vectorDebugSnapshot(this.currentHairOffset);
     this.runtimeDebug.hairShadowWorldPosition = vectorDebugSnapshot(this.hairHeadPosition);
-    updateSekaiFaceShadowParameters(
-      this.faceMaterial,
+    this.characterLighting.updateFaceBasis(
       faceShadowLightDirection,
       this.headDotDirectionalLight,
-      COSTUME_SHOP_USE_FACE_SHADOW_LIMITER,
-      COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE
+      this.hairHeadPosition
     );
-    for (const slot of [this.bodySlot, this.headSlot]) {
-      slot.traverse((node) => {
-        const mesh = node as THREE.Mesh;
-        if (!mesh.isMesh) {
-          return;
-        }
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (!(material instanceof THREE.ShaderMaterial)) {
-            continue;
-          }
-          if (material.uniforms.uHeadDotDirectionalLight) {
-            updateSekaiFaceShadowParameters(
-              material,
-              faceShadowLightDirection,
-              this.headDotDirectionalLight,
-              (material.uniforms.uUseFaceShadowLimiter?.value ?? 1.0) > 0.5,
-              material.uniforms.uFaceShadowLimitRange?.value ?? 0.0
-            );
-          }
-          if (material.uniforms.uHeadPosition) {
-            material.uniforms.uHeadPosition.value.copy(this.hairHeadPosition);
-          }
-        }
-      });
-    }
+    this.characterLighting.updateEyeThroughHairView(
+      this.camera.position,
+      this.faceHeadWorldPosition,
+      this.faceForwardWorld
+    );
   }
 
   private findFaceSdfHeadBone() {
