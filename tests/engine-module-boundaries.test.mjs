@@ -56,9 +56,10 @@ test("prefab graph assembly and native mesh import are isolated from engine stat
   assert.match(engineSource, /private async loadCombinedCharacterAsset/);
 });
 
-test("body material binding is isolated while head layer orchestration stays staged", () => {
+test("body and head material binding are isolated from engine state", () => {
   const engineSource = readSource("src/engine/Haruki3DEngine.ts");
   const materialSource = readSource("src/engine/characterMaterialRuntime.ts");
+  const headMaterialSource = readSource("src/engine/headMaterialRuntime.ts");
 
   assert.doesNotMatch(engineSource, /Body mesh '\$\{mesh\.name\}' material key/);
   assert.match(materialSource, /export async function bindBodyRuntimeMaterials/);
@@ -68,12 +69,15 @@ test("body material binding is isolated while head layer orchestration stays sta
     engineSource,
     /this\.runtimeDebug\.body = \[\];\s+await bindBodyRuntimeMaterials/
   );
-  assert.match(engineSource, /private async overrideHeadMaterials/);
+  assert.doesNotMatch(engineSource, /Head mesh '\$\{mesh\.name\}' material key/);
+  assert.match(headMaterialSource, /export async function bindHeadRuntimeMaterials/);
+  assert.match(engineSource, /await bindHeadRuntimeMaterials\(/);
 });
 
 test("through-hair pass policy and submesh cloning are isolated from engine state", () => {
   const engineSource = readSource("src/engine/Haruki3DEngine.ts");
   const materialSource = readSource("src/engine/characterMaterialRuntime.ts");
+  const headMaterialSource = readSource("src/engine/headMaterialRuntime.ts");
 
   assert.doesNotMatch(engineSource, /function configureFaceLayerOverlayStencil/);
   assert.doesNotMatch(engineSource, /function createGroupedOverlayMesh/);
@@ -81,5 +85,5 @@ test("through-hair pass policy and submesh cloning are isolated from engine stat
   assert.match(materialSource, /export function configureSekaiEyelashPass/);
   assert.match(materialSource, /material\.depthFunc = THREE\.AlwaysDepth/);
   assert.match(materialSource, /export function createSekaiThroughHairOverlayMesh/);
-  assert.match(engineSource, /const CHARACTER_STENCIL_BIT = 0x01/);
+  assert.match(headMaterialSource, /const CHARACTER_STENCIL_BIT = 0x01/);
 });

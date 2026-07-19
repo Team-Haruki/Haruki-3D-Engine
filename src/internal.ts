@@ -122,5 +122,9 @@ export {
   updateSekaiEyelashPassView,
   type RuntimeMaterialDebug,
 } from "./engine/characterMaterialRuntime";
+export {
+  bindHeadRuntimeMaterials,
+  type CharacterEyeMaterialController,
+} from "./engine/headMaterialRuntime";
 export { createSekaiBodyMaterial } from "./materials/sekaiBodyMaterial";
 export { createSekaiLayerMaterial } from "./materials/sekaiCharacterShader";
