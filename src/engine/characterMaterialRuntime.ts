@@ -101,6 +101,21 @@ type CloneBodyMaterialParams = {
   alphaCutoff?: number;
 };
 
+type SekaiEyelashSourceKind = "eye" | "eyelash" | "eyebrow" | "eyelight";
+
+type SekaiEyelashViewSettings = {
+  opacity: number;
+  edge1: number;
+  edge2: number;
+};
+
+const sekaiEyelashViewSettings: Record<SekaiEyelashSourceKind, SekaiEyelashViewSettings> = {
+  eye: { opacity: 0.2, edge1: 0.9, edge2: 0.2 },
+  eyelash: { opacity: 0.2, edge1: 0.9, edge2: 0.2 },
+  eyebrow: { opacity: 0.5, edge1: 0.5, edge2: 0.1 },
+  eyelight: { opacity: 0.2, edge1: 0.9, edge2: 0.2 },
+};
+
 export function getSekaiPreviewRimDirection() {
   return new THREE.Vector3(0, 0, -1)
     .applyEuler(new THREE.Euler(THREE.MathUtils.degToRad(135), 0, THREE.MathUtils.degToRad(-90)))
@@ -265,6 +280,239 @@ export function tuneLightingForPreview(
 export function usesSekaiSkinTint(kind: string | undefined) {
   const normalized = (kind ?? "body").toLowerCase();
   return normalized === "body" || normalized === "accessory" || normalized === "acc";
+}
+
+export function configureSekaiEyelashPass(
+  material: THREE.Material,
+  stencilBit: number,
+  sourceKind?: SekaiEyelashSourceKind
+) {
+  material.side = THREE.FrontSide;
+  material.transparent = true;
+  material.stencilWrite = true;
+  material.stencilRef = stencilBit;
+  material.stencilFunc = THREE.EqualStencilFunc;
+  material.stencilFuncMask = stencilBit;
+  material.stencilWriteMask = stencilBit;
+  material.stencilFail = THREE.KeepStencilOp;
+  material.stencilZFail = THREE.KeepStencilOp;
+  material.stencilZPass = THREE.KeepStencilOp;
+  material.depthTest = true;
+  material.depthWrite = false;
+  material.depthFunc = THREE.AlwaysDepth;
+  material.blending = THREE.CustomBlending;
+  material.blendSrc = THREE.SrcAlphaFactor;
+  material.blendDst = THREE.OneMinusSrcAlphaFactor;
+  material.blendEquation = THREE.AddEquation;
+  material.blendSrcAlpha = THREE.ZeroFactor;
+  material.blendDstAlpha = THREE.OneFactor;
+  material.blendEquationAlpha = THREE.AddEquation;
+  material.polygonOffset = false;
+  if (sourceKind) {
+    material.userData.pjskSekaiEyelashViewSettings = {
+      ...sekaiEyelashViewSettings[sourceKind],
+    };
+    if (material instanceof THREE.ShaderMaterial && material.uniforms.uAlphaScale) {
+      material.uniforms.uAlphaScale.value = sekaiEyelashViewSettings[sourceKind].opacity;
+    }
+    if (material instanceof THREE.ShaderMaterial && material.uniforms.uAlphaSource) {
+      material.uniforms.uAlphaSource.value = sourceKind === "eyelight" ? 2.0 : 1.0;
+    }
+  }
+}
+
+export function updateSekaiEyelashPassView(
+  material: THREE.Material,
+  faceCameraDot: number
+) {
+  const settings = material.userData.pjskSekaiEyelashViewSettings as
+    | SekaiEyelashViewSettings
+    | undefined;
+  if (!settings) {
+    return null;
+  }
+  const width = settings.edge1 - settings.edge2;
+  const normalized = width === 0
+    ? (faceCameraDot >= settings.edge1 ? 1 : 0)
+    : THREE.MathUtils.clamp((faceCameraDot - settings.edge2) / width, 0, 1);
+  const alpha = normalized * normalized * (3 - 2 * normalized) * settings.opacity;
+  if (material instanceof THREE.ShaderMaterial && material.uniforms.uAlphaScale) {
+    material.uniforms.uAlphaScale.value = alpha;
+  }
+  return alpha;
+}
+
+export function configureSekaiFaceLayerStencilPrepass(
+  material: THREE.Material,
+  stencilBit: number
+) {
+  material.transparent = false;
+  material.colorWrite = false;
+  material.stencilWrite = true;
+  material.stencilRef = stencilBit;
+  material.stencilFunc = THREE.AlwaysStencilFunc;
+  material.stencilFuncMask = 0xff;
+  material.stencilWriteMask = stencilBit;
+  material.stencilFail = THREE.KeepStencilOp;
+  material.stencilZFail = THREE.KeepStencilOp;
+  material.stencilZPass = THREE.ReplaceStencilOp;
+  material.depthTest = true;
+  material.depthWrite = false;
+  material.depthFunc = THREE.LessEqualDepth;
+}
+
+export function configureSekaiHairStencil(
+  material: THREE.Material,
+  stencilBit: number
+) {
+  material.stencilWrite = true;
+  material.stencilRef = 0;
+  material.stencilFunc = THREE.AlwaysStencilFunc;
+  material.stencilFuncMask = 0xff;
+  material.stencilWriteMask = 0xff & ~stencilBit;
+  material.stencilFail = THREE.KeepStencilOp;
+  material.stencilZFail = THREE.KeepStencilOp;
+  material.stencilZPass = THREE.ReplaceStencilOp;
+}
+
+export function getHeadLayerRenderOrder(kind: string) {
+  switch (kind) {
+    case "face_sdf":
+    case "face":
+    case "accessory":
+    case "body":
+    case "eyelight":
+      return 2000;
+    case "eye_stencil_prepass":
+      return 2001;
+    case "eyelash_stencil_prepass":
+      return 2001.1;
+    case "eyebrow_stencil_prepass":
+      return 2001.2;
+    case "eyelash":
+    case "eyebrow":
+      return 2001;
+    case "eye":
+      return 2002;
+    case "hair":
+      return 2451;
+    case "eye_through_hair":
+      return 2452;
+    case "eyelash_through_hair":
+      return 2453;
+    case "eyebrow_through_hair":
+      return 2454;
+    case "eyelight_through_hair":
+      return 2455;
+    default:
+      return 2000;
+  }
+}
+
+export function sortHeadMeshGroupsByMaterialKind(
+  mesh: THREE.Mesh,
+  materials: THREE.Material[]
+) {
+  if (materials.length < 2 || mesh.geometry.groups.length < 2) {
+    return;
+  }
+  const orderedGroups = mesh.geometry.groups
+    .map((group, index) => {
+      const material = materials[group.materialIndex ?? 0];
+      const kind = typeof material?.userData.pjskMaterialKind === "string"
+        ? material.userData.pjskMaterialKind
+        : "";
+      return {
+        start: group.start,
+        count: group.count,
+        materialIndex: group.materialIndex ?? 0,
+        order: getHeadLayerRenderOrder(kind),
+        index,
+      };
+    })
+    .sort((a, b) => a.order - b.order || a.index - b.index);
+  mesh.geometry.clearGroups();
+  for (const group of orderedGroups) {
+    mesh.geometry.addGroup(group.start, group.count, group.materialIndex);
+  }
+}
+
+export function createGroupedLayerMesh(
+  source: THREE.Mesh,
+  groups: Array<{ start: number; count: number; materialIndex: number }>,
+  materials: THREE.Material[],
+  nameSuffix: string
+) {
+  if (groups.length === 0 || materials.length === 0) {
+    return null;
+  }
+  const geometry = source.geometry.clone();
+  geometry.clearGroups();
+  for (const group of groups) {
+    geometry.addGroup(group.start, group.count, group.materialIndex);
+  }
+  const sourceSkinned = source as THREE.SkinnedMesh;
+  const overlay = sourceSkinned.isSkinnedMesh
+    ? new THREE.SkinnedMesh(geometry, materials)
+    : new THREE.Mesh(geometry, materials);
+  overlay.name = `${source.name}_${nameSuffix}`;
+  overlay.position.copy(source.position);
+  overlay.quaternion.copy(source.quaternion);
+  overlay.scale.copy(source.scale);
+  overlay.matrix.copy(source.matrix);
+  overlay.matrixAutoUpdate = source.matrixAutoUpdate;
+  overlay.matrixWorldAutoUpdate = source.matrixWorldAutoUpdate;
+  overlay.layers.mask = source.layers.mask;
+  overlay.visible = source.visible;
+  overlay.renderOrder = Math.min(
+    ...materials.map((material) => getHeadLayerRenderOrder(
+      typeof material.userData.pjskMaterialKind === "string"
+        ? material.userData.pjskMaterialKind
+        : ""
+    ))
+  );
+  overlay.frustumCulled = source.frustumCulled;
+  overlay.castShadow = false;
+  overlay.receiveShadow = false;
+  overlay.morphTargetDictionary = source.morphTargetDictionary;
+  overlay.morphTargetInfluences = source.morphTargetInfluences;
+  sortHeadMeshGroupsByMaterialKind(overlay, materials);
+  if ((overlay as THREE.SkinnedMesh).isSkinnedMesh && sourceSkinned.isSkinnedMesh) {
+    const skinnedOverlay = overlay as THREE.SkinnedMesh;
+    skinnedOverlay.bind(sourceSkinned.skeleton, sourceSkinned.bindMatrix);
+    skinnedOverlay.bindMode = sourceSkinned.bindMode;
+    skinnedOverlay.bindMatrix.copy(sourceSkinned.bindMatrix);
+    skinnedOverlay.bindMatrixInverse.copy(sourceSkinned.bindMatrixInverse);
+  }
+  return overlay;
+}
+
+export function createSekaiThroughHairOverlayMesh(
+  source: THREE.Mesh,
+  groups: Array<{ start: number; count: number; materialIndex: number }>,
+  materials: THREE.Material[]
+) {
+  const overlay = createGroupedLayerMesh(source, groups, materials, "through_hair_overlay");
+  if (!overlay) {
+    return null;
+  }
+  const kind = typeof materials[0]?.userData.pjskMaterialKind === "string"
+    ? materials[0].userData.pjskMaterialKind
+    : "";
+  const sourceKind = kind.startsWith("eyelash_")
+    ? "eyelash"
+    : kind.startsWith("eyebrow_")
+      ? "eyebrow"
+      : kind.startsWith("eyelight_")
+        ? "eyelight"
+        : kind.startsWith("eye_")
+          ? "eye"
+          : "";
+  overlay.userData.pjskEyeThroughHairSource = source;
+  overlay.userData.pjskEyeThroughHairSourceKind = sourceKind;
+  overlay.userData.pjskEyeThroughHairPassKind = "overlay";
+  overlay.userData.pjskEyeThroughHairOverlay = true;
+  return overlay;
 }
 
 export async function bindBodyRuntimeMaterials({

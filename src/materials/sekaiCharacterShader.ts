@@ -986,6 +986,8 @@ export function createSekaiLayerMaterial(
       uAlphaScale: { value: THREE.MathUtils.clamp(options?.alphaScale ?? 1.0, 0.0, 1.0) },
       uAlphaCutoff: { value: THREE.MathUtils.clamp(options?.alphaCutoff ?? 0.001, 0.0, 1.0) },
       uStrictAlpha: { value: options?.strictAlpha ? 1.0 : 0.0 },
+      // 0: texture alpha, 1: SekaiEyelash opaque source, 2: SekaiEyelash highlight red.
+      uAlphaSource: { value: 0.0 },
     },
     vertexShader: `
       #include <common>
@@ -1045,6 +1047,7 @@ export function createSekaiLayerMaterial(
       uniform float uAlphaScale;
       uniform float uAlphaCutoff;
       uniform float uStrictAlpha;
+      uniform float uAlphaSource;
 
       varying vec2 vUv;
       varying vec3 vViewNormal;
@@ -1084,8 +1087,13 @@ export function createSekaiLayerMaterial(
         }
         vec4 sampleColor = uUseMainTex > 0.5 ? texture2D(uMainTex, uv) : vec4(1.0);
         float textureAlpha = sampleColor.a;
-        float alpha = textureAlpha;
-        if (uMode > 1.5 && uStrictAlpha < 0.5) {
+        float alpha = uAlphaSource > 1.5
+          ? sampleColor.r
+          : (uAlphaSource > 0.5 ? 1.0 : textureAlpha);
+        if (uAlphaSource > 1.5 && sampleColor.r < uThreshold) {
+          discard;
+        }
+        if (uAlphaSource < 0.5 && uMode > 1.5 && uStrictAlpha < 0.5) {
           float brightness = max(max(sampleColor.r, sampleColor.g), sampleColor.b);
           float alphaLow = mix(0.06, 0.16, uThreshold);
           float alphaHigh = mix(0.32, 0.55, uThreshold);
@@ -1107,7 +1115,9 @@ export function createSekaiLayerMaterial(
           float brightness = max(max(sampleColor.r, sampleColor.g), sampleColor.b);
           color = max(color, vec3(brightness) * uTintColor);
           color *= 1.05 + alpha * mix(0.65, 1.05, uHighlightInfluence);
-          alpha = clamp(alpha * mix(1.1, 1.55, uHighlightInfluence), 0.0, 1.0);
+          if (uAlphaSource < 0.5) {
+            alpha = clamp(alpha * mix(1.1, 1.55, uHighlightInfluence), 0.0, 1.0);
+          }
         }
         gl_FragColor = vec4(outputColor(clamp(color, 0.0, 1.0)), alpha);
       }

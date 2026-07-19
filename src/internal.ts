@@ -115,6 +115,12 @@ export {
 } from "./engine/unityPrefabRuntime";
 export {
   bindBodyRuntimeMaterials,
+  configureSekaiEyelashPass,
+  configureSekaiFaceLayerStencilPrepass,
+  configureSekaiHairStencil,
+  createSekaiThroughHairOverlayMesh,
+  updateSekaiEyelashPassView,
   type RuntimeMaterialDebug,
 } from "./engine/characterMaterialRuntime";
 export { createSekaiBodyMaterial } from "./materials/sekaiBodyMaterial";
+export { createSekaiLayerMaterial } from "./materials/sekaiCharacterShader";

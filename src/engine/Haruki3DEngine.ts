@@ -95,12 +95,20 @@ import {
 import {
   bindBodyRuntimeMaterials,
   cloneBodyShaderMaterial,
+  configureSekaiEyelashPass,
+  configureSekaiFaceLayerStencilPrepass,
+  configureSekaiHairStencil,
+  createGroupedLayerMesh,
+  createSekaiThroughHairOverlayMesh,
   extractMaterialColorMap,
   getSekaiPreviewRimDirection,
+  getHeadLayerRenderOrder,
   loadRuntimeTexture,
   normalizeMeshSlotName,
   syncReplacementTextureFromOriginal,
+  sortHeadMeshGroupsByMaterialKind,
   tuneLightingForPreview,
+  updateSekaiEyelashPassView,
   usesSekaiSkinTint,
   type RuntimeMaterialDebug,
 } from "./characterMaterialRuntime";
@@ -143,25 +151,9 @@ const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
 ).normalize();
 const COSTUME_SHOP_USE_FACE_SHADOW_LIMITER = true;
 const COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE = 0;
-const CHARACTER_EYE_STENCIL_BIT = 0x01;
-const CHARACTER_EYELASH_STENCIL_BIT = 0x02;
-const CHARACTER_EYEBROW_STENCIL_BIT = 0x04;
-const CHARACTER_FACE_LAYER_STENCIL_MASK =
-  CHARACTER_EYE_STENCIL_BIT |
-  CHARACTER_EYELASH_STENCIL_BIT |
-  CHARACTER_EYEBROW_STENCIL_BIT;
-const NON_CHARACTER_FACE_LAYER_STENCIL_MASK =
-  0xff & ~CHARACTER_FACE_LAYER_STENCIL_MASK;
-const EYE_THROUGH_HAIR_FRONT_FADE_MIN = 0.45;
-const EYE_THROUGH_HAIR_FRONT_FADE_MAX = 0.94;
-const EYE_THROUGH_HAIR_SIDE_FADE_MIN = 0.18;
-const EYE_THROUGH_HAIR_SIDE_FADE_MAX = 0.80;
+const CHARACTER_STENCIL_BIT = 0x01;
 const HAIR_ALPHA_CUTOFF = 0.02;
 const ACCESSORY_ALPHA_CUTOFF = 0.02;
-const EYE_THROUGH_HAIR_ALPHA = 0.42;
-const EYELASH_THROUGH_HAIR_ALPHA = 0.55;
-const EYELASH_THROUGH_HAIR_ALPHA_CUTOFF = 0.25;
-const EYEBROW_THROUGH_HAIR_ALPHA = 0.55;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
@@ -714,24 +706,6 @@ function isFaceOrFaceLayerMaterialKind(kind: unknown) {
     isFaceLayerMaterialKind(kind);
 }
 
-function getEyeThroughHairSourceKind(kind: unknown) {
-  switch (kind) {
-    case "eye_through_hair":
-    case "eye_stencil_prepass":
-      return "eye";
-    case "eyelash_through_hair":
-    case "eyelash_stencil_prepass":
-      return "eyelash";
-    case "eyebrow_through_hair":
-    case "eyebrow_stencil_prepass":
-      return "eyebrow";
-    case "eyelight_through_hair":
-      return "eyelight";
-    default:
-      return "";
-  }
-}
-
 function isEyeThroughHairSourceAllowed(sourceKind: string, mode: RenderIsolationMode) {
   switch (mode) {
     case "eye_through_hair_eye_only":
@@ -1052,40 +1026,6 @@ function isMorphMesh(node: THREE.Object3D): node is THREE.Mesh {
   return !!mesh.isMesh && Array.isArray(mesh.morphTargetInfluences);
 }
 
-function getHeadLayerRenderOrder(kind: string) {
-  switch (kind) {
-    case "face_sdf":
-    case "face":
-    case "accessory":
-    case "body":
-    case "eyelight":
-      return 2000;
-    case "eye_stencil_prepass":
-      return 2001;
-    case "eyelash_stencil_prepass":
-      return 2001.1;
-    case "eyebrow_stencil_prepass":
-      return 2001.2;
-    case "eyelash":
-    case "eyebrow":
-      return 2001;
-    case "eye":
-      return 2002;
-    case "hair":
-      return 2451;
-    case "eye_through_hair":
-      return 2452;
-    case "eyelash_through_hair":
-      return 2453;
-    case "eyebrow_through_hair":
-      return 2454;
-    case "eyelight_through_hair":
-      return 2455;
-    default:
-      return 2000;
-  }
-}
-
 function configureBaseStencilClear(
   material: THREE.Material,
   writeMask = 0xff
@@ -1098,206 +1038,6 @@ function configureBaseStencilClear(
   material.stencilFail = THREE.KeepStencilOp;
   material.stencilZFail = THREE.KeepStencilOp;
   material.stencilZPass = THREE.ReplaceStencilOp;
-}
-
-function configureFaceLayerStencilPrepass(
-  material: THREE.Material,
-  stencilBit: number
-) {
-  material.transparent = false;
-  material.colorWrite = false;
-  material.stencilWrite = true;
-  material.stencilRef = 0xff;
-  material.stencilFunc = THREE.AlwaysStencilFunc;
-  material.stencilFuncMask = 0xff;
-  material.stencilWriteMask = stencilBit;
-  material.stencilFail = THREE.KeepStencilOp;
-  material.stencilZFail = THREE.KeepStencilOp;
-  material.stencilZPass = THREE.ReplaceStencilOp;
-  material.depthTest = true;
-  material.depthWrite = false;
-  material.depthFunc = THREE.LessEqualDepth;
-}
-
-function configureEyeStencilPrepass(
-  material: THREE.Material,
-) {
-  configureFaceLayerStencilPrepass(material, CHARACTER_EYE_STENCIL_BIT);
-}
-
-function configureEyelashStencilPrepass(
-  material: THREE.Material,
-) {
-  configureFaceLayerStencilPrepass(material, CHARACTER_EYELASH_STENCIL_BIT);
-}
-
-function configureEyebrowStencilPrepass(
-  material: THREE.Material,
-) {
-  configureFaceLayerStencilPrepass(material, CHARACTER_EYEBROW_STENCIL_BIT);
-}
-
-function configureEyeOverlayStencil(
-  material: THREE.Material,
-  zPass: THREE.StencilOp
-) {
-  material.stencilWrite = true;
-  material.stencilRef = CHARACTER_EYE_STENCIL_BIT;
-  material.stencilFunc = THREE.EqualStencilFunc;
-  material.stencilFuncMask = CHARACTER_FACE_LAYER_STENCIL_MASK;
-  material.stencilWriteMask = CHARACTER_FACE_LAYER_STENCIL_MASK;
-  material.stencilFail = THREE.KeepStencilOp;
-  material.stencilZFail = THREE.KeepStencilOp;
-  material.stencilZPass = zPass;
-  material.depthTest = true;
-  material.depthWrite = false;
-  material.depthFunc = THREE.GreaterDepth;
-}
-
-function configureFaceLayerOverlayStencil(
-  material: THREE.Material,
-  stencilBit: number
-) {
-  material.stencilWrite = true;
-  material.stencilRef = stencilBit;
-  material.stencilFunc = THREE.EqualStencilFunc;
-  material.stencilFuncMask = stencilBit;
-  material.stencilWriteMask = CHARACTER_FACE_LAYER_STENCIL_MASK;
-  material.stencilFail = THREE.KeepStencilOp;
-  material.stencilZFail = THREE.KeepStencilOp;
-  material.stencilZPass = THREE.KeepStencilOp;
-  material.depthTest = true;
-  material.depthWrite = false;
-  material.depthFunc = THREE.GreaterDepth;
-}
-
-function configureEyelightThroughHairOverlay(
-  material: THREE.Material
-) {
-  material.stencilWrite = false;
-  material.depthTest = true;
-  material.depthWrite = false;
-  material.depthFunc = THREE.GreaterDepth;
-}
-
-function configureHairOccluderStencil(
-  material: THREE.Material
-) {
-  material.stencilWrite = true;
-  material.stencilRef = 0x00;
-  material.stencilFunc = THREE.AlwaysStencilFunc;
-  material.stencilFuncMask = 0xff;
-  material.stencilWriteMask = NON_CHARACTER_FACE_LAYER_STENCIL_MASK;
-  material.stencilFail = THREE.KeepStencilOp;
-  material.stencilZFail = THREE.KeepStencilOp;
-  material.stencilZPass = THREE.ReplaceStencilOp;
-}
-
-function sortHeadMeshGroupsByMaterialKind(
-  mesh: THREE.Mesh,
-  materials: THREE.Material[]
-) {
-  if (materials.length < 2 || mesh.geometry.groups.length < 2) {
-    return;
-  }
-
-  const orderedGroups = mesh.geometry.groups
-    .map((group, index) => {
-      const material = materials[group.materialIndex ?? 0];
-      const kind = typeof material?.userData.pjskMaterialKind === "string"
-        ? material.userData.pjskMaterialKind
-        : "";
-      return {
-        start: group.start,
-        count: group.count,
-        materialIndex: group.materialIndex ?? 0,
-        order: getHeadLayerRenderOrder(kind),
-        index,
-      };
-    })
-    .sort((a, b) => a.order - b.order || a.index - b.index);
-
-  mesh.geometry.clearGroups();
-  for (const group of orderedGroups) {
-    mesh.geometry.addGroup(group.start, group.count, group.materialIndex);
-  }
-}
-
-function createGroupedLayerMesh(
-  source: THREE.Mesh,
-  groups: Array<{ start: number; count: number; materialIndex: number }>,
-  materials: THREE.Material[],
-  nameSuffix: string
-) {
-  if (groups.length === 0 || materials.length === 0) {
-    return null;
-  }
-  const geometry = source.geometry.clone();
-  geometry.clearGroups();
-  for (const group of groups) {
-    geometry.addGroup(group.start, group.count, group.materialIndex);
-  }
-
-  const sourceSkinned = source as THREE.SkinnedMesh;
-  const overlay = sourceSkinned.isSkinnedMesh
-    ? new THREE.SkinnedMesh(geometry, materials)
-    : new THREE.Mesh(geometry, materials);
-  overlay.name = `${source.name}_${nameSuffix}`;
-  overlay.position.copy(source.position);
-  overlay.quaternion.copy(source.quaternion);
-  overlay.scale.copy(source.scale);
-  overlay.matrix.copy(source.matrix);
-  overlay.matrixAutoUpdate = source.matrixAutoUpdate;
-  overlay.matrixWorldAutoUpdate = source.matrixWorldAutoUpdate;
-  overlay.layers.mask = source.layers.mask;
-  overlay.visible = source.visible;
-  overlay.renderOrder = Math.min(
-    ...materials.map((material) => getHeadLayerRenderOrder(
-      typeof material.userData.pjskMaterialKind === "string"
-        ? material.userData.pjskMaterialKind
-        : ""
-    ))
-  );
-  overlay.frustumCulled = source.frustumCulled;
-  overlay.castShadow = false;
-  overlay.receiveShadow = false;
-  overlay.morphTargetDictionary = source.morphTargetDictionary;
-  overlay.morphTargetInfluences = source.morphTargetInfluences;
-  sortHeadMeshGroupsByMaterialKind(overlay, materials);
-  if ((overlay as THREE.SkinnedMesh).isSkinnedMesh && sourceSkinned.isSkinnedMesh) {
-    const skinnedOverlay = overlay as THREE.SkinnedMesh;
-    skinnedOverlay.bind(sourceSkinned.skeleton, sourceSkinned.bindMatrix);
-    skinnedOverlay.bindMode = sourceSkinned.bindMode;
-    skinnedOverlay.bindMatrix.copy(sourceSkinned.bindMatrix);
-    skinnedOverlay.bindMatrixInverse.copy(sourceSkinned.bindMatrixInverse);
-  }
-  return overlay;
-}
-
-function createGroupedOverlayMesh(
-  source: THREE.Mesh,
-  groups: Array<{ start: number; count: number; materialIndex: number }>,
-  materials: THREE.Material[]
-) {
-  const overlay = createGroupedLayerMesh(
-    source,
-    groups,
-    materials,
-    "through_hair_overlay"
-  );
-  if (!overlay) {
-    return null;
-  }
-  const sourceKind = getEyeThroughHairSourceKind(
-    typeof materials[0]?.userData.pjskMaterialKind === "string"
-      ? materials[0].userData.pjskMaterialKind
-      : ""
-  );
-  overlay.userData.pjskEyeThroughHairSource = source;
-  overlay.userData.pjskEyeThroughHairSourceKind = sourceKind;
-  overlay.userData.pjskEyeThroughHairPassKind = "overlay";
-  overlay.userData.pjskEyeThroughHairOverlay = true;
-  return overlay;
 }
 
 function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
@@ -2107,20 +1847,9 @@ export class Haruki3DEngine {
     const cameraDirection = cameraSideValid
       ? this.tempVector.normalize()
       : this.tempVector.set(0, 0, 1);
-    const frontDot = cameraSideValid ? cameraDirection.dot(this.faceForwardWorld) : 1.0;
-    const sideDot = cameraSideValid ? Math.abs(cameraDirection.dot(this.faceRightWorld)) : 0.0;
-    const frontFade = THREE.MathUtils.smoothstep(
-      frontDot,
-      EYE_THROUGH_HAIR_FRONT_FADE_MIN,
-      EYE_THROUGH_HAIR_FRONT_FADE_MAX
-    );
-    const sideFade = 1.0 - THREE.MathUtils.smoothstep(
-      sideDot,
-      EYE_THROUGH_HAIR_SIDE_FADE_MIN,
-      EYE_THROUGH_HAIR_SIDE_FADE_MAX
-    );
-    const viewAlpha = THREE.MathUtils.clamp(frontFade * sideFade, 0.0, 1.0);
-    const passVisible = viewAlpha > 0.001;
+    const faceCameraDot = cameraSideValid
+      ? cameraDirection.dot(this.faceForwardWorld)
+      : 1.0;
     for (const slot of [this.bodySlot, this.headSlot]) {
       slot.traverse((node) => {
         const mesh = node as THREE.Mesh;
@@ -2134,18 +1863,18 @@ export class Haruki3DEngine {
           return;
         }
         const baseVisible = mesh.userData.pjskEyeThroughHairBaseVisible;
-        mesh.visible = (typeof baseVisible === "boolean" ? baseVisible : mesh.visible) && passVisible;
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        for (const material of materials) {
-          if (!(material instanceof THREE.ShaderMaterial) || !material.uniforms.uAlphaScale) {
-            continue;
-          }
-          if (typeof material.userData.pjskEyeThroughHairBaseAlphaScale !== "number") {
-            material.userData.pjskEyeThroughHairBaseAlphaScale = material.uniforms.uAlphaScale.value;
-          }
-          material.uniforms.uAlphaScale.value =
-            material.userData.pjskEyeThroughHairBaseAlphaScale * viewAlpha;
+        const sourceVisible = typeof baseVisible === "boolean" ? baseVisible : mesh.visible;
+        if (mesh.userData.pjskEyeThroughHairStencilPrepass) {
+          mesh.visible = sourceVisible;
+          return;
         }
+        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        let passVisible = false;
+        for (const material of materials) {
+          const alpha = updateSekaiEyelashPassView(material, faceCameraDot);
+          passVisible ||= alpha === null || alpha > 0.001;
+        }
+        mesh.visible = sourceVisible && passVisible;
       });
     }
   }
@@ -3859,7 +3588,7 @@ export class Haruki3DEngine {
           }
         );
         stencilPrepassMaterial.side = THREE.FrontSide;
-        configureEyeStencilPrepass(stencilPrepassMaterial);
+        configureSekaiFaceLayerStencilPrepass(stencilPrepassMaterial, CHARACTER_STENCIL_BIT);
         stencilPrepassMaterial.userData.pjskMaterialKind = "eye_stencil_prepass";
         const overlayMaterial = createSekaiLayerMaterial(
           mainTex,
@@ -3881,12 +3610,11 @@ export class Haruki3DEngine {
             distortionTexTilingX: lighting?.distortionTexTilingX,
             distortionTexTilingY: lighting?.distortionTexTilingY,
             threshold: lighting?.threshold,
-            alphaScale: EYE_THROUGH_HAIR_ALPHA,
             strictAlpha: true,
           }
         );
         overlayMaterial.side = THREE.FrontSide;
-        configureEyeOverlayStencil(overlayMaterial, THREE.KeepStencilOp);
+        configureSekaiEyelashPass(overlayMaterial, CHARACTER_STENCIL_BIT, "eye");
         overlayMaterial.userData.pjskMaterialKind = "eye_through_hair";
         material.userData.pjskOverlayMaterial = overlayMaterial;
         material.userData.pjskStencilPrepassMaterial = stencilPrepassMaterial;
@@ -3940,11 +3668,10 @@ export class Haruki3DEngine {
             distortionTexTilingX: lighting?.distortionTexTilingX,
             distortionTexTilingY: lighting?.distortionTexTilingY,
             threshold: lighting?.threshold,
-            alphaScale: EYE_THROUGH_HAIR_ALPHA,
           }
         );
         overlayMaterial.side = THREE.FrontSide;
-        configureEyelightThroughHairOverlay(overlayMaterial);
+        configureSekaiEyelashPass(overlayMaterial, CHARACTER_STENCIL_BIT, "eyelight");
         overlayMaterial.userData.pjskMaterialKind = "eyelight_through_hair";
         material.userData.pjskOverlayMaterial = overlayMaterial;
       } else if (kind === "eyelash" || kind === "eyebrow") {
@@ -3953,35 +3680,19 @@ export class Haruki3DEngine {
         });
         material.side = THREE.FrontSide;
         const stencilPrepassMaterial = createSekaiLayerMaterial(mainTex, "alpha", null, {
-          alphaCutoff:
-            kind === "eyelash" ? EYELASH_THROUGH_HAIR_ALPHA_CUTOFF : undefined,
           strictAlpha: true,
         });
         stencilPrepassMaterial.side = THREE.FrontSide;
-        if (kind === "eyelash") {
-          configureEyelashStencilPrepass(stencilPrepassMaterial);
-        } else {
-          configureEyebrowStencilPrepass(stencilPrepassMaterial);
-        }
+        configureSekaiFaceLayerStencilPrepass(stencilPrepassMaterial, CHARACTER_STENCIL_BIT);
         stencilPrepassMaterial.userData.pjskMaterialKind = kind === "eyelash"
           ? "eyelash_stencil_prepass"
           : "eyebrow_stencil_prepass";
         {
           const overlayMaterial = createSekaiLayerMaterial(mainTex, "alpha", null, {
-            alphaScale: kind === "eyelash"
-              ? EYELASH_THROUGH_HAIR_ALPHA
-              : EYEBROW_THROUGH_HAIR_ALPHA,
-            alphaCutoff:
-              kind === "eyelash" ? EYELASH_THROUGH_HAIR_ALPHA_CUTOFF : undefined,
             strictAlpha: true,
           });
           overlayMaterial.side = THREE.FrontSide;
-          configureFaceLayerOverlayStencil(
-            overlayMaterial,
-            kind === "eyelash"
-              ? CHARACTER_EYELASH_STENCIL_BIT
-              : CHARACTER_EYEBROW_STENCIL_BIT
-          );
+          configureSekaiEyelashPass(overlayMaterial, CHARACTER_STENCIL_BIT, kind);
           overlayMaterial.userData.pjskMaterialKind = kind === "eyelash"
             ? "eyelash_through_hair"
             : "eyebrow_through_hair";
@@ -4008,7 +3719,7 @@ export class Haruki3DEngine {
           bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
           alphaCutoff: HAIR_ALPHA_CUTOFF,
         });
-        configureHairOccluderStencil(material);
+        configureSekaiHairStencil(material, CHARACTER_STENCIL_BIT);
       } else if (kind === "accessory" || kind === "body") {
         material = cloneBodyShaderMaterial(this.bodyMaterial, {
           mainTex,
@@ -4440,7 +4151,7 @@ export class Haruki3DEngine {
         if (!stencilPrepassMaterial) {
           continue;
         }
-        const stencilPrepassMesh = createGroupedOverlayMesh(
+        const stencilPrepassMesh = createSekaiThroughHairOverlayMesh(
           mesh,
           [{
             start: group.start,
@@ -4466,7 +4177,7 @@ export class Haruki3DEngine {
         if (!overlayMaterial) {
           continue;
         }
-        const overlayMesh = createGroupedOverlayMesh(
+        const overlayMesh = createSekaiThroughHairOverlayMesh(
           mesh,
           [{
             start: group.start,

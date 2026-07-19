@@ -253,17 +253,17 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
 });
 
 test("engine head material render order follows documented Sekai render queues", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const materialRuntimeSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterMaterialRuntime.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /case "face_sdf":\s+case "face":\s+case "accessory":\s+case "body":\s+case "eyelight":\s+return 2000;/s);
-  assert.match(engineSource, /case "eyelash":\s+case "eyebrow":\s+return 2001;/s);
-  assert.match(engineSource, /case "eye":\s+return 2002;/);
-  assert.match(engineSource, /case "hair":\s+return 2451;/);
-  assert.match(engineSource, /case "eye_through_hair":\s+return 2452;/);
-  assert.match(engineSource, /case "eyelight_through_hair":\s+return 2455;/);
+  assert.match(materialRuntimeSource, /case "face_sdf":\s+case "face":\s+case "accessory":\s+case "body":\s+case "eyelight":\s+return 2000;/s);
+  assert.match(materialRuntimeSource, /case "eyelash":\s+case "eyebrow":\s+return 2001;/s);
+  assert.match(materialRuntimeSource, /case "eye":\s+return 2002;/);
+  assert.match(materialRuntimeSource, /case "hair":\s+return 2451;/);
+  assert.match(materialRuntimeSource, /case "eye_through_hair":\s+return 2452;/);
+  assert.match(materialRuntimeSource, /case "eyelight_through_hair":\s+return 2455;/);
 });
 
 test("persistent capture server propagates config defaults into role parts capture", () => {

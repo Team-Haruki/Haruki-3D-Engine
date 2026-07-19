@@ -70,3 +70,16 @@ test("body material binding is isolated while head layer orchestration stays sta
   );
   assert.match(engineSource, /private async overrideHeadMaterials/);
 });
+
+test("through-hair pass policy and submesh cloning are isolated from engine state", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const materialSource = readSource("src/engine/characterMaterialRuntime.ts");
+
+  assert.doesNotMatch(engineSource, /function configureFaceLayerOverlayStencil/);
+  assert.doesNotMatch(engineSource, /function createGroupedOverlayMesh/);
+  assert.doesNotMatch(engineSource, /function getHeadLayerRenderOrder/);
+  assert.match(materialSource, /export function configureSekaiEyelashPass/);
+  assert.match(materialSource, /material\.depthFunc = THREE\.AlwaysDepth/);
+  assert.match(materialSource, /export function createSekaiThroughHairOverlayMesh/);
+  assert.match(engineSource, /const CHARACTER_STENCIL_BIT = 0x01/);
+});
