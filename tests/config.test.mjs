@@ -515,7 +515,7 @@ test("face sdf is default-off and only enabled for explicit capable face materia
   assert.match(shaderSource, /vFaceShadowUv = abs\(uv1\.x\) \+ abs\(uv1\.y\) > 0\.000001 \? uv1 : uv;/);
   assert.match(
     engineSource,
-    /loadTexture\(\s*slot\.faceShadowTex,\s*THREE\.NoColorSpace\s*\)/
+    /loadRuntimeTexture\(\s*this\.textureLoader,\s*slot\.faceShadowTex,\s*THREE\.NoColorSpace\s*\)/
   );
   assert.doesNotMatch(shaderSource, /staticShadowMask/);
 });
@@ -756,6 +756,10 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const materialRuntimeSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/characterMaterialRuntime.ts"),
+    "utf8"
+  );
   const shadowSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/projectedShadow.ts"),
     "utf8"
@@ -771,7 +775,7 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
   assert.match(engineSource, /hairShadowEnabled:\s*this\.isHeadProximityHairShadowEnabled\(\) &&\s*Boolean\(options\.hairController\) &&\s*lighting\?\.faceSphereShadowEdge != null/s);
   assert.match(engineSource, /useLambert: options\.hairController \? true : \(lighting\?\.useLambert \?\? true\)/);
   assert.match(
-    engineSource,
+    materialRuntimeSource,
     /useLambert:\s*params\.useLambert \?\?\s*params\.lighting\?\.useLambert/
   );
   assert.doesNotMatch(engineSource, /lighting\?\.hairShadow === true/);

@@ -55,3 +55,18 @@ test("prefab graph assembly and native mesh import are isolated from engine stat
   assert.match(prefabSource, /export function installUnityRuntimeNativeMeshes/);
   assert.match(engineSource, /private async loadCombinedCharacterAsset/);
 });
+
+test("body material binding is isolated while head layer orchestration stays staged", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const materialSource = readSource("src/engine/characterMaterialRuntime.ts");
+
+  assert.doesNotMatch(engineSource, /Body mesh '\$\{mesh\.name\}' material key/);
+  assert.match(materialSource, /export async function bindBodyRuntimeMaterials/);
+  assert.match(materialSource, /original\.userData\.pjskMaterialKey/);
+  assert.match(materialSource, /THREE\.NoColorSpace/);
+  assert.match(
+    engineSource,
+    /this\.runtimeDebug\.body = \[\];\s+await bindBodyRuntimeMaterials/
+  );
+  assert.match(engineSource, /private async overrideHeadMaterials/);
+});

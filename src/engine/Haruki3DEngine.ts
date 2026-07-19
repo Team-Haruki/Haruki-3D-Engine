@@ -92,6 +92,18 @@ import {
   type BodyAnimationKind,
   type RuntimeMotionRetargetDebug,
 } from "./runtimeMotion";
+import {
+  bindBodyRuntimeMaterials,
+  cloneBodyShaderMaterial,
+  extractMaterialColorMap,
+  getSekaiPreviewRimDirection,
+  loadRuntimeTexture,
+  normalizeMeshSlotName,
+  syncReplacementTextureFromOriginal,
+  tuneLightingForPreview,
+  usesSekaiSkinTint,
+  type RuntimeMaterialDebug,
+} from "./characterMaterialRuntime";
 
 export type {
   PjskCameraProfile,
@@ -105,6 +117,7 @@ export type {
   AnimationTrackDebug,
   BodyAnimationKind,
 } from "./runtimeMotion";
+export type { RuntimeMaterialDebug } from "./characterMaterialRuntime";
 export type {
   ProjectedShadowSettings,
   ProjectedShadowSettingsInput,
@@ -285,66 +298,6 @@ export type BodyAnimationSelection = {
   motionKind?: BodyAnimationKind | null;
   loopUrl: string | null;
   loopKind?: BodyAnimationKind | null;
-};
-
-export type RuntimeMaterialDebug = {
-  meshName: string;
-  sourceMaterialName: string;
-  resolvedKey: string | null;
-  resolvedKind: string | null;
-  usedOriginalMap: boolean;
-  boundMainTex: string | null;
-  boundShadowTex: string | null;
-  boundValueTex: string | null;
-  boundFaceShadowTex: string | null;
-  finalMaterialType: string;
-  shaderHasMainTex?: number | null;
-  shaderHasShadowTex?: number | null;
-  shaderHasFaceShadowTex?: number | null;
-  shaderHasValueTex?: number | null;
-  shaderLightDirectionX?: number | null;
-  shaderLightDirectionY?: number | null;
-  shaderLightDirectionZ?: number | null;
-  shaderShadowThreshold?: number | null;
-  shaderShadowWeight?: number | null;
-  shaderShadowWidthOverride?: number | null;
-  shaderValueShadowInfluence?: number | null;
-  shaderHairShadowEnabled?: number | null;
-  shaderLambertEnabled?: number | null;
-  shaderSpecularPower?: number | null;
-  shaderRimThreshold?: number | null;
-  shaderControllerRimThreshold?: number | null;
-  shaderRimIntensity?: number | null;
-  shaderRimDirectionality?: number | null;
-  shaderCharacterAmbient?: number | null;
-  shaderShadowTexWeight?: number | null;
-  shaderSaturation?: number | null;
-  shaderSkinTintEnabled?: number | null;
-  shaderSkinColorDefault?: string | null;
-  shaderSkinColor1?: string | null;
-  shaderSkinColor2?: string | null;
-  shaderBodyDebugMode?: number | null;
-  shaderFaceDebugMode?: number | null;
-  shaderFaceSdfEnabled?: number | null;
-  faceSdfCapable?: boolean | null;
-  faceSdfUv1Available?: boolean | null;
-  shaderAtlasTileX?: number | null;
-  shaderAtlasTileY?: number | null;
-  shaderAtlasSample?: number | null;
-  shaderUseAtlas?: number | null;
-  shaderAlphaScale?: number | null;
-  shaderAlphaCutoff?: number | null;
-  shaderStrictAlpha?: number | null;
-  shaderStencilWrite?: boolean | null;
-  shaderStencilRef?: number | null;
-  shaderStencilFunc?: number | null;
-  shaderStencilFuncMask?: number | null;
-  shaderStencilWriteMask?: number | null;
-  shaderStencilZPass?: number | null;
-  shaderDepthFunc?: number | null;
-  shaderDepthWrite?: boolean | null;
-  shaderTransparent?: boolean | null;
-  renderOrder?: number;
 };
 
 export type RuntimeHeadMorphDebug = {
@@ -939,12 +892,6 @@ function createSekaiOutlineMaterial(
   return material;
 }
 
-function getSekaiPreviewRimDirection() {
-  return new THREE.Vector3(0, 0, -1)
-    .applyEuler(new THREE.Euler(THREE.MathUtils.degToRad(135), 0, THREE.MathUtils.degToRad(-90)))
-    .normalize();
-}
-
 function normalizeFaceShadowHorizontal(
   target: THREE.Vector2,
   x: number,
@@ -1017,141 +964,6 @@ function bodyDebugModeToUniform(mode: BodyDebugMode) {
     default:
       return 0;
   }
-}
-
-function cloneBodyShaderMaterial(
-  source: THREE.ShaderMaterial,
-  params: {
-    mainTex?: THREE.Texture | null;
-    shadowTex?: THREE.Texture | null;
-    valueTex?: THREE.Texture | null;
-    baseColor?: THREE.ColorRepresentation;
-    shadowColor?: THREE.ColorRepresentation;
-    skinColorDefault?: THREE.ColorRepresentation;
-    skinColor1?: THREE.ColorRepresentation;
-    skinColor2?: THREE.ColorRepresentation;
-    lighting?: MaterialLightingSettings;
-    skinTintEnabled?: boolean;
-    bodyDebugMode?: number;
-    shadowWidthOverride?: number | null;
-    valueShadowInfluence?: number;
-    hairShadowEnabled?: boolean;
-    useLambert?: boolean;
-    headPosition?: THREE.Vector3;
-    alphaCutoff?: number;
-  }
-) {
-  const material = source.clone();
-  updateSekaiBodyMaterial(material, {
-    baseColor:
-      params.baseColor ??
-      `#${source.uniforms.uBaseColor.value.getHexString()}`,
-    shadowColor:
-      params.shadowColor ??
-      `#${source.uniforms.uShadowColor.value.getHexString()}`,
-    skinColorDefault:
-      params.skinColorDefault ??
-      `#${source.uniforms.uSkinColorDefault.value.getHexString()}`,
-    skinColor1:
-      params.skinColor1 ??
-      `#${source.uniforms.uSkinColor1.value.getHexString()}`,
-    skinColor2:
-      params.skinColor2 ??
-      `#${source.uniforms.uSkinColor2.value.getHexString()}`,
-    mainTex: params.mainTex ?? null,
-    shadowTex: params.shadowTex ?? null,
-    valueTex: params.valueTex ?? null,
-    useValueTex: params.lighting?.useValueTex ?? Boolean(params.valueTex),
-    lightDirection: source.uniforms.uLightDirection.value.clone(),
-    lightIntensity: source.uniforms.uLightIntensity.value,
-    ambientIntensity: source.uniforms.uAmbientIntensity.value,
-    shadowThreshold:
-      params.lighting?.sekaiShadowThreshold ??
-      source.uniforms.uShadowThreshold.value,
-    shadowWeight: source.uniforms.uShadowWeight.value,
-    characterAmbientIntensity:
-      source.uniforms.uCharacterAmbientIntensity?.value ?? 0.3,
-    rimIntensity: source.uniforms.uRimIntensity?.value ?? 0.35,
-    controllerRimThreshold:
-      source.uniforms.uControllerRimThreshold?.value ?? 0.18,
-    rimDirectionality: source.uniforms.uRimDirectionality?.value ?? 0.85,
-    rimDirection:
-      source.uniforms.uRimDirection?.value.clone() ?? getSekaiPreviewRimDirection(),
-    specularPower: params.lighting?.specularPower ?? source.uniforms.uSpecularPower.value,
-    rimThreshold: params.lighting?.rimThreshold ?? source.uniforms.uRimThreshold.value,
-    shadowTexWeight: params.lighting?.shadowTexWeight ?? source.uniforms.uShadowTexWeight.value,
-    fadeMode: params.lighting?.fadeMode ?? source.uniforms.uFadeMode?.value ?? 0,
-    hueSinAngle: params.lighting?.hueSinAngle ?? source.uniforms.uHueSinAngle?.value ?? 0,
-    hueCosAngle: params.lighting?.hueCosAngle ?? source.uniforms.uHueCosAngle?.value ?? 1,
-    shadowWidth: params.lighting?.shadowWidth ?? source.uniforms.uShadowWidth.value,
-    shadowWidthOverride:
-      params.shadowWidthOverride ??
-      ((source.uniforms.uShadowWidthOverride?.value ?? -1) >= 0
-        ? source.uniforms.uShadowWidthOverride.value
-        : null),
-    valueShadowInfluence:
-      params.valueShadowInfluence ??
-      source.uniforms.uValueShadowInfluence?.value ??
-      0,
-    hairShadowEnabled:
-      params.hairShadowEnabled ??
-      ((source.uniforms.uHairShadowEnabled?.value ?? 0.0) > 0.5),
-    useLambert:
-      params.useLambert ??
-      params.lighting?.useLambert ??
-      ((source.uniforms.uUseLambert?.value ?? 1.0) > 0.5),
-    headPosition:
-      params.headPosition ??
-      source.uniforms.uHeadPosition?.value.clone(),
-    faceSphereShadowEdge: params.lighting?.faceSphereShadowEdge ?? 0.0,
-    faceSphereShadowSmoothness: params.lighting?.faceSphereShadowSmoothness ?? 0.0,
-    faceSphereShadowWeight: params.lighting?.faceSphereShadowWeight ?? 0.0,
-    saturation: params.lighting?.saturation ?? source.uniforms.uSaturation.value,
-    value: params.lighting?.value ?? source.uniforms.uValue?.value ?? 0.5,
-    contrast: params.lighting?.contrast ?? source.uniforms.uContrast?.value ?? 0.5,
-    partsAmbientColor:
-      params.lighting?.partsAmbientColor ??
-      `#${source.uniforms.uPartsAmbientColor.value.getHexString()}`,
-    reflectionBlendColor:
-      params.lighting?.reflectionBlendColor ??
-      `#${source.uniforms.uReflectionBlendColor.value.getHexString()}`,
-    globalShadowColor:
-      source.uniforms.uGlobalShadowColor
-        ? `#${source.uniforms.uGlobalShadowColor.value.getHexString()}`
-        : "#ffffff",
-    controllerAmbientColor:
-      source.uniforms.uControllerAmbientColor
-        ? `#${source.uniforms.uControllerAmbientColor.value.getHexString()}`
-        : "#ffffff",
-    controllerRimColor:
-      source.uniforms.uControllerRimColor
-        ? `#${source.uniforms.uControllerRimColor.value.getHexString()}`
-        : "#e6edf9",
-    controllerShadowRimColor:
-      source.uniforms.uControllerShadowRimColor
-        ? `#${source.uniforms.uControllerShadowRimColor.value.getHexString()}`
-        : "#ffffff",
-    controllerRimColorWeight:
-      source.uniforms.uControllerRimColorWeight?.value ?? 0,
-    controllerShadowRimColorWeight:
-      source.uniforms.uControllerShadowRimColorWeight?.value ?? 0,
-    controllerRimEdgeSmoothness:
-      source.uniforms.uControllerRimEdgeSmoothness?.value ?? 0.38,
-    controllerRimShadowSharpness:
-      source.uniforms.uControllerRimShadowSharpness?.value ?? 0,
-    bodyDebugMode:
-      params.bodyDebugMode ??
-      source.uniforms.uBodyDebugMode?.value ??
-      0,
-    skinTintEnabled:
-      params.skinTintEnabled ??
-      ((source.uniforms.uSkinTintEnabled?.value ?? 1.0) > 0.5),
-    alphaCutoff:
-      params.alphaCutoff ??
-      source.uniforms.uAlphaCutoff?.value ??
-      0.0,
-  });
-  return material;
 }
 
 function cloneFaceShaderMaterial(
@@ -1486,45 +1298,6 @@ function createGroupedOverlayMesh(
   overlay.userData.pjskEyeThroughHairPassKind = "overlay";
   overlay.userData.pjskEyeThroughHairOverlay = true;
   return overlay;
-}
-
-function normalizeMeshSlotName(name: string) {
-  const lower = name.toLowerCase();
-  if (lower.includes("face")) {
-    return "face";
-  }
-  if (lower.includes("hair")) {
-    return "hair";
-  }
-  if (lower.includes("acc")) {
-    return "acc";
-  }
-  if (lower.includes("body")) {
-    return "body";
-  }
-  return lower;
-}
-
-function tuneShadowTexWeight(kind: string | undefined, weight: number) {
-  void kind;
-  return weight;
-}
-
-function tuneLightingForPreview(
-  kind: string | undefined,
-  lighting: MaterialLightingSettings | undefined
-) {
-  return lighting
-    ? {
-        ...lighting,
-        shadowTexWeight: tuneShadowTexWeight(kind, lighting.shadowTexWeight),
-      }
-    : undefined;
-}
-
-function usesSekaiSkinTint(kind: string | undefined) {
-  const normalized = (kind ?? "body").toLowerCase();
-  return normalized === "body" || normalized === "accessory" || normalized === "acc";
 }
 
 function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
@@ -3948,249 +3721,21 @@ export class Haruki3DEngine {
     }
   }
 
-  private async loadTexture(
-    url: string | undefined,
-    colorSpace: THREE.ColorSpace = THREE.SRGBColorSpace
-  ) {
-    if (!url) {
-      return null;
-    }
-    try {
-      const texture = await this.textureLoader.loadAsync(url);
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.RepeatWrapping;
-      texture.flipY = false;
-      texture.colorSpace = colorSpace;
-      texture.needsUpdate = true;
-      return texture;
-    } catch {
-      return null;
-    }
-  }
-
-  private extractColorMap(material: THREE.Material) {
-    const candidate = material as THREE.Material & { map?: THREE.Texture | null };
-    return candidate.map ?? null;
-  }
-
-  private syncReplacementTextureFromOriginal(
-    material: THREE.Material,
-    originalMap: THREE.Texture | null
-  ) {
-    if (!originalMap) {
-      return;
-    }
-
-    const sync = (texture: THREE.Texture | null | undefined) => {
-      if (!texture) {
-        return;
-      }
-      texture.wrapS = originalMap.wrapS;
-      texture.wrapT = originalMap.wrapT;
-      texture.offset.copy(originalMap.offset);
-      texture.repeat.copy(originalMap.repeat);
-      texture.center.copy(originalMap.center);
-      texture.rotation = originalMap.rotation;
-      texture.magFilter = originalMap.magFilter;
-      texture.minFilter = originalMap.minFilter;
-      texture.anisotropy = originalMap.anisotropy;
-      texture.flipY = originalMap.flipY;
-      texture.colorSpace = originalMap.colorSpace;
-      texture.needsUpdate = true;
-    };
-
-    if (material instanceof THREE.MeshBasicMaterial) {
-      sync(material.map);
-      return;
-    }
-
-    if (material instanceof THREE.ShaderMaterial) {
-      const mainTex = material.uniforms.uMainTex?.value as
-        | THREE.Texture
-        | null
-        | undefined;
-      sync(mainTex);
-    }
-  }
-
   private async overrideBodyMaterials(
     root: THREE.Object3D,
-    bodyAsset: BodyAssetManifest,
-    options: { exactMaterialNameOnly?: boolean } = {}
+    bodyAsset: BodyAssetManifest
   ) {
     this.runtimeDebug.body = [];
-    const slotEntries: Array<{
-      key: string;
-      meshKey: string;
-      materialKey: string;
-      materialName: string | null;
-      materialKind: string;
-      mainTex: string | null;
-      shadowTex: string | null;
-      valueTex: string | null;
-      faceShadowTex: string | null;
-      material: THREE.Material;
-    }> = [];
-    for (const slot of bodyAsset.bodyMaterials) {
-      const mainTex = await this.loadTexture(slot.mainTex);
-      const shadowTex = await this.loadTexture(slot.shadowTex);
-      const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      if (!slot.materialKind) {
-        throw new Error(`Body material ${slot.materialName ?? slot.materialKey} is missing materialKind.`);
-      }
-      const materialKind = slot.materialKind;
-      const lighting = tuneLightingForPreview(slot.materialKind, slot.lighting);
-      const material = cloneBodyShaderMaterial(this.bodyMaterial, {
-        mainTex,
-        shadowTex,
-        valueTex,
-        baseColor: bodyAsset.proxy.bodyColor,
-        shadowColor: bodyAsset.proxy.shadowColor,
-        skinColorDefault:
-          this.currentHeadAsset?.proxy.skinColorDefault ??
-          this.currentHeadAsset?.proxy.faceColor ??
-          bodyAsset.proxy.bodyColor,
-        skinColor1:
-          this.currentHeadAsset?.proxy.skinColor1 ??
-          this.currentHeadAsset?.proxy.faceShadeColor ??
-          bodyAsset.proxy.shadowColor,
-        skinColor2:
-          this.currentHeadAsset?.proxy.skinColor2 ??
-          this.currentHeadAsset?.proxy.faceShadeColor ??
-          bodyAsset.proxy.shadowColor,
-        lighting,
-        skinTintEnabled: usesSekaiSkinTint(materialKind),
-        bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
-      });
-      material.userData.pjskLighting = lighting;
-      material.userData.pjskMaterialKind = materialKind;
-      material.userData.pjskMaterialKey = slot.materialKey;
-      material.userData.pjskMaterialSlotIndex = slot.slotIndex;
-      const meshKey = normalizeMeshSlotName(slot.meshName);
-      slotEntries.push({
-        key: slot.materialKey,
-        meshKey,
-        materialKey: slot.materialKey,
-        materialName: slot.materialName?.toLowerCase() ?? null,
-        materialKind,
-        mainTex: slot.mainTex ?? null,
-        shadowTex: slot.shadowTex ?? null,
-        valueTex: slot.valueTex ?? null,
-        faceShadowTex: null,
-        material,
-      });
-    }
-
-    root.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (!mesh.isMesh) {
-        return;
-      }
-      const originalMaterials = Array.isArray(mesh.material)
-        ? mesh.material
-        : [mesh.material];
-      const meshKey = normalizeMeshSlotName(mesh.name);
-      const meshSlots = slotEntries.filter((entry) => entry.meshKey === meshKey);
-      if (meshSlots.length === 0) {
-        return;
-      }
-      const resolvedEntriesByIndex: Array<typeof slotEntries[number] | null> = [];
-      const rebound = originalMaterials.map((original, index) => {
-        const originalMaterialKey = typeof original.userData.pjskMaterialKey === "string"
-          ? original.userData.pjskMaterialKey
-          : "";
-        const resolvedByMaterialKey = meshSlots.find(
-          (entry) => entry.materialKey === originalMaterialKey
-        );
-        const resolvedEntry = resolvedByMaterialKey ?? null;
-        if (!originalMaterialKey) {
-          throw new Error(
-            `Body mesh '${mesh.name}' material '${original.name}' is missing pjskMaterialKey; regenerate it with Haruki-3D-Exporter materialKey runtime support.`
-          );
-        }
-        if (!resolvedEntry) {
-          throw new Error(
-            `Body mesh '${mesh.name}' material key '${originalMaterialKey}' was not found in body material slots.`
-          );
-        }
-        if (resolvedEntry) {
-          const mainMap = this.extractColorMap(original);
-          this.syncReplacementTextureFromOriginal(resolvedEntry.material, mainMap);
-          mesh.userData.pjskMaterialKind = resolvedEntry.materialKind;
-          let usedOriginalMap = false;
-          if (
-            resolvedEntry.material instanceof THREE.ShaderMaterial &&
-            !resolvedEntry.material.uniforms.uMainTex.value &&
-            mainMap
-          ) {
-            resolvedEntry.material.uniforms.uMainTex.value = mainMap;
-            resolvedEntry.material.uniforms.uUseMainTex.value = 1.0;
-            resolvedEntry.material.uniforms.uBaseColor.value.set("#ffffff");
-            usedOriginalMap = true;
-          }
-          const shaderUniforms =
-            resolvedEntry.material instanceof THREE.ShaderMaterial
-              ? resolvedEntry.material.uniforms
-              : null;
-          this.runtimeDebug.body.push({
-            meshName: mesh.name,
-            sourceMaterialName: original.name,
-            resolvedKey: resolvedEntry?.key ?? null,
-            resolvedKind: resolvedEntry?.materialKind ?? null,
-            usedOriginalMap,
-            boundMainTex: resolvedEntry?.mainTex ?? null,
-            boundShadowTex: resolvedEntry?.shadowTex ?? null,
-            boundValueTex: resolvedEntry?.valueTex ?? null,
-            boundFaceShadowTex: null,
-            finalMaterialType: resolvedEntry.material.type,
-            shaderHasMainTex: shaderUniforms?.uUseMainTex?.value ?? null,
-            shaderHasShadowTex: shaderUniforms?.uUseShadowTex?.value ?? null,
-            shaderHasValueTex: shaderUniforms?.uUseValueTex?.value ?? null,
-            shaderLightDirectionX: shaderUniforms?.uLightDirection?.value?.x ?? null,
-            shaderLightDirectionY: shaderUniforms?.uLightDirection?.value?.y ?? null,
-            shaderLightDirectionZ: shaderUniforms?.uLightDirection?.value?.z ?? null,
-            shaderShadowThreshold: shaderUniforms?.uShadowThreshold?.value ?? null,
-            shaderShadowWeight: shaderUniforms?.uShadowWeight?.value ?? null,
-            shaderShadowWidthOverride:
-              shaderUniforms?.uShadowWidthOverride?.value ?? null,
-            shaderValueShadowInfluence:
-              shaderUniforms?.uValueShadowInfluence?.value ?? null,
-            shaderLambertEnabled: shaderUniforms?.uUseLambert?.value ?? null,
-            shaderSpecularPower: shaderUniforms?.uSpecularPower?.value ?? null,
-            shaderRimThreshold: shaderUniforms?.uRimThreshold?.value ?? null,
-            shaderControllerRimThreshold:
-              shaderUniforms?.uControllerRimThreshold?.value ?? null,
-            shaderRimIntensity: shaderUniforms?.uRimIntensity?.value ?? null,
-            shaderRimDirectionality:
-              shaderUniforms?.uRimDirectionality?.value ?? null,
-            shaderCharacterAmbient:
-              shaderUniforms?.uCharacterAmbientIntensity?.value ?? null,
-            shaderShadowTexWeight: shaderUniforms?.uShadowTexWeight?.value ?? null,
-            shaderSaturation: shaderUniforms?.uSaturation?.value ?? null,
-            shaderSkinTintEnabled: shaderUniforms?.uSkinTintEnabled?.value ?? null,
-            shaderSkinColorDefault: shaderUniforms?.uSkinColorDefault?.value
-              ? `#${shaderUniforms.uSkinColorDefault.value.getHexString()}`
-              : null,
-            shaderSkinColor1: shaderUniforms?.uSkinColor1?.value
-              ? `#${shaderUniforms.uSkinColor1.value.getHexString()}`
-              : null,
-            shaderSkinColor2: shaderUniforms?.uSkinColor2?.value
-              ? `#${shaderUniforms.uSkinColor2.value.getHexString()}`
-              : null,
-            shaderBodyDebugMode:
-              shaderUniforms?.uBodyDebugMode?.value ?? null,
-          });
-          return resolvedEntry.material;
-        }
-        throw new Error("Unreachable body material identity resolution state.");
-      });
-      disposeReplacedMaterials(originalMaterials, rebound);
-      mesh.material = Array.isArray(mesh.material) ? rebound : rebound[0];
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
+    await bindBodyRuntimeMaterials({
+      root,
+      bodyAsset,
+      headAsset: this.currentHeadAsset,
+      textureLoader: this.textureLoader,
+      template: this.bodyMaterial,
+      bodyDebugMode: bodyDebugModeToUniform(this.bodyDebugMode),
+      debug: this.runtimeDebug.body,
     });
   }
-
   private async overrideHeadMaterials(
     root: THREE.Object3D,
     headAsset: HeadAssetManifest,
@@ -4246,10 +3791,15 @@ export class Haruki3DEngine {
       mesh: THREE.Mesh;
     }> = [];
     for (const slot of headAsset.faceMaterials) {
-      const mainTex = await this.loadTexture(slot.mainTex);
-      const shadowTex = await this.loadTexture(slot.shadowTex);
-      const valueTex = await this.loadTexture(slot.valueTex, THREE.NoColorSpace);
-      const faceShadowTex = await this.loadTexture(
+      const mainTex = await loadRuntimeTexture(this.textureLoader, slot.mainTex);
+      const shadowTex = await loadRuntimeTexture(this.textureLoader, slot.shadowTex);
+      const valueTex = await loadRuntimeTexture(
+        this.textureLoader,
+        slot.valueTex,
+        THREE.NoColorSpace
+      );
+      const faceShadowTex = await loadRuntimeTexture(
+        this.textureLoader,
         slot.faceShadowTex,
         THREE.NoColorSpace
       );
@@ -4566,16 +4116,16 @@ export class Haruki3DEngine {
           );
         }
         if (resolvedEntry) {
-          const mainMap = this.extractColorMap(original);
-          this.syncReplacementTextureFromOriginal(resolvedEntry.material, mainMap);
+          const mainMap = extractMaterialColorMap(original);
+          syncReplacementTextureFromOriginal(resolvedEntry.material, mainMap);
           if (resolvedEntry.overlayMaterial) {
-            this.syncReplacementTextureFromOriginal(resolvedEntry.overlayMaterial, mainMap);
+            syncReplacementTextureFromOriginal(resolvedEntry.overlayMaterial, mainMap);
           }
           if (resolvedEntry.stencilPrepassMaterial) {
-            this.syncReplacementTextureFromOriginal(resolvedEntry.stencilPrepassMaterial, mainMap);
+            syncReplacementTextureFromOriginal(resolvedEntry.stencilPrepassMaterial, mainMap);
           }
           if (resolvedEntry.topLayerMaterial) {
-            this.syncReplacementTextureFromOriginal(resolvedEntry.topLayerMaterial, mainMap);
+            syncReplacementTextureFromOriginal(resolvedEntry.topLayerMaterial, mainMap);
           }
           let usedOriginalMap = false;
           if (resolvedEntry.material instanceof THREE.ShaderMaterial && !resolvedEntry.material.uniforms.uMainTex.value && mainMap) {

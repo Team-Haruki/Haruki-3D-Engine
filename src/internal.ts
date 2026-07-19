@@ -113,3 +113,8 @@ export {
   makeUnityPrefabHeadFollowDebugSnapshot,
   syncUnityPrefabSourceGraph,
 } from "./engine/unityPrefabRuntime";
+export {
+  bindBodyRuntimeMaterials,
+  type RuntimeMaterialDebug,
+} from "./engine/characterMaterialRuntime";
+export { createSekaiBodyMaterial } from "./materials/sekaiBodyMaterial";
