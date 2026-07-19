@@ -165,14 +165,14 @@ test("capture server idle shutdown can be disabled", () => {
 });
 
 test("engine recognizes compressed Unity motion URLs", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const motionSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/runtimeMotion.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /unity-motion\\\.msgpack\\\.br/);
-  assert.match(engineSource, /value\.every\(\(entry\) => typeof entry === "number" && Number\.isFinite\(entry\)\)/);
-  assert.match(engineSource, /return value as number\[\]/);
+  assert.match(motionSource, /unity-motion\\\.msgpack\\\.br/);
+  assert.match(motionSource, /value\.every\(\(entry\) => typeof entry === "number" && Number\.isFinite\(entry\)\)/);
+  assert.match(motionSource, /return value as number\[\]/);
 });
 
 test("runtime package loader supports role-scoped registries and lazy compatibility", () => {
@@ -635,12 +635,16 @@ test("engine exposes only prefab-native runtime imports", () => {
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const motionSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/runtimeMotion.ts"),
+    "utf8"
+  );
 
   assert.match(engineSource, /Final runtime package must provide container\.unityRuntimeJson/);
   assert.match(engineSource, /Final runtime package must provide runtimeUnitySetup version 0414/);
   assert.doesNotMatch(engineSource, /importCharacterParts|loadBodyAsset|loadHeadAsset|applyBodyAsset|applyHeadAsset/);
   assert.doesNotMatch(engineSource, /"glb" \| "proxy"|combined_glb|separate_parts|bone_linked|node_attached/);
-  assert.match(engineSource, /export type BodyAnimationKind = "unity-json";/);
+  assert.match(motionSource, /export type BodyAnimationKind = "unity-json";/);
   assert.match(engineSource, /Unity motion \.msgpack\.br is required/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(bodyAsset\.source\.meshUrl/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(headAsset\.source\.meshUrl/);
@@ -1269,8 +1273,8 @@ test("composed part runtime declares body-head assembly for motion retarget supp
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const motionSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/runtimeMotion.ts"),
     "utf8"
   );
 
@@ -1288,8 +1292,8 @@ test("composed part runtime declares body-head assembly for motion retarget supp
   assert.match(composerSource, /combineNodeBName:\s*"Head"/);
   assert.match(composerSource, /childMoveSuffix:\s*"_target"/);
   assert.match(composerSource, /coordinateSpace:\s*"unity-left-handed"/);
-  assert.match(engineSource, /hasUnityBodyHeadAssembly\(extension\)/);
-  assert.match(engineSource, /isFaceAssemblyBridgeMotionTarget/);
+  assert.match(motionSource, /hasUnityBodyHeadAssembly\(extension\)/);
+  assert.match(motionSource, /isFaceAssemblyBridgeMotionTarget/);
 });
 
 test("unity prefab spring runtime is created from prefab source graph on initial load", () => {

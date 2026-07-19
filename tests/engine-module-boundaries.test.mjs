@@ -33,3 +33,14 @@ test("projected shadow state is owned by one module", () => {
   assert.match(shadowSource, /export class CharacterProjectedShadowController/);
   assert.match(shadowSource, /export const defaultProjectedShadowSettings/);
 });
+
+test("motion decoding and retargeting are isolated from playback state", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const motionSource = readSource("src/engine/runtimeMotion.ts");
+
+  assert.doesNotMatch(engineSource, /function readUnityMotionRuntime0414/);
+  assert.doesNotMatch(engineSource, /function retargetUnityPrefabAnimationClip/);
+  assert.match(motionSource, /export function decodeUnityMotionClips/);
+  assert.match(motionSource, /export function retargetUnityPrefabAnimationClip/);
+  assert.match(engineSource, /private async refreshAnimationPlayback/);
+});

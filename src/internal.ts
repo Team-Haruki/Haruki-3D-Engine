@@ -99,3 +99,11 @@ export {
 } from "./engine/cameraRuntime";
 export { createCaptureBackgroundTexture } from "./engine/captureBackground";
 export { CharacterProjectedShadowController } from "./engine/projectedShadow";
+export {
+  createSmoothedLoopClip,
+  decodeUnityMotionClips,
+  inferBodyAnimationKind,
+  makeAnimationTrackDebug,
+  prepareRuntimeAnimationClip,
+  retargetUnityPrefabAnimationClip,
+} from "./engine/runtimeMotion";

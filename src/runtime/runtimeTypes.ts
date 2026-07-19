@@ -1,5 +1,7 @@
 import type { BodyAssetManifest, HeadAssetManifest } from "../data/sampleScene";
 
+export type RuntimeNumericArray = number[] | Float32Array | Uint16Array | Uint32Array;
+
 export type RuntimeCombinedCharacterAsset = {
   id: string;
   displayName: string;
