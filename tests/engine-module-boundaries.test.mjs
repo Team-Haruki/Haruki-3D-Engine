@@ -55,6 +55,17 @@ test("animation playback state is isolated from the engine orchestrator", () => 
   assert.doesNotMatch(engineSource, /private async refreshAnimationPlayback/);
 });
 
+test("face motion state and morph binding are isolated from the engine orchestrator", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const faceMotionSource = readSource("src/engine/faceMotionRuntime.ts");
+
+  assert.match(faceMotionSource, /export class FaceMotionRuntime/);
+  assert.match(engineSource, /private readonly faceMotion/);
+  assert.doesNotMatch(engineSource, /private currentFaceMotionClip/);
+  assert.doesNotMatch(engineSource, /private sampleFaceCurve/);
+  assert.doesNotMatch(engineSource, /private bindHeadMorphTargets/);
+});
+
 test("prefab graph assembly and native mesh import are isolated from engine state", () => {
   const engineSource = readSource("src/engine/Haruki3DEngine.ts");
   const prefabSource = readSource("src/engine/unityPrefabRuntime.ts");

@@ -113,6 +113,10 @@ export {
   type AnimationPlaybackPosition,
 } from "./engine/animationPlaybackRuntime";
 export {
+  FaceMotionRuntime,
+  readEmbeddedRuntimeFaceMotion,
+} from "./engine/faceMotionRuntime";
+export {
   buildUnityPrefabSourceGraph,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,

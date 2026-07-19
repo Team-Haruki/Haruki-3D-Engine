@@ -370,7 +370,7 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
     /stepCaptureFrame\([^]*?\n  \}\n\n  getCharacterRoot/
   )?.[0] ?? "";
   assert.match(dynamicsBody, /animationPlayback\.step/);
-  assert.match(dynamicsBody, /updateFaceMotion/);
+  assert.match(dynamicsBody, /faceMotion\.step/);
   assert.match(dynamicsBody, /syncOfficialModelCombineSetup/);
   assert.match(dynamicsBody, /currentExtraBoneRuntime\?\.update/);
   assert.match(dynamicsBody, /currentSpringRuntime\?\.update/);

@@ -82,6 +82,16 @@ import {
   type BodyAnimationSelection as RuntimeBodyAnimationSelection,
 } from "./animationPlaybackRuntime";
 import {
+  FaceMotionRuntime,
+  readEmbeddedRuntimeFaceMotion,
+  type FaceMotionClip as RuntimeFaceMotionClip,
+  type FaceMotionCurve as RuntimeFaceMotionCurve,
+  type FaceMotionKeyframe as RuntimeFaceMotionKeyframe,
+  type FaceMotionPlaybackSnapshot as RuntimeFaceMotionPlaybackSnapshot,
+  type FaceMotionSet as RuntimeFaceMotionSet,
+  type RuntimeHeadMorphDebug as FaceRuntimeHeadMorphDebug,
+} from "./faceMotionRuntime";
+import {
   bindBodyRuntimeMaterials,
   getSekaiPreviewRimDirection,
   normalizeMeshSlotName,
@@ -265,12 +275,7 @@ function normalizeHairShadowMode(mode: HairShadowMode): HairShadowMode {
 export type BodyAnimationSelection = RuntimeBodyAnimationSelection;
 export type AnimationPlaybackSnapshot = RuntimeAnimationPlaybackSnapshot;
 
-export type RuntimeHeadMorphDebug = {
-  meshName: string;
-  morphTargetCount: number;
-  mappedChannelCount: number;
-  sampleChannels: string[];
-};
+export type RuntimeHeadMorphDebug = FaceRuntimeHeadMorphDebug;
 
 export type RuntimeOutlineShellDebug = {
   meshName: string;
@@ -369,36 +374,11 @@ type CombinedCharacterImportOptions = {
   clearAnimationCache?: boolean;
 };
 
-export type FaceMotionKeyframe = {
-  time: number;
-  value: number;
-};
-
-export type FaceMotionCurve = {
-  curveHash: number;
-  keyframes: FaceMotionKeyframe[];
-};
-
-export type FaceMotionClip = {
-  name: string;
-  sampleRate: number;
-  duration: number;
-  curves: FaceMotionCurve[];
-};
-
-export type FaceMotionSet = {
-  bundlePath?: string;
-  clips: FaceMotionClip[];
-};
-
-export type FaceMotionPlaybackSnapshot = {
-  activeClipName: string | null;
-  queuedLoopClipName: string | null;
-  error: string | null;
-  currentTime: number;
-  mappedMeshCount: number;
-  mappedCurveCount: number;
-};
+export type FaceMotionKeyframe = RuntimeFaceMotionKeyframe;
+export type FaceMotionCurve = RuntimeFaceMotionCurve;
+export type FaceMotionClip = RuntimeFaceMotionClip;
+export type FaceMotionSet = RuntimeFaceMotionSet;
+export type FaceMotionPlaybackSnapshot = RuntimeFaceMotionPlaybackSnapshot;
 
 export type PartImportSnapshot = {
   revision: number;
@@ -417,12 +397,6 @@ type LoadedPartResult = {
   prefabSourceGraph: UnityPrefabSourceGraph;
 };
 
-type HeadMorphRuntime = {
-  mesh: THREE.Mesh;
-  curveIndexByHash: Map<number, number>;
-  controlledIndices: number[];
-};
-
 type CharacterHairMaterialController = {
   offset: THREE.Vector3;
   headTransformName: string | null;
@@ -435,14 +409,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function countArray(value: unknown) {
   return Array.isArray(value) ? value.length : 0;
-}
-
-function readEmbeddedRuntimeFaceMotion(extension: unknown): FaceMotionSet | null {
-  const motionPackage = asRecord(
-    asRecord(extension).motionPackage ?? asRecord(extension).MotionPackage
-  );
-  const faceMotion = motionPackage.faceMotion ?? motionPackage.FaceMotion;
-  return faceMotion ? faceMotion as FaceMotionSet : null;
 }
 
 function summarizeSpringBonePart(value: unknown) {
@@ -855,11 +821,6 @@ function bodyDebugModeToUniform(mode: BodyDebugMode) {
   }
 }
 
-function isMorphMesh(node: THREE.Object3D): node is THREE.Mesh {
-  const mesh = node as THREE.Mesh;
-  return !!mesh.isMesh && Array.isArray(mesh.morphTargetInfluences);
-}
-
 function faceSdfDebugModeToUniform(mode: FaceSdfDebugMode) {
   switch (mode) {
     case "sdf":
@@ -1060,15 +1021,10 @@ export class Haruki3DEngine {
     missingHeadBones: [],
   };
   private currentBodyAnimationRoot: THREE.Object3D | null = null;
+  private readonly faceMotion = new FaceMotionRuntime();
   private readonly animationPlayback: AnimationPlaybackRuntime;
   private controllerOutlineColor: THREE.Color | null = null;
   private controllerOutlineBlending = 0;
-  private currentFaceMotionSet: FaceMotionSet | null = null;
-  private currentFaceMotionClip: FaceMotionClip | null = null;
-  private currentFaceMotionLoopClip: FaceMotionClip | null = null;
-  private currentFaceMotionTime = 0;
-  private currentFaceMotionError: string | null = null;
-  private readonly currentHeadMorphRuntimes: HeadMorphRuntime[] = [];
   private currentRuntimeExtension: unknown = null;
   private currentSpringRuntime: SpringRuntimeController | null = null;
   private currentExtraBoneRuntime: SekaiExtraBoneRuntime | null = null;
@@ -1079,7 +1035,6 @@ export class Haruki3DEngine {
     targetPath: null,
     reason: null,
   };
-  private faceMotionEnabled = true;
   private springRuntimeMode: SpringRuntimeMode = "unity-prefab";
   private characterHeight = 1;
   private readonly tempMatrixA = new THREE.Matrix4();
@@ -1141,7 +1096,7 @@ export class Haruki3DEngine {
       throw new Error("Haruki 3D engine requires a container or canvas.");
     }
     this.animationPlayback = new AnimationPlaybackRuntime({
-      onLoopPromoted: () => this.promoteFaceMotionLoop(),
+      onLoopPromoted: () => this.faceMotion.promoteLoop(),
     });
     this.container = options.container ?? null;
     this.ownsCanvas = options.canvas === undefined;
@@ -1317,7 +1272,7 @@ export class Haruki3DEngine {
     this.currentBodyAttachNode = null;
     this.currentHeadAttachOriginNode = null;
     this.runtimeDebug.headMorphs = [];
-    this.currentHeadMorphRuntimes.length = 0;
+    this.faceMotion.release({ preserveMotion: true });
     this.currentBodyAnimationRoot = null;
     this.currentPrefabSourceGraph = null;
     this.currentHairHeadTransform = null;
@@ -1337,7 +1292,10 @@ export class Haruki3DEngine {
     this.currentBodyAttachNode = loaded.prefabSourceGraph.bodyAttach;
     this.currentHeadAttachOriginNode = loaded.prefabSourceGraph.headOrigin;
     this.currentPrefabHeadFollowDebug = loaded.prefabSourceGraph.debug;
-    this.bindHeadMorphTargets(loaded.root, characterAsset.headAsset);
+    this.runtimeDebug.headMorphs = this.faceMotion.bind(
+      loaded.root,
+      characterAsset.headAsset
+    );
     this.prepareCombinedComposition();
     this.currentExtraBoneRuntime = SekaiExtraBoneRuntime.fromPjskRuntimeExtension(
       this.currentRuntimeExtension,
@@ -1350,7 +1308,7 @@ export class Haruki3DEngine {
     });
     if (preservedAnimation) {
       this.animationPlayback.restorePosition(preservedAnimation);
-      this.applyCurrentFaceMotionFrame();
+      this.faceMotion.applyCurrent();
       this.syncOfficialModelCombineSetup();
       this.currentExtraBoneRuntime?.update();
       this.resetCurrentSpringRuntimeState();
@@ -1994,23 +1952,13 @@ export class Haruki3DEngine {
       this.currentSpringRuntime?.getControlledTrackNodeNames() ??
       new Set<string>();
     return this.animationPlayback.getSnapshot({
-      faceMotionEnabled: this.faceMotionEnabled,
+      faceMotionEnabled: this.faceMotion.isEnabled(),
       utjControlledNodeNames,
     });
   }
 
   getFaceMotionSnapshot(): FaceMotionPlaybackSnapshot {
-    return {
-      activeClipName: this.currentFaceMotionClip?.name ?? null,
-      queuedLoopClipName: this.currentFaceMotionLoopClip?.name ?? null,
-      error: this.currentFaceMotionError,
-      currentTime: this.currentFaceMotionTime,
-      mappedMeshCount: this.currentHeadMorphRuntimes.length,
-      mappedCurveCount: this.currentHeadMorphRuntimes.reduce(
-        (sum, runtime) => sum + runtime.curveIndexByHash.size,
-        0
-      ),
-    };
+    return this.faceMotion.getSnapshot();
   }
 
   setAnimationPaused(paused: boolean) {
@@ -2022,12 +1970,7 @@ export class Haruki3DEngine {
   }
 
   setFaceMotionEnabled(enabled: boolean) {
-    this.faceMotionEnabled = enabled;
-    if (enabled) {
-      this.applyCurrentFaceMotionFrame();
-    } else {
-      this.clearFaceMotionInfluences();
-    }
+    this.faceMotion.setEnabled(enabled);
   }
 
   setBodyHeadTracksEnabled(enabled: boolean) {
@@ -2098,8 +2041,7 @@ export class Haruki3DEngine {
   }
 
   private applyAnimationSeekResult(nextTime: number) {
-    this.currentFaceMotionTime = nextTime;
-    this.applyCurrentFaceMotionFrame();
+    this.faceMotion.seek(nextTime);
     this.syncOfficialModelCombineSetup();
     this.resetCurrentSpringRuntimeState();
   }
@@ -2124,7 +2066,11 @@ export class Haruki3DEngine {
     const stepDelta = Math.max(0, delta);
     if (advanceAnimation) {
       this.animationPlayback.step(stepDelta);
-      this.updateFaceMotion(stepDelta);
+      this.faceMotion.step(
+        stepDelta,
+        this.animationPlayback.getSpeed(),
+        this.animationPlayback.isPaused()
+      );
     }
     this.syncOfficialModelCombineSetup();
     this.currentExtraBoneRuntime?.update();
@@ -2429,7 +2375,7 @@ export class Haruki3DEngine {
       ? animationUrl
       : null;
     const faceMotion = readEmbeddedRuntimeFaceMotion(combined.runtimeExtension);
-    if (faceMotion && (force || !this.currentFaceMotionSet)) {
+    if (faceMotion && (force || !this.faceMotion.hasMotion())) {
       this.setFaceMotionSet(
         faceMotion,
         "face",
@@ -2462,31 +2408,11 @@ export class Haruki3DEngine {
     preferredClipName: string | null,
     preferredLoopClipName: string | null
   ) {
-    this.currentFaceMotionSet = data;
-    this.currentFaceMotionError = null;
-    this.currentFaceMotionTime = 0;
-    this.currentFaceMotionClip = null;
-    this.currentFaceMotionLoopClip = null;
-
-    if (!data || !data.clips.length) {
-      this.clearFaceMotionInfluences();
-      return;
-    }
-
-    const selected = data.clips.find((clip) => clip.name === preferredClipName)
-      ?? data.clips[0]
-      ?? null;
-    this.currentFaceMotionClip = selected;
-    if (!selected) {
-      return;
-    }
-
-    if (preferredLoopClipName && preferredLoopClipName !== selected.name) {
-      this.currentFaceMotionLoopClip =
-        data.clips.find((clip) => clip.name === preferredLoopClipName) ?? null;
-    }
-
-    this.applyCurrentFaceMotionFrame();
+    this.faceMotion.setMotion(
+      data,
+      preferredClipName,
+      preferredLoopClipName
+    );
   }
 
   async setAnimationSelection(selection: BodyAnimationSelection | null) {
@@ -2939,13 +2865,9 @@ export class Haruki3DEngine {
       preserveSelection: options.preserveAnimationSelection,
       clearCache: options.clearAnimationCache,
     });
-    if (!options.preserveAnimationSelection) {
-      this.currentFaceMotionSet = null;
-      this.currentFaceMotionClip = null;
-      this.currentFaceMotionLoopClip = null;
-      this.currentFaceMotionTime = 0;
-      this.currentFaceMotionError = null;
-    }
+    this.faceMotion.release({
+      preserveMotion: options.preserveAnimationSelection,
+    });
     this.currentSpringRuntime?.resetPose();
     this.currentSpringRuntime = null;
     this.currentExtraBoneRuntime = null;
@@ -2960,7 +2882,6 @@ export class Haruki3DEngine {
       targetPath: null,
       reason: "not initialized",
     };
-    this.currentHeadMorphRuntimes.length = 0;
     this.runtimeDebug.headMorphs = [];
     this.clearCharacterSlot(this.bodySlot);
     this.clearCharacterSlot(this.headSlot);
@@ -3221,168 +3142,6 @@ export class Haruki3DEngine {
       eyeController: options.eyeController,
       debug: this.runtimeDebug.head,
     });
-  }
-
-  private bindHeadMorphTargets(
-    root: THREE.Object3D,
-    headAsset: HeadAssetManifest
-  ) {
-    const manifestChannels = headAsset.morphChannels ?? [];
-    const bindings = headAsset.morphChannelBindings ?? [];
-    this.currentHeadMorphRuntimes.length = 0;
-
-    root.traverse((node) => {
-      if (
-        node.userData.pjskEyeThroughHairOverlay ||
-        node.userData.pjskEyeThroughHairStencilPrepass
-      ) {
-        return;
-      }
-      if (!isMorphMesh(node)) {
-        return;
-      }
-
-      const mesh = node;
-      const count = mesh.morphTargetInfluences?.length ?? 0;
-      if (!count) {
-        return;
-      }
-
-      if (
-        (!mesh.morphTargetDictionary || !Object.keys(mesh.morphTargetDictionary).length) &&
-        manifestChannels.length === count
-      ) {
-        mesh.morphTargetDictionary = Object.fromEntries(
-          manifestChannels.map((channel, index) => [channel, index])
-        );
-      }
-
-      const dictionary = mesh.morphTargetDictionary ?? {};
-      const curveIndexByHash = new Map<number, number>();
-      const controlledIndices: number[] = [];
-      for (const binding of bindings) {
-        const index = dictionary[binding.name];
-        if (typeof index !== 'number') {
-          continue;
-        }
-        curveIndexByHash.set(binding.curveHash, index);
-        controlledIndices.push(index);
-      }
-
-      mesh.morphTargetInfluences?.fill(0);
-      this.currentHeadMorphRuntimes.push({
-        mesh,
-        curveIndexByHash,
-        controlledIndices: [...new Set(controlledIndices)],
-      });
-
-      const channelNames = Object.entries(dictionary)
-        .sort((a, b) => a[1] - b[1])
-        .map(([name]) => name);
-
-      this.runtimeDebug.headMorphs.push({
-        meshName: mesh.name,
-        morphTargetCount: count,
-        mappedChannelCount: curveIndexByHash.size,
-        sampleChannels: channelNames.slice(0, 12),
-      });
-    });
-  }
-
-  private updateFaceMotion(delta: number) {
-    if (
-      this.animationPlayback.isPaused() ||
-      !this.faceMotionEnabled ||
-      !this.currentFaceMotionClip ||
-      this.currentHeadMorphRuntimes.length === 0
-    ) {
-      return;
-    }
-
-    this.currentFaceMotionTime += delta * this.animationPlayback.getSpeed();
-    const duration = this.currentFaceMotionClip.duration;
-    if (duration > 0 && this.currentFaceMotionTime > duration) {
-      if (this.currentFaceMotionLoopClip) {
-        const loopTime = this.currentFaceMotionTime - duration;
-        this.currentFaceMotionClip = this.currentFaceMotionLoopClip;
-        this.currentFaceMotionLoopClip = null;
-        this.currentFaceMotionTime = this.currentFaceMotionClip.duration > 0
-          ? loopTime % this.currentFaceMotionClip.duration
-          : 0;
-      } else {
-        this.currentFaceMotionTime %= duration;
-      }
-    }
-
-    this.applyCurrentFaceMotionFrame();
-  }
-
-  private promoteFaceMotionLoop() {
-    if (!this.currentFaceMotionLoopClip) {
-      return;
-    }
-
-    this.currentFaceMotionClip = this.currentFaceMotionLoopClip;
-    this.currentFaceMotionLoopClip = null;
-    this.currentFaceMotionTime = 0;
-    this.applyCurrentFaceMotionFrame();
-  }
-
-  private applyCurrentFaceMotionFrame() {
-    if (!this.faceMotionEnabled || !this.currentFaceMotionClip) {
-      return;
-    }
-
-    for (const runtime of this.currentHeadMorphRuntimes) {
-      const influences = runtime.mesh.morphTargetInfluences;
-      if (!influences) {
-        continue;
-      }
-      for (const index of runtime.controlledIndices) {
-        influences[index] = 0;
-      }
-      for (const curve of this.currentFaceMotionClip.curves) {
-        const index = runtime.curveIndexByHash.get(curve.curveHash);
-        if (index === undefined) {
-          continue;
-        }
-        influences[index] = this.sampleFaceCurve(curve.keyframes, this.currentFaceMotionTime) / 100;
-      }
-    }
-  }
-
-  private clearFaceMotionInfluences() {
-    for (const runtime of this.currentHeadMorphRuntimes) {
-      const influences = runtime.mesh.morphTargetInfluences;
-      if (!influences) {
-        continue;
-      }
-      for (const index of runtime.controlledIndices) {
-        influences[index] = 0;
-      }
-    }
-  }
-
-  private sampleFaceCurve(keyframes: FaceMotionKeyframe[], time: number) {
-    if (!keyframes.length) {
-      return 0;
-    }
-    if (time <= keyframes[0].time) {
-      return keyframes[0].value;
-    }
-    for (let i = 1; i < keyframes.length; i += 1) {
-      const prev = keyframes[i - 1];
-      const next = keyframes[i];
-      if (time <= next.time) {
-        const span = next.time - prev.time;
-        if (span <= 1e-6) {
-          return next.value;
-        }
-        const t = (time - prev.time) / span;
-        return prev.value + (next.value - prev.value) * t;
-      }
-    }
-    return keyframes[keyframes.length - 1].value;
   }
 
   private handleResize() {
