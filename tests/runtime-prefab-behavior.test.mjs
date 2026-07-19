@@ -3,6 +3,7 @@ import test from "node:test";
 import * as THREE from "three";
 import {
   buildUnityPrefabSourceGraph,
+  createUnityPrefabConstraintRuntime,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,
   syncUnityPrefabSourceGraph,
@@ -125,6 +126,40 @@ test("prefab debug snapshot preserves fallback state until a graph is loaded", (
   assert.equal(snapshot.active, true);
   assert.equal(snapshot.sourcePath, "body/Neck");
   assert.equal(snapshot.setupVersion, "0414");
+});
+
+test("persistent constraints retain resolved transform bindings between frames", () => {
+  const extension = makeRuntimeExtension();
+  extension.runtimeUnitySetup.constraintSetup = {
+    version: "0414",
+    sourceKind: "unity-prefab",
+    constraints: [{
+      type: "parent",
+      ownerPath: "face/Face",
+      sources: [{
+        sourcePath: "body",
+        weight: 1,
+        translationOffset: { x: 1, y: 0, z: 0 },
+      }],
+    }],
+  };
+  const graph = buildUnityPrefabSourceGraph(extension);
+  const body = graph.nodeByPath.get("body");
+  const renderer = graph.nodeByPath.get("face/Face");
+  const runtime = createUnityPrefabConstraintRuntime(graph, extension, 2);
+
+  assert.ok(runtime);
+  runtime.update();
+  const before = renderer.getWorldPosition(new THREE.Vector3());
+  graph.nodeByPath.clear();
+  body.position.x = 3;
+  body.updateMatrixWorld(true);
+
+  const diagnostics = runtime.update();
+  const after = renderer.getWorldPosition(new THREE.Vector3());
+
+  assert.equal(diagnostics.appliedCount, 1);
+  assert.ok(Math.abs(after.x - before.x - 3) < 1e-6);
 });
 
 function makeRuntimeExtension() {

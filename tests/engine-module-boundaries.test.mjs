@@ -74,6 +74,8 @@ test("prefab graph assembly and native mesh import are isolated from engine stat
   assert.doesNotMatch(engineSource, /function buildUnityRuntimeNativeGeometry/);
   assert.match(prefabSource, /export function buildUnityPrefabSourceGraph/);
   assert.match(prefabSource, /export function installUnityRuntimeNativeMeshes/);
+  assert.match(prefabSource, /export function createUnityPrefabConstraintRuntime/);
+  assert.doesNotMatch(engineSource, /function readRuntimeUnitySetup0414/);
   assert.match(engineSource, /private async loadCombinedCharacterAsset/);
 });
 

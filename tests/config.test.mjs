@@ -542,8 +542,8 @@ test("face sdf uses official face-only head light parameters", () => {
     "utf8"
   );
 
-  assert.match(engineSource, /COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE\.Vector3\(-15, 50, 0\)/);
-  assert.match(engineSource, /COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree/);
+  assert.match(engineSource, /sekaiCostumeShopDirectionalLightRotationDegrees/);
+  assert.match(engineSource, /sekaiCostumeShopDirectionalLightDirection/);
   assert.match(shaderSource, /uniform vec2 uHeadDotDirectionalLight;/);
   assert.match(shaderSource, /uniform float uUseFaceShadowLimiter;/);
   assert.match(shaderSource, /uniform float uFaceShadowLimitRange;/);
@@ -762,15 +762,19 @@ test("part registry runtime path keeps role motion separate from part packages",
   assert.match(composerSource, /sourceRendererTransformPath/);
   assert.match(composerSource, /constraintSetup:\s*\{/);
   assert.match(composerSource, /repair constraints after composition/);
+  assert.match(composerSource, /source path may therefore point at the source prefab's/);
   assert.match(loaderSource, /roleRuntimePath/);
   assert.match(loaderSource, /loadRoleRuntimePackages/);
   assert.match(engineSource, /applyCustomRoleDefaultMotion/);
   assert.match(engineSource, /nativeMeshes: this\.lastNativeMeshInstallDiagnostics/);
   assert.match(engineSource, /constraints: this\.lastConstraintSetupDiagnostics/);
   assert.match(prefabSource, /applyUnityRuntimeConstraints/);
+  assert.match(engineSource, /UnityConstraintRuntime/);
   assert.match(composerSource, /sourcePathId = remapNumericId/);
   assert.match(constraintRuntimeSource, /export function applyUnityRuntimeConstraints/);
   assert.match(constraintRuntimeSource, /constraint\.sources/);
+  assert.match(constraintRuntimeSource, /resolveReboundConstraintSourceNode/);
+  assert.match(constraintRuntimeSource, /graph\.root\.traverse/);
   assert.match(constraintRuntimeSource, /transform name \$\{name\} matched \$\{candidates\.length\} nodes/);
   assert.match(constraintRuntimeSource, /parent constraint applied with height-scaled translation offsets/);
   assert.match(constraintRuntimeSource, /rotation constraint applied with weighted source rotations/);
@@ -778,6 +782,44 @@ test("part registry runtime path keeps role motion separate from part packages",
   assert.match(constraintRuntimeSource, /applyAimConstraint/);
   assert.match(constraintRuntimeSource, /worldUpObject/);
   assert.match(constraintRuntimeSource, /multiplyScalar\(characterHeight\)/);
+  assert.match(constraintRuntimeSource, /export class UnityConstraintRuntime/);
+  assert.match(constraintRuntimeSource, /update\(\): RuntimeConstraintDebug/);
+  assert.match(constraintRuntimeSource, /applyConstraintRotationOffset/);
+  assert.match(constraintRuntimeSource, /constraint\.translationAxis/);
+  assert.match(constraintRuntimeSource, /constraint\.rotationAxis/);
+  assert.match(constraintRuntimeSource, /constraint\.worldUpType/);
+  assert.match(engineSource, /currentConstraintRuntime/);
+  assert.match(prefabSource, /constraintRuntime\.update\(\)/);
+  assert.match(
+    engineSource,
+    /this\.syncOfficialModelCombineSetup\(\);\s*this\.currentExtraBoneRuntime\?\.update\(\);\s*if \(this\.isSpringRuntimeEnabled\(\)\)/
+  );
+});
+
+test("unified prefab spring runtime retains force providers and official timeline controls", () => {
+  const springSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
+    "utf8"
+  );
+  const composerSource = fs.readFileSync(
+    path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
+    "utf8"
+  );
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
+
+  assert.match(springSource, /forceProviders\?: RuntimeForceProviderSource\[\]/);
+  assert.match(springSource, /resolveForceProviders/);
+  assert.match(springSource, /computeWindVolumeOneSelfForce/);
+  assert.match(springSource, /-Math\.cos\(THREE\.MathUtils\.degToRad\(provider\.additionalWindAngle\)\)/);
+  assert.match(springSource, /bone\.windInfluence/);
+  assert.match(springSource, /setTimelineControl/);
+  assert.match(springSource, /clearTimelineControl/);
+  assert.doesNotMatch(springSource, /forceProviderCount:\s*0/);
+  assert.match(composerSource, /remapRuntimeForceProviders/);
+  assert.match(engineSource, /setSpringTimelineControl/);
 });
 
 test("runtime shadow debug exposes projected and hair-shadow layers", () => {

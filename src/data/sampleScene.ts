@@ -265,8 +265,23 @@ export function sekaiPluginLightLocationToThreeDirection(location: Vec3): Vec3 {
   };
 }
 
+// CharacterLightConstants.DIRECTIONAL_LIGHT_ROTATION is (-15, 50, 0) in the
+// costume shop. Unity applies Euler rotations in Z-X-Y order; converting its
+// transform.forward into the viewer's mirrored-X basis gives this direction.
+export const sekaiCostumeShopDirectionalLightRotationDegrees: Vec3 = {
+  x: -15,
+  y: 50,
+  z: 0,
+};
+
+export const sekaiCostumeShopDirectionalLightDirection: Vec3 = {
+  x: -0.7399421116938479,
+  y: 0.2588190451025207,
+  z: 0.6208851530148456,
+};
+
 export const previewLightDirectionFit: Vec3 =
-  sekaiPluginLightLocationToThreeDirection(sekaiReferenceDirectionalLocation);
+  sekaiCostumeShopDirectionalLightDirection;
 
 export const previewShadowThresholdFit = 0.33;
 

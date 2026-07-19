@@ -343,7 +343,7 @@ export async function fetchRuntimeMessagePack(url: string) {
   if (!url.endsWith(".msgpack.br")) {
     throw new Error(`Runtime metadata must use .msgpack.br: ${url}`);
   }
-  const response = await fetch(url, { cache: "no-store" });
+  const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
   }

@@ -12,6 +12,10 @@ import type {
   PreviewLightState,
 } from "../data/sampleScene";
 import {
+  sekaiCostumeShopDirectionalLightDirection,
+  sekaiCostumeShopDirectionalLightRotationDegrees,
+} from "../data/sampleScene";
+import {
   createSekaiBodyMaterial,
 } from "../materials/sekaiBodyMaterial";
 import {
@@ -23,11 +27,16 @@ import {
   type UtjSpringBoneRuntimeSnapshot,
   type UtjSpringBoneTraceSnapshot,
 } from "./springRuntimeTypes";
-import { UnityPrefabSpringRuntime } from "./unityPrefabSpringRuntimeAdapter";
-import { SekaiExtraBoneRuntime } from "./sekaiExtraBoneRuntime";
-import type { RuntimeConstraintDebug } from "./unityConstraintRuntime";
 import {
-  convertUnityDirectionToThree,
+  UnityPrefabSpringRuntime,
+  type SpringTimelineControl,
+} from "./unityPrefabSpringRuntimeAdapter";
+import { SekaiExtraBoneRuntime } from "./sekaiExtraBoneRuntime";
+import {
+  UnityConstraintRuntime,
+  type RuntimeConstraintDebug,
+} from "./unityConstraintRuntime";
+import {
   readUnityVector3,
   type UnityVectorLike,
 } from "./unityCoordinateConversion";
@@ -64,6 +73,7 @@ import {
 import { buildPrefabNodePathLookup } from "./prefabNodeLookup";
 import {
   buildUnityPrefabSourceGraph,
+  createUnityPrefabConstraintRuntime,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,
   syncUnityPrefabSourceGraph as syncUnityPrefabRuntimeGraph,
@@ -137,24 +147,22 @@ const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR = 6.0;
 const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE = 0.01 / 0.255;
 const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE = 0.6 / 0.255;
 const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
-const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(-15, 50, 0);
-const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
-  new THREE.Vector3(0, 0, 1)
-    .applyEuler(
-      new THREE.Euler(
-        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.x),
-        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.y),
-        THREE.MathUtils.degToRad(COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES.z),
-        "XYZ"
-      )
-    )
-    .normalize()
+const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(
+  sekaiCostumeShopDirectionalLightRotationDegrees.x,
+  sekaiCostumeShopDirectionalLightRotationDegrees.y,
+  sekaiCostumeShopDirectionalLightRotationDegrees.z
+);
+const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = new THREE.Vector3(
+  sekaiCostumeShopDirectionalLightDirection.x,
+  sekaiCostumeShopDirectionalLightDirection.y,
+  sekaiCostumeShopDirectionalLightDirection.z
 ).normalize();
 const COSTUME_SHOP_USE_FACE_SHADOW_LIMITER = true;
 const COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE = 0;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
+export type SpringTimelineControlState = SpringTimelineControl;
 
 export type PjskPresentationMode = "interactive" | "capture";
 
@@ -857,6 +865,8 @@ export class Haruki3DEngine {
   private currentRuntimeExtension: unknown = null;
   private currentSpringRuntime: SpringRuntimeController | null = null;
   private currentExtraBoneRuntime: SekaiExtraBoneRuntime | null = null;
+  private currentConstraintRuntime: UnityConstraintRuntime | null = null;
+  private currentSpringTimelineControl: SpringTimelineControlState | null = null;
   private currentPrefabSourceGraph: UnityPrefabSourceGraph | null = null;
   private currentPrefabHeadFollowDebug: PrefabHeadFollowDebug = {
     active: false,
@@ -1101,6 +1111,7 @@ export class Haruki3DEngine {
     this.currentRuntimeExtension = characterAsset.runtimeExtension;
     this.currentSpringRuntime = null;
     this.currentExtraBoneRuntime = null;
+    this.currentConstraintRuntime = null;
     this.currentBodyAttachNode = null;
     this.currentHeadAttachOriginNode = null;
     this.runtimeDebug.headMorphs = [];
@@ -1134,6 +1145,11 @@ export class Haruki3DEngine {
       loaded.prefabSourceGraph.root
     );
     this.currentSpringRuntime = this.createSpringRuntime(loaded.prefabSourceGraph.root);
+    this.currentConstraintRuntime = createUnityPrefabConstraintRuntime(
+      loaded.prefabSourceGraph,
+      this.currentRuntimeExtension,
+      this.characterHeight
+    );
     this.syncUnityPrefabSourceGraph();
     await this.reloadAnimationPlayback({
       resetSpring: preservedAnimation === null,
@@ -1525,13 +1541,26 @@ export class Haruki3DEngine {
 
   private createSpringRuntime(root: THREE.Object3D): SpringRuntimeController | null {
     if (this.springRuntimeMode === "unity-prefab") {
-      return UnityPrefabSpringRuntime.fromPjskRuntimeExtension(
+      const runtime = UnityPrefabSpringRuntime.fromPjskRuntimeExtension(
         this.currentRuntimeExtension,
         root
       );
+      if (runtime && this.currentSpringTimelineControl) {
+        runtime.setTimelineControl(this.currentSpringTimelineControl);
+      }
+      return runtime;
     }
 
     return null;
+  }
+
+  setSpringTimelineControl(control: SpringTimelineControlState | null) {
+    this.currentSpringTimelineControl = control ? { ...control } : null;
+    if (this.currentSpringTimelineControl) {
+      this.currentSpringRuntime?.setTimelineControl(this.currentSpringTimelineControl);
+    } else {
+      this.currentSpringRuntime?.clearTimelineControl();
+    }
   }
 
   seekAnimation(time: number) {
@@ -2100,6 +2129,7 @@ export class Haruki3DEngine {
     this.currentSpringRuntime?.resetPose();
     this.currentSpringRuntime = null;
     this.currentExtraBoneRuntime = null;
+    this.currentConstraintRuntime = null;
     this.currentRuntimeExtension = null;
     this.currentBodyAttachNode = null;
     this.currentHeadAttachOriginNode = null;
@@ -2560,7 +2590,8 @@ export class Haruki3DEngine {
     this.lastConstraintSetupDiagnostics = syncUnityPrefabRuntimeGraph(
       graph,
       this.currentRuntimeExtension,
-      this.characterHeight
+      this.characterHeight,
+      this.currentConstraintRuntime
     );
   }
 

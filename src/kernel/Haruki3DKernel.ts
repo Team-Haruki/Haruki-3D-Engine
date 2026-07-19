@@ -21,6 +21,15 @@ export type Haruki3DKernel = {
 const FIXED_FRAME_SECONDS = 1 / 60;
 const MAX_FRAME_STEPS = 5;
 
+type Haruki3DKernelEngine = Pick<
+  Haruki3DEngine,
+  | "destroy"
+  | "loadRenderRecipe"
+  | "renderFrame"
+  | "setViewportSize"
+  | "stepRuntimeFrame"
+>;
+
 export function createHaruki3DKernel(
   options: Haruki3DKernelOptions
 ): Haruki3DKernel {
@@ -35,9 +44,17 @@ export function createHaruki3DKernel(
     autoRender: false,
     manageResize: false,
   });
+  return createHaruki3DKernelRuntime(engine, assetBaseUrl);
+}
+
+export function createHaruki3DKernelRuntime(
+  engine: Haruki3DKernelEngine,
+  assetBaseUrl: string
+): Haruki3DKernel {
   let animationFrame = 0;
   let running = false;
   let destroyed = false;
+  let loadSettled: Promise<void> = Promise.resolve();
   let lastFrameMs: number | null = null;
   let accumulator = 0;
   let elapsedTime = 0;
@@ -78,7 +95,12 @@ export function createHaruki3DKernel(
   return {
     async load(recipe) {
       assertActive();
-      await engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl });
+      const loading = engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl });
+      loadSettled = loading.then(() => undefined, () => undefined);
+      await loading;
+      if (destroyed) {
+        return;
+      }
       engine.stepRuntimeFrame(0, { advanceAnimation: false, elapsedTime });
       engine.renderFrame();
     },
@@ -111,11 +133,11 @@ export function createHaruki3DKernel(
       if (destroyed) {
         return;
       }
+      destroyed = true;
       running = false;
       cancelAnimationFrame(animationFrame);
       animationFrame = 0;
-      engine.destroy();
-      destroyed = true;
+      void loadSettled.then(() => engine.destroy());
     },
   };
 }

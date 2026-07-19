@@ -117,7 +117,7 @@ The Docker image runs the capture HTTP service. Mount an exported runtime packag
 
 ```bash
 docker build -t haruki-3d-engine .
-docker run --rm -p 8080:8080 \
+docker run --rm -p 127.0.0.1:8080:8080 \
   -e HARUKI_ENGINE_CONFIG=/app/haruki-3d-engine.config.json \
   -e HARUKI_CAPTURE_SCALE=2 \
   -v /path/to/haruki-3d-engine.config.json:/app/haruki-3d-engine.config.json:ro \

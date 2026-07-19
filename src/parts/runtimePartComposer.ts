@@ -1679,10 +1679,11 @@ function remapRuntimeConstraints(
     })
     .filter((constraint) => {
       const ownerRoot = normalizeRootName(firstPathSegment(constraint.ownerPath));
-      const sourceRoots = readRecordArray(constraint.sources)
-        .map((source) => normalizeRootName(firstPathSegment(readOptionalString(source.sourcePath))));
-      return (!ownerRoot || roots.has(ownerRoot)) &&
-        sourceRoots.every((sourceRoot) => !sourceRoot || roots.has(sourceRoot));
+      // ConstraintSetup rebinds every source by transform name after model
+      // composition. A source path may therefore point at the source prefab's
+      // inactive body/face branch and must not decide whether the live owner
+      // constraint survives part filtering.
+      return !ownerRoot || roots.has(ownerRoot);
     });
 }
 
@@ -1796,6 +1797,9 @@ function cloneArrayWithPartPrefix<T = unknown>(
         typeof id === "number" ? remapNumericId(id, partIndex) : id
       );
     }
+    if (Array.isArray(cloned.forceProviders)) {
+      cloned.forceProviders = remapRuntimeForceProviders(cloned.forceProviders, partIndex);
+    }
     if (Array.isArray(cloned.directColliderPathIds)) {
       cloned.directColliderPathIds = cloned.directColliderPathIds.map((id) =>
         typeof id === "number" ? remapNumericId(id, partIndex) : id
@@ -1843,6 +1847,22 @@ function cloneArrayWithPartPrefix<T = unknown>(
       cloned.candidateRoots = remapColliderRoots(cloned.candidateRoots, partIndex);
     }
     return cloned as T;
+  });
+}
+
+function remapRuntimeForceProviders(value: unknown[], partIndex: number): unknown[] {
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      return entry;
+    }
+    const cloned: Record<string, unknown> = { ...entry, runtimePartIndex: partIndex };
+    if (typeof cloned.sourcePathId === "number") {
+      cloned.sourcePathId = remapNumericId(cloned.sourcePathId, partIndex);
+    }
+    if (typeof cloned.springManagerPathId === "number") {
+      cloned.springManagerPathId = remapNumericId(cloned.springManagerPathId, partIndex);
+    }
+    return cloned;
   });
 }
 

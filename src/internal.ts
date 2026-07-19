@@ -68,6 +68,8 @@ export {
 } from "./parts/runtimePartComposer";
 export {
   previewLightDefaults,
+  sekaiCostumeShopDirectionalLightDirection,
+  sekaiCostumeShopDirectionalLightRotationDegrees,
   type BodyAssetManifest,
   type HeadAssetManifest,
   type PreviewLightState,
@@ -89,6 +91,7 @@ export {
 } from "./kernel/renderRecipe";
 export {
   createHaruki3DKernel,
+  createHaruki3DKernelRuntime,
   type Haruki3DKernel,
   type Haruki3DKernelOptions,
 } from "./kernel/Haruki3DKernel";
@@ -123,10 +126,15 @@ export {
 } from "./engine/characterLightingRuntime";
 export {
   buildUnityPrefabSourceGraph,
+  createUnityPrefabConstraintRuntime,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,
   syncUnityPrefabSourceGraph,
 } from "./engine/unityPrefabRuntime";
+export {
+  UnityPrefabSpringRuntime,
+  type SpringTimelineControl,
+} from "./engine/unityPrefabSpringRuntimeAdapter";
 export {
   bindBodyRuntimeMaterials,
   configureSekaiEyelashPass,

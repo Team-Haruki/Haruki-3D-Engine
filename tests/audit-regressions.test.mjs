@@ -26,6 +26,14 @@ test("engine serves and loads only final MessagePack Brotli runtime files", () =
   assert.match(loaderSource, /parts\/by-role\/\$\{role\.characterId\}/);
   assert.doesNotMatch(loaderSource, /full-runtime|\.json\.gz|DecompressionStream|parts\/part-registry\.json/);
   assert.match(loaderSource, /runtime\.corePath\?\.endsWith\("\.msgpack\.br"\)/);
+  assert.doesNotMatch(loaderSource, /cache:\s*["']no-store["']/);
+});
+
+test("local capture development does not listen on every interface by default", () => {
+  const source = readSource("vite.capture.config.ts");
+
+  assert.match(source, /host:\s*"127\.0\.0\.1"/);
+  assert.doesNotMatch(source, /host:\s*"0\.0\.0\.0"/);
 });
 
 function sourceSlice(source, startMarker, endMarker) {

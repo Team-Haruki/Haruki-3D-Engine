@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { RuntimeNumericArray } from "../runtime/runtimeTypes";
 import { buildPrefabNodePathLookup } from "./prefabNodeLookup";
 import {
+  UnityConstraintRuntime,
   applyUnityRuntimeConstraints,
   type RuntimeConstraintDebug,
   type RuntimeConstraintSetupSource,
@@ -808,14 +809,17 @@ function buildUnityRuntimeNativeGeometry(source: RuntimeNativeMeshSource) {
 export function syncUnityPrefabSourceGraph(
   graph: UnityPrefabSourceGraph,
   extension: unknown,
-  characterHeight: number
+  characterHeight: number,
+  constraintRuntime?: { update(): RuntimeConstraintDebug } | null
 ): RuntimeConstraintDebug | null {
   graph.root.updateMatrixWorld(true);
-  const diagnostics = applyUnityRuntimeConstraints(
-    graph,
-    readRuntimeUnitySetup0414(extension)?.constraintSetup,
-    characterHeight
-  );
+  const diagnostics = constraintRuntime
+    ? constraintRuntime.update()
+    : applyUnityRuntimeConstraints(
+      graph,
+      readRuntimeUnitySetup0414(extension)?.constraintSetup,
+      characterHeight
+    );
 
   for (const binding of graph.meshCarrierBindings) {
     binding.target.position.copy(binding.source.position);
@@ -825,6 +829,17 @@ export function syncUnityPrefabSourceGraph(
   }
   graph.root.updateMatrixWorld(true);
   return diagnostics;
+}
+
+export function createUnityPrefabConstraintRuntime(
+  graph: UnityPrefabSourceGraph,
+  extension: unknown,
+  characterHeight: number
+) {
+  const setup = readRuntimeUnitySetup0414(extension)?.constraintSetup;
+  return setup
+    ? new UnityConstraintRuntime(graph, setup, characterHeight)
+    : null;
 }
 
 export function makeUnityPrefabHeadFollowDebugSnapshot(

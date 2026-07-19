@@ -5,7 +5,7 @@ const projectRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
   server: {
-    host: "0.0.0.0",
+    host: "127.0.0.1",
     port: 4173,
     watch: {
       // Windows-mounted WSL paths do not reliably emit file change events.

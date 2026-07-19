@@ -66,6 +66,10 @@ the final role-scoped package:
 
 Raw Unity bundles are not a supported browser input.
 
+Runtime requests use the browser's normal HTTP cache. Deployments should use
+versioned runtime URLs and ordinary `Cache-Control`/`ETag` headers; the kernel
+does not force `no-store` or maintain a second persistent browser cache.
+
 ## Capture Adapter
 
 The Docker capture service is not part of the public browser interface. It uses

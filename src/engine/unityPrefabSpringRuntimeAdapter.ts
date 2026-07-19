@@ -100,7 +100,20 @@ type RuntimeManagerSource = {
   friction?: number;
   animatedBoneNames?: string[];
   rawGravity?: VectorLike | null;
+  forceProviders?: RuntimeForceProviderSource[];
   bonePathIds?: number[];
+};
+
+type RuntimeForceProviderSource = {
+  sourcePathId?: number;
+  scriptName?: string;
+  nodeName?: string | null;
+  nodePath?: string | null;
+  activeSelf?: boolean | null;
+  activeInHierarchy?: boolean | null;
+  springManagerPathId?: number | null;
+  runtimePartIndex?: number;
+  raw?: UnknownRecord | null;
 };
 
 type RuntimeBoneSource = {
@@ -284,6 +297,7 @@ type RuntimeBone = {
   isSumOfForcesOnBone: boolean;
   isPaused: boolean;
   gravity: THREE.Vector3;
+  forceProviders: RuntimeForceProvider[];
   node: THREE.Object3D;
   state: UtjSpringBoneState;
   initialLocalRotation: THREE.Quaternion;
@@ -302,6 +316,10 @@ type RuntimeBone = {
   radius: number;
   stiffnessForce: number;
   dragForce: number;
+  windInfluence: number;
+  originalStiffnessForce: number;
+  originalDragForce: number;
+  originalWindInfluence: number;
   springForce: THREE.Vector3;
   springConstant: number;
   lengthLimitTargets: RuntimeLengthLimitTarget[];
@@ -314,6 +332,54 @@ type RuntimeBone = {
   lastCollisionStatus: number;
   lastCollisionInfo: LastCollisionInfo | null;
   lastAngleLimitApplied: boolean;
+};
+
+type RuntimeForceProvider = RuntimeForceVolume | RuntimeWindVolume | RuntimeWindVolumeOneSelf;
+
+type RuntimeForceProviderBase = {
+  sourcePathId: number | null;
+  node: THREE.Object3D;
+  springManagerPathId: number | null;
+};
+
+type RuntimeForceVolume = RuntimeForceProviderBase & {
+  kind: "ForceVolume";
+  strength: number;
+};
+
+type RuntimeWindVolume = RuntimeForceProviderBase & {
+  kind: "WindVolume";
+  weight: number;
+  strength: number;
+  period: number;
+  positionalMultiplier: number;
+  timeFactor: number;
+  offsetVector: THREE.Vector3;
+};
+
+type RuntimeWindVolumeOneSelf = RuntimeForceProviderBase & {
+  kind: "WindVolumeOneSelf";
+  isActive: boolean;
+  dynamicRatio: number;
+  simulationFrameRate: number;
+  weight: number;
+  strength: number;
+  period: number;
+  currentTime: number;
+  spinPeriod: number;
+  spinTime: number;
+  amplitude: number;
+  peakDistance: number;
+  additionalWindAngle: number;
+  additionalWindStrength: number;
+};
+
+export type SpringTimelineControl = {
+  stiffnessForce?: number | null;
+  dragForce?: number | null;
+  windInfluence?: number | null;
+  slowMotionScale?: number | null;
+  paused?: boolean | null;
 };
 
 type RuntimeBoneAxisSource =
@@ -337,6 +403,14 @@ export class UnityPrefabSpringRuntime {
   private readonly frameColliderCache = new Map<RuntimeCollider, UtjCollider>();
   private readonly angleVector = new THREE.Vector3();
   private readonly debugAnimatedTip = new THREE.Vector3();
+  private readonly providerForce = new THREE.Vector3();
+  private readonly providerWorldToLocal = new THREE.Matrix4();
+  private readonly waveAxis = new THREE.Vector3();
+  private readonly providerRight = new THREE.Vector3();
+  private readonly providerUp = new THREE.Vector3();
+  private readonly mainWindDirection = new THREE.Vector3();
+  private readonly localBonePosition = new THREE.Vector3();
+  private readonly additionalDirection = new THREE.Vector3();
   private traceFilters: string[] = [];
   private traceMaxEvents = 240;
   private traceSequence = 0;
@@ -371,12 +445,14 @@ export class UnityPrefabSpringRuntime {
     const boneByPathId = buildBoneMap(setup);
     const setupDiagnostics = buildSetupDiagnostics(setup, activeRoots);
     const controlledNodes = new Set<THREE.Object3D>();
+    const forceProviderCache = new Map<string, RuntimeForceProvider>();
     const bones: RuntimeBone[] = [];
 
     for (const manager of setup.managers ?? []) {
       if (!isSourceActive(manager) || !isRuntimePathActive(manager.nodePath ?? manager.poseRoot, activeRoots)) {
         continue;
       }
+      const forceProviders = resolveForceProviders(resolution, manager, forceProviderCache);
       for (const bonePathId of manager.bonePathIds ?? []) {
         const sourceBone = boneByPathId.get(bonePathId);
         if (!sourceBone || !isSourceActive(sourceBone) || !isRuntimePathActive(sourceBone.nodePath, activeRoots)) {
@@ -408,6 +484,7 @@ export class UnityPrefabSpringRuntime {
           tailBinding,
           pivotNode,
           resolveLengthLimitTargets(resolution, sourceBone),
+          forceProviders,
           colliderBinding
         );
         if (runtimeBone) {
@@ -445,11 +522,39 @@ export class UnityPrefabSpringRuntime {
     };
   }
 
+  // Mirrors the three official timeline paths: global SpringBoneControl,
+  // manager SpringBoneSlow, and CharacterModel.PauseSpringBone.
+  setTimelineControl(control: SpringTimelineControl): void {
+    for (const bone of this.bones) {
+      bone.stiffnessForce = finiteOverride(control.stiffnessForce, bone.originalStiffnessForce);
+      bone.dragForce = finiteOverride(control.dragForce, bone.originalDragForce);
+      bone.windInfluence = finiteOverride(control.windInfluence, bone.originalWindInfluence);
+      bone.slowMotionScale = finiteOverride(control.slowMotionScale, 1);
+      bone.isPaused = control.paused ?? false;
+    }
+  }
+
+  clearTimelineControl(): void {
+    this.setTimelineControl({});
+  }
+
   // UTJ.SpringManager.UpdateDynamics RVA 0x0a59fe18
   update(deltaTime: number): void {
     if (this.bones.some((bone) => bone.automaticUpdates && bone.enabled && !bone.isPaused)) {
       this.preUpdateColliders();
     }
+
+    const windProviders = this.collectWindVolumeOneSelfProviders();
+    const lateUpdateManagerIds = new Set(
+      windProviders
+        .filter((provider) => provider.isActive && provider.springManagerPathId !== null)
+        .map((provider) => provider.springManagerPathId as number)
+    );
+    const windManagedSumIds = new Set(
+      windProviders
+        .filter((provider) => !provider.isActive && provider.springManagerPathId !== null)
+        .map((provider) => provider.springManagerPathId as number)
+    );
 
     for (const bone of this.bones) {
       if (!bone.automaticUpdates || !bone.enabled) {
@@ -461,10 +566,13 @@ export class UnityPrefabSpringRuntime {
         this.applyBoneRotation(bone, getEffectiveDynamicRatio(bone));
         continue;
       }
-      if (!bone.isSumOfForcesOnBone) {
+      const managerSumsForces = bone.managerPathId !== null && windManagedSumIds.has(bone.managerPathId)
+        ? true
+        : bone.isSumOfForcesOnBone;
+      if (!managerSumsForces || (bone.managerPathId !== null && lateUpdateManagerIds.has(bone.managerPathId))) {
         continue;
       }
-      this.externalForce.copy(bone.gravity);
+      this.computeExternalForce(bone, deltaTime);
       this.updateBoneSpringAndRotation(
         bone,
         calcUtjManagerTimeStep(deltaTime, bone.simulationFrameRate, bone.slowMotionScale),
@@ -472,6 +580,148 @@ export class UnityPrefabSpringRuntime {
         getEffectiveDynamicRatio(bone)
       );
     }
+
+    for (const provider of windProviders) {
+      if (provider.isActive) {
+        this.updateWindVolumeOneSelfLateUpdate(provider, deltaTime);
+      }
+    }
+  }
+
+  private collectWindVolumeOneSelfProviders(): RuntimeWindVolumeOneSelf[] {
+    const providers = new Set<RuntimeWindVolumeOneSelf>();
+    for (const bone of this.bones) {
+      for (const provider of bone.forceProviders) {
+        if (provider.kind === "WindVolumeOneSelf") {
+          providers.add(provider);
+        }
+      }
+    }
+    return [...providers];
+  }
+
+  private updateWindVolumeOneSelfLateUpdate(
+    provider: RuntimeWindVolumeOneSelf,
+    deltaTime: number
+  ): void {
+    if (provider.springManagerPathId === null) {
+      return;
+    }
+    const dt = provider.simulationFrameRate > 0 ? 1 / provider.simulationFrameRate : deltaTime;
+    for (const bone of this.bones) {
+      if (bone.managerPathId !== provider.springManagerPathId || !bone.automaticUpdates || !bone.enabled || bone.isPaused) {
+        continue;
+      }
+      this.computeWindVolumeOneSelfForce(provider, bone, deltaTime);
+      this.externalForce.copy(bone.gravity).add(this.providerForce);
+      this.updateBoneSpringAndRotation(
+        bone,
+        dt,
+        this.externalForce,
+        bone.isAnimated ? provider.dynamicRatio : 1
+      );
+    }
+  }
+
+  private computeExternalForce(bone: RuntimeBone, deltaTime: number): THREE.Vector3 {
+    this.externalForce.copy(bone.gravity);
+    for (const provider of bone.forceProviders) {
+      this.externalForce.add(this.computeForceProvider(provider, bone, deltaTime));
+    }
+    return this.externalForce;
+  }
+
+  private computeForceProvider(
+    provider: RuntimeForceProvider,
+    bone: RuntimeBone,
+    deltaTime: number
+  ): THREE.Vector3 {
+    if (provider.kind === "ForceVolume") {
+      provider.node.updateMatrixWorld(true);
+      return this.providerForce
+        .set(0, 0, 1)
+        .transformDirection(provider.node.matrixWorld)
+        .multiplyScalar(provider.strength);
+    }
+    if (provider.kind === "WindVolume") {
+      return this.computeWindVolume(provider, bone);
+    }
+    return this.computeWindVolumeOneSelfForce(provider, bone, deltaTime);
+  }
+
+  private computeWindVolume(provider: RuntimeWindVolume, bone: RuntimeBone): THREE.Vector3 {
+    const baseStrength = provider.weight * provider.strength;
+    if (baseStrength <= UNITY_MATHF_EPSILON || provider.period <= 0.001) {
+      return this.providerForce.set(0, 0, 0);
+    }
+    provider.node.updateMatrixWorld(true);
+    bone.node.getWorldPosition(this.localBonePosition).applyMatrix4(
+      this.providerWorldToLocal.copy(provider.node.matrixWorld).invert()
+    );
+    const wave = Math.sin(
+      provider.timeFactor +
+      Math.sin(this.localBonePosition.x * provider.positionalMultiplier) +
+      Math.cos(this.localBonePosition.z * provider.positionalMultiplier)
+    );
+    return this.providerForce
+      .set(0, 0, 1)
+      .transformDirection(provider.node.matrixWorld)
+      .addScaledVector(provider.offsetVector, wave)
+      .normalize()
+      .multiplyScalar(baseStrength * bone.windInfluence);
+  }
+
+  private computeWindVolumeOneSelfForce(
+    provider: RuntimeWindVolumeOneSelf,
+    bone: RuntimeBone,
+    deltaTime: number
+  ): THREE.Vector3 {
+    const baseStrength = provider.weight * provider.strength;
+    if (baseStrength <= UNITY_MATHF_EPSILON || provider.period <= UNITY_MATHF_EPSILON) {
+      return this.providerForce.set(0, 0, 0);
+    }
+    provider.currentTime = addPeriodically(provider.currentTime, deltaTime, provider.period);
+    const phase = provider.currentTime * Math.PI * 2 / provider.period;
+    provider.node.updateMatrixWorld(true);
+    this.waveAxis.set(0, 1, 0).transformDirection(provider.node.matrixWorld);
+    if (Math.abs(provider.spinPeriod) > 0.001) {
+      provider.spinTime = addPeriodically(provider.spinTime, deltaTime, provider.spinPeriod);
+      const spinPhase = provider.spinTime * Math.PI * 2 / provider.spinPeriod;
+      this.providerRight.set(1, 0, 0).transformDirection(provider.node.matrixWorld);
+      this.providerUp.set(0, 1, 0).transformDirection(provider.node.matrixWorld);
+      this.waveAxis.copy(this.providerRight).multiplyScalar(Math.cos(spinPhase)).addScaledVector(
+        this.providerUp,
+        Math.sin(spinPhase)
+      );
+    }
+    const peakDistance = Math.max(provider.peakDistance, UNITY_MATHF_EPSILON);
+    bone.node.getWorldPosition(this.localBonePosition).applyMatrix4(
+      this.providerWorldToLocal.copy(provider.node.matrixWorld).invert()
+    );
+    const waveScale = Math.PI * 2 / peakDistance;
+    const wave = Math.sin(
+      phase +
+      Math.sin(waveScale * this.localBonePosition.x) +
+      Math.cos(waveScale * this.localBonePosition.z)
+    );
+    this.mainWindDirection.set(0, 0, 1)
+      .transformDirection(provider.node.matrixWorld)
+      .addScaledVector(this.waveAxis, provider.amplitude * wave)
+      .normalize();
+    // Official: Quaternion.Euler(0, angle, 0) * Vector3.right. Mirror Unity's
+    // X axis when expressing that world-space direction in Three coordinates.
+    this.additionalDirection
+      .set(
+        -Math.cos(THREE.MathUtils.degToRad(provider.additionalWindAngle)),
+        0,
+        -Math.sin(THREE.MathUtils.degToRad(provider.additionalWindAngle))
+      )
+      .normalize();
+    return this.providerForce
+      .copy(this.mainWindDirection)
+      .multiplyScalar(baseStrength)
+      .addScaledVector(this.additionalDirection, provider.additionalWindStrength)
+      .multiplyScalar(bone.windInfluence);
   }
 
   settleCurrentPose(frameCount = 60, deltaTime = 1 / 60): void {
@@ -576,7 +826,7 @@ export class UnityPrefabSpringRuntime {
         lastCollisionColliderSourcePathId: bone.lastCollisionInfo?.sourcePathId ?? null,
         lastAngleLimitApplied: bone.lastAngleLimitApplied,
         hasSpringForce: bone.springForce.lengthSq() > 0.00000001,
-        forceProviderCount: 0,
+        forceProviderCount: bone.forceProviders.length,
         stiffnessForce: bone.stiffnessForce,
         managerDynamicRatio: bone.dynamicRatio,
         dynamicRatio: getEffectiveDynamicRatio(bone),
@@ -621,7 +871,7 @@ export class UnityPrefabSpringRuntime {
             : null,
           lastAngleLimitApplied: bone.lastAngleLimitApplied,
           hasSpringForce: bone.springForce.lengthSq() > 0.00000001,
-          forceProviderCount: 0,
+          forceProviderCount: bone.forceProviders.length,
           stiffnessForce: bone.stiffnessForce,
           dragForce: bone.dragForce,
           managerDynamicRatio: bone.dynamicRatio,
@@ -967,7 +1217,7 @@ export class UnityPrefabSpringRuntime {
       enableAngleLimits: bone.enableAngleLimits,
       enableLengthLimits: bone.enableLengthLimits,
       colliderCount: bone.colliders.length,
-      forceProviderCount: 0,
+      forceProviderCount: bone.forceProviders.length,
       headPosition: vectorSnapshot(this.headPosition),
       parentRotation: quaternionSnapshot(this.parentRotation),
       initialLocalRotation: quaternionSnapshot(bone.initialLocalRotation),
@@ -1178,6 +1428,7 @@ function createRuntimeBone(
   tailBinding: RuntimeTailBindingDiagnostic,
   pivotNode: THREE.Object3D | null,
   lengthLimitTargets: RuntimeLengthLimitTarget[],
+  forceProviders: RuntimeForceProvider[],
   colliderBinding: RuntimeColliderBinding
 ): RuntimeBone | null {
   const tailPosition = tailBinding.tailPosition;
@@ -1191,6 +1442,11 @@ function createRuntimeBone(
     node: target.node,
     initialLength: target.node.getWorldPosition(new THREE.Vector3()).distanceTo(tailPosition),
   }));
+  const stiffnessForce = sourceBone.rawStiffnessForce ?? 300;
+  const dragForce = sourceBone.rawDragForce ?? sourceBone.dragForce ?? 0.4;
+  const windInfluence = Math.max(0, sourceBone.rawWindInfluence ?? 1);
+  const slowMotionScale = readFiniteNumber(manager.slowMotionScale) ?? 1;
+  const isPaused = manager.isPaused === true;
 
   return {
     managerPathId: readFiniteNumber(manager.pathId),
@@ -1212,8 +1468,9 @@ function createRuntimeBone(
     collideWithGround: manager.collideWithGround === true,
     groundHeight: manager.groundHeight ?? 0,
     isSumOfForcesOnBone: manager.isSumOfForcesOnBone !== false,
-    isPaused: manager.isPaused === true,
+    isPaused,
     gravity: vectorFromRaw(manager.rawGravity),
+    forceProviders,
     node,
     state: createUtjSpringBoneState(headPosition, tailPosition),
     initialLocalRotation,
@@ -1226,12 +1483,16 @@ function createRuntimeBone(
     dynamicRatio,
     isAnimated: isBoneAnimated(sourceBone, node, manager),
     simulationFrameRate: readFiniteNumber(manager.simulationFrameRate) ?? 60,
-    slowMotionScale: readFiniteNumber(manager.slowMotionScale) ?? 1,
+    slowMotionScale,
     bounce: readFiniteNumber(manager.bounce) ?? 0,
     friction: readFiniteNumber(manager.friction) ?? 1,
     radius: Math.max(0, sourceBone.hitRadius ?? 0.05),
-    stiffnessForce: sourceBone.rawStiffnessForce ?? 300,
-    dragForce: sourceBone.rawDragForce ?? sourceBone.dragForce ?? 0.4,
+    stiffnessForce,
+    dragForce,
+    windInfluence,
+    originalStiffnessForce: stiffnessForce,
+    originalDragForce: dragForce,
+    originalWindInfluence: windInfluence,
     springForce: vectorFromRaw(sourceBone.rawSpringForce),
     springConstant: sourceBone.rawSpringConstant ?? 0.5,
     lengthLimitTargets: initializedLengthLimitTargets,
@@ -1245,6 +1506,112 @@ function createRuntimeBone(
     lastCollisionInfo: null,
     lastAngleLimitApplied: false,
   };
+}
+
+function resolveForceProviders(
+  resolution: NodeResolution,
+  manager: RuntimeManagerSource,
+  cache: Map<string, RuntimeForceProvider>
+): RuntimeForceProvider[] {
+  return (manager.forceProviders ?? [])
+    .map((source) => {
+      const key = forceProviderCacheKey(source);
+      const cached = key ? cache.get(key) : undefined;
+      if (cached) {
+        return cached;
+      }
+      const provider = createForceProvider(resolution, source);
+      if (provider && key) {
+        cache.set(key, provider);
+      }
+      return provider;
+    })
+    .filter((provider): provider is RuntimeForceProvider => Boolean(provider));
+}
+
+function forceProviderCacheKey(source: RuntimeForceProviderSource): string | null {
+  const part = typeof source.runtimePartIndex === "number" ? `${source.runtimePartIndex}:` : "";
+  if (typeof source.sourcePathId === "number") {
+    return `${part}path:${source.sourcePathId}`;
+  }
+  if (source.nodePath) {
+    return `${part}nodePath:${source.nodePath}`;
+  }
+  return null;
+}
+
+function createForceProvider(
+  resolution: NodeResolution,
+  source: RuntimeForceProviderSource
+): RuntimeForceProvider | null {
+  const scriptName = source.scriptName ?? "";
+  const isWindVolumeOneSelf = scriptName.endsWith("WindVolumeOneSelf");
+  const isWindVolume = scriptName.endsWith("WindVolume") && !isWindVolumeOneSelf;
+  const isForceVolume = scriptName.endsWith("ForceVolume") && !isWindVolume;
+  if (!isForceVolume && !isWindVolume && !isWindVolumeOneSelf) {
+    return null;
+  }
+  const node = resolveNodeForPart(resolution, source.nodePath, source.runtimePartIndex) ??
+    resolveUniqueNodeByName(resolution, source.nodeName);
+  const raw = source.raw ?? {};
+  if (!node || !readRawBoolean(raw, "m_Enabled", true) || source.activeSelf === false || source.activeInHierarchy === false) {
+    return null;
+  }
+  const common: RuntimeForceProviderBase = {
+    sourcePathId: readFiniteNumber(source.sourcePathId),
+    node,
+    springManagerPathId: readFiniteNumber(source.springManagerPathId) ??
+      readRawObjectPathId(raw, "<SpringManager>k__BackingField") ??
+      readRawObjectPathId(raw, "_SpringManager_k__BackingField") ??
+      readRawObjectPathId(raw, "springManager"),
+  };
+  if (isForceVolume) {
+    return {
+      kind: "ForceVolume",
+      ...common,
+      strength: readRawNumber(raw, "strength", 0),
+    };
+  }
+  if (isWindVolume) {
+    return {
+      kind: "WindVolume",
+      ...common,
+      weight: readRawNumber(raw, "weight", 0),
+      strength: readRawNumber(raw, "strength", 0),
+      period: readRawNumber(raw, "period", 0),
+      positionalMultiplier: readRawNumber(raw, "positionalMultiplier", 0),
+      timeFactor: readRawNumber(raw, "timeFactor", 0),
+      offsetVector: readRawVector(raw, "offsetVector"),
+    };
+  }
+  return {
+    kind: "WindVolumeOneSelf",
+    ...common,
+    isActive: readRawBoolean(raw, "isActive", false),
+    dynamicRatio: THREE.MathUtils.clamp(readRawNumber(raw, "dynamicRatio", 0.5), 0, 1),
+    simulationFrameRate: Math.max(0, readRawNumber(raw, "simulationFrameRate", 60)),
+    weight: readRawNumber(raw, "weight", 0),
+    strength: readRawNumber(raw, "strength", 0),
+    period: readRawNumber(raw, "period", 0),
+    currentTime: readRawNumber(raw, "currentTime", 0),
+    spinPeriod: readRawNumber(raw, "spinPeriod", 0),
+    spinTime: readRawNumber(raw, "spinTime", 0),
+    amplitude: readRawNumber(raw, "amplitude", 0),
+    peakDistance: readRawNumber(raw, "peakDistance", 0),
+    additionalWindAngle: readRawNumber(raw, "additionalWindAngle", 0),
+    additionalWindStrength: readRawNumber(raw, "additionalWindStrength", 0),
+  };
+}
+
+function resolveUniqueNodeByName(
+  resolution: NodeResolution,
+  name?: string | null
+): THREE.Object3D | null {
+  if (!name) {
+    return null;
+  }
+  const matches = [...new Set(resolution.nodeByPath.values())].filter((node) => node.name === name);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function buildRuntimeColliders(
@@ -2167,6 +2534,44 @@ function normalizeRuntimeAxis(axis: THREE.Vector3): THREE.Vector3 | null {
 
 function vectorFromArray(values?: number[]): THREE.Vector3 {
   return new THREE.Vector3(values?.[0] ?? 0, values?.[1] ?? 0, values?.[2] ?? 0);
+}
+
+function readRawNumber(raw: UnknownRecord, key: string, fallback: number): number {
+  return readFiniteNumber(raw[key] ?? raw[capitalize(key)]) ?? fallback;
+}
+
+function readRawVector(raw: UnknownRecord, key: string): THREE.Vector3 {
+  const value = raw[key] ?? raw[capitalize(key)];
+  return Array.isArray(value) || (value !== null && typeof value === "object")
+    ? vectorFromRaw(value as VectorLike | number[])
+    : new THREE.Vector3();
+}
+
+function readRawBoolean(raw: UnknownRecord, key: string, fallback: boolean): boolean {
+  const value = raw[key] ?? raw[capitalize(key)];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  return typeof value === "number" ? value !== 0 : fallback;
+}
+
+function readRawObjectPathId(raw: UnknownRecord, key: string): number | null {
+  const value = asRecord(raw[key] ?? raw[capitalize(key)]);
+  return readFiniteNumber(value?.m_PathID ?? value?.m_pathID ?? value?.pathId);
+}
+
+function capitalize(value: string): string {
+  return value.length > 0 ? value[0].toUpperCase() + value.slice(1) : value;
+}
+
+function addPeriodically(currentValue: number, deltaValue: number, period: number): number {
+  return period > 0
+    ? THREE.MathUtils.euclideanModulo(currentValue + deltaValue, period)
+    : currentValue + deltaValue;
+}
+
+function finiteOverride(value: number | null | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
 function readFiniteNumber(value: unknown): number | null {

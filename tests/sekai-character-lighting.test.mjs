@@ -5,7 +5,31 @@ import {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
   evaluateSekaiFaceSphereShadow,
+  previewLightDefaults,
+  sekaiCostumeShopDirectionalLightDirection,
+  sekaiCostumeShopDirectionalLightRotationDegrees,
 } from "../dist/haruki-3d-engine-internal.js";
+
+test("costume preview uses the official costume-shop directional transform", () => {
+  assert.deepEqual(sekaiCostumeShopDirectionalLightRotationDegrees, {
+    x: -15,
+    y: 50,
+    z: 0,
+  });
+  assert.deepEqual(
+    {
+      x: previewLightDefaults.x,
+      y: previewLightDefaults.y,
+      z: previewLightDefaults.z,
+    },
+    sekaiCostumeShopDirectionalLightDirection
+  );
+  assert.ok(Math.abs(Math.hypot(
+    previewLightDefaults.x,
+    previewLightDefaults.y,
+    previewLightDefaults.z
+  ) - 1) < 1e-12);
+});
 
 test("official base toon uses half Lambert only when enabled", () => {
   assert.equal(evaluateSekaiBaseShadow({
