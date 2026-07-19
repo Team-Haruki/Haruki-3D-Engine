@@ -107,3 +107,9 @@ export {
   prepareRuntimeAnimationClip,
   retargetUnityPrefabAnimationClip,
 } from "./engine/runtimeMotion";
+export {
+  buildUnityPrefabSourceGraph,
+  installUnityRuntimeNativeMeshes,
+  makeUnityPrefabHeadFollowDebugSnapshot,
+  syncUnityPrefabSourceGraph,
+} from "./engine/unityPrefabRuntime";

@@ -44,3 +44,14 @@ test("motion decoding and retargeting are isolated from playback state", () => {
   assert.match(motionSource, /export function retargetUnityPrefabAnimationClip/);
   assert.match(engineSource, /private async refreshAnimationPlayback/);
 });
+
+test("prefab graph assembly and native mesh import are isolated from engine state", () => {
+  const engineSource = readSource("src/engine/Haruki3DEngine.ts");
+  const prefabSource = readSource("src/engine/unityPrefabRuntime.ts");
+
+  assert.doesNotMatch(engineSource, /function applyOfficialModelCombineSetup/);
+  assert.doesNotMatch(engineSource, /function buildUnityRuntimeNativeGeometry/);
+  assert.match(prefabSource, /export function buildUnityPrefabSourceGraph/);
+  assert.match(prefabSource, /export function installUnityRuntimeNativeMeshes/);
+  assert.match(engineSource, /private async loadCombinedCharacterAsset/);
+});

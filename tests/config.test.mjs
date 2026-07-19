@@ -610,22 +610,22 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
 });
 
 test("native prefab meshes bind with exported Unity inverse bind matrices before fallback", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /buildUnityRuntimeBoneInverseBindMatrices/);
+  assert.match(prefabSource, /buildUnityRuntimeBoneInverseBindMatrices/);
   assert.match(
-    engineSource,
+    prefabSource,
     /const inverseBindMatrices = buildUnityRuntimeBoneInverseBindMatrices\(\s+source,\s+skeletonBones\.length,\s+warnings\s+\);/s
   );
   assert.match(
-    engineSource,
+    prefabSource,
     /new THREE\.Skeleton\(\s+skeletonBones as unknown as THREE\.Bone\[\],\s+inverseBindMatrices\.length > 0 \? inverseBindMatrices : undefined\s+\)/s
   );
   assert.match(
-    engineSource,
+    prefabSource,
     /if \(inverseBindMatrices\.length === 0\) \{\s+skeleton\.calculateInverses\(\);\s+\}/s
   );
 });
@@ -723,6 +723,10 @@ test("part registry runtime path keeps role motion separate from part packages",
     path.join(repoRoot, "src/engine/unityConstraintRuntime.ts"),
     "utf8"
   );
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(composerSource, /type RoleRuntimePackage =/);
   assert.match(composerSource, /findHeadOptionalAttachTransform/);
@@ -734,7 +738,7 @@ test("part registry runtime path keeps role motion separate from part packages",
   assert.match(engineSource, /applyCustomRoleDefaultMotion/);
   assert.match(engineSource, /nativeMeshes: this\.lastNativeMeshInstallDiagnostics/);
   assert.match(engineSource, /constraints: this\.lastConstraintSetupDiagnostics/);
-  assert.match(engineSource, /applyUnityRuntimeConstraints/);
+  assert.match(prefabSource, /applyUnityRuntimeConstraints/);
   assert.match(composerSource, /sourcePathId = remapNumericId/);
   assert.match(constraintRuntimeSource, /export function applyUnityRuntimeConstraints/);
   assert.match(constraintRuntimeSource, /constraint\.sources/);
@@ -1037,47 +1041,47 @@ test("final part manifests require exported character height", () => {
 });
 
 test("unity prefab source graph requires the official model-combine setup", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
-  assert.doesNotMatch(engineSource, /PJSK_RuntimeMount_face/);
-  assert.doesNotMatch(engineSource, /runtimeMountPath/);
+  assert.match(prefabSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
+  assert.doesNotMatch(prefabSource, /PJSK_RuntimeMount_face/);
+  assert.doesNotMatch(prefabSource, /runtimeMountPath/);
 });
 
 test("unity prefab source graph mounts every duplicate composed face root", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /const headRoots = collectUnityPrefabHeadRoots/);
-  assert.match(engineSource, /const headRootMounts = headRoots\.map/);
-  assert.match(engineSource, /resolveUnityPrefabMountedHeadOrigin/);
-  assert.match(engineSource, /originRestLocalToRoot/);
-  assert.doesNotMatch(engineSource, /findUnityPrefabChildByName\(mountedHeadRoot, "Position"\)/);
+  assert.match(prefabSource, /const headRoots = collectUnityPrefabHeadRoots/);
+  assert.match(prefabSource, /const headRootMounts = headRoots\.map/);
+  assert.match(prefabSource, /resolveUnityPrefabMountedHeadOrigin/);
+  assert.match(prefabSource, /originRestLocalToRoot/);
+  assert.doesNotMatch(prefabSource, /findUnityPrefabChildByName\(mountedHeadRoot, "Position"\)/);
 });
 
 test("unity prefab source graph applies official ModelCombineSetup graft instead of per-frame face head sync", () => {
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
 
-  assert.match(engineSource, /function applyOfficialModelCombineSetup/);
-  assert.match(engineSource, /assembly\.faceRendererName \?\? "Face"/);
-  assert.match(engineSource, /Official model_combine_setup paths were not fully resolved/);
-  assert.match(engineSource, /new Set\(\[faceRendererName, "Face", "Hair", "Acc"\]\)/);
-  assert.match(engineSource, /drainChildrenKeepingLocal\(bodyNodeB\.node, faceNodeB\.node\)/);
-  assert.match(engineSource, /child\.name\.endsWith\(childMoveSuffix\)/);
-  assert.match(engineSource, /nodeByPath\.set\(bodyNodeA\.path, faceNodeA\.node\)/);
-  assert.match(engineSource, /nodeByPath\.set\(bodyNodeB\.path, faceNodeB\.node\)/);
-  assert.match(engineSource, /detachNode\(bodyNodeB\.node\)/);
-  assert.match(engineSource, /detachNode\(bodyNodeA\.node\)/);
-  assert.match(engineSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
-  assert.doesNotMatch(engineSource, /usesModelCombineSetup/);
+  assert.match(prefabSource, /function applyOfficialModelCombineSetup/);
+  assert.match(prefabSource, /assembly\.faceRendererName \?\? "Face"/);
+  assert.match(prefabSource, /Official model_combine_setup paths were not fully resolved/);
+  assert.match(prefabSource, /new Set\(\[faceRendererName, "Face", "Hair", "Acc"\]\)/);
+  assert.match(prefabSource, /drainChildrenKeepingLocal\(bodyNodeB\.node, faceNodeB\.node\)/);
+  assert.match(prefabSource, /child\.name\.endsWith\(childMoveSuffix\)/);
+  assert.match(prefabSource, /nodeByPath\.set\(bodyNodeA\.path, faceNodeA\.node\)/);
+  assert.match(prefabSource, /nodeByPath\.set\(bodyNodeB\.path, faceNodeB\.node\)/);
+  assert.match(prefabSource, /detachNode\(bodyNodeB\.node\)/);
+  assert.match(prefabSource, /detachNode\(bodyNodeA\.node\)/);
+  assert.match(prefabSource, /Runtime package must provide the official model_combine_setup body\/head assembly/);
+  assert.doesNotMatch(prefabSource, /usesModelCombineSetup/);
 });
 
 test("Sekai ExtraBone runtime follows official rotation order and coefficient direction", () => {
@@ -1329,12 +1333,12 @@ test("composed spring setup keeps duplicate head and hair prefab paths part scop
     path.join(repoRoot, "src/parts/runtimePartComposer.ts"),
     "utf8"
   );
-  const engineSource = fs.readFileSync(
-    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
-    "utf8"
-  );
   const springSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/unityPrefabSpringRuntimeAdapter.ts"),
+    "utf8"
+  );
+  const prefabSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
 
@@ -1348,7 +1352,7 @@ test("composed spring setup keeps duplicate head and hair prefab paths part scop
   assert.match(composerSource, /\.map\(\(part\) => part\.prefabGraph\)/);
   assert.match(composerSource, /cloned\.runtimePartIndex = partIndex/);
 
-  assert.match(engineSource, /node\.userData\.pjskRuntimePartIndex = transform\.runtimePartIndex/);
+  assert.match(prefabSource, /node\.userData\.pjskRuntimePartIndex = transform\.runtimePartIndex/);
 
   assert.match(springSource, /nodeByPartPath: Map<string, THREE\.Object3D>/);
   assert.match(springSource, /transformByPartPath: Map<string, RuntimePrefabTransform>/);
