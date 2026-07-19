@@ -369,7 +369,7 @@ test("role parts capture supports warmup frames for spring runtime settling", ()
   const captureStepBody = engineSource.match(
     /stepCaptureFrame\([^]*?\n  \}\n\n  getCharacterRoot/
   )?.[0] ?? "";
-  assert.match(dynamicsBody, /currentAnimationMixer\?\.update/);
+  assert.match(dynamicsBody, /animationPlayback\.step/);
   assert.match(dynamicsBody, /updateFaceMotion/);
   assert.match(dynamicsBody, /syncOfficialModelCombineSetup/);
   assert.match(dynamicsBody, /currentExtraBoneRuntime\?\.update/);
@@ -651,13 +651,17 @@ test("engine exposes only prefab-native runtime imports", () => {
     path.join(repoRoot, "src/engine/runtimeMotion.ts"),
     "utf8"
   );
+  const playbackSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/animationPlaybackRuntime.ts"),
+    "utf8"
+  );
 
   assert.match(engineSource, /Final runtime package must provide container\.unityRuntimeJson/);
   assert.match(engineSource, /Final runtime package must provide runtimeUnitySetup version 0414/);
   assert.doesNotMatch(engineSource, /importCharacterParts|loadBodyAsset|loadHeadAsset|applyBodyAsset|applyHeadAsset/);
   assert.doesNotMatch(engineSource, /"glb" \| "proxy"|combined_glb|separate_parts|bone_linked|node_attached/);
   assert.match(motionSource, /export type BodyAnimationKind = "unity-json";/);
-  assert.match(engineSource, /Unity motion \.msgpack\.br is required/);
+  assert.match(playbackSource, /Unity motion \.msgpack\.br is required/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(bodyAsset\.source\.meshUrl/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(headAsset\.source\.meshUrl/);
   assert.doesNotMatch(engineSource, /const loaded = await loadGltfPart\(\s+meshUrl,\s+characterAsset\.id\s+\)/s);
@@ -860,12 +864,12 @@ test("custom selection mutations use the official full-character update path", (
   assert.match(engineSource, /!sameResolvedSelection[\s\S]*await this\.importCombinedCharacter\(combined,\s*\{/);
   assert.match(engineSource, /const previousSelection = wardrobe\.getCustomSelection\(\)/);
   assert.match(engineSource, /const nextAnimationUrl = combined\.bodyAsset\.source\.animationUrls\?\.\[0\] \?\? null/);
-  assert.match(engineSource, /const preserveAnimation = previousCombinedId !== null &&\s+previousSelection !== null &&\s+runtimeRoleId\(previousSelection\.characterId, previousSelection\.unit\) ===\s+runtimeRoleId\(selection\.characterId, selection\.unit\) &&\s+this\.currentAnimationUrl === nextAnimationUrl &&\s+this\.currentAnimationLoopUrl === nextLoopUrl/);
+  assert.match(engineSource, /const preserveAnimation = previousCombinedId !== null &&\s+previousSelection !== null &&\s+runtimeRoleId\(previousSelection\.characterId, previousSelection\.unit\) ===\s+runtimeRoleId\(selection\.characterId, selection\.unit\) &&\s+this\.animationPlayback\.matchesSelection\(nextAnimationUrl, nextLoopUrl\)/);
   assert.match(engineSource, /preserveAnimation,\s+disposeBeforeLoad:\s*true/);
   assert.match(engineSource, /clearAnimationCache:\s*false/);
   assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !preserveAnimation\)/);
-  assert.match(engineSource, /await this\.refreshAnimationPlayback\(\{\s+resetSpring: preservedAnimation === null,\s+\}\);\s+if \(preservedAnimation\)/);
-  assert.match(engineSource, /this\.currentAnimationAction\.time = duration > 0/);
+  assert.match(engineSource, /await this\.reloadAnimationPlayback\(\{\s+resetSpring: preservedAnimation === null,\s+\}\);\s+if \(preservedAnimation\)/);
+  assert.match(engineSource, /this\.animationPlayback\.restorePosition\(preservedAnimation\)/);
   const sameSelectionBranch = engineSource.slice(
     engineSource.indexOf("const sameResolvedSelection"),
     engineSource.indexOf("await this.applyCustomRoleDefaultMotion(combined, !preserveAnimation)")

@@ -1,7 +1,6 @@
 import * as THREE from "three";
 import {
   ensureRoleRuntimePackage,
-  fetchRuntimeMessagePack,
   loadRuntimePackageFromBaseUrl,
   type RuntimePackageLoadOptions,
   type RuntimePackageLoadResult,
@@ -76,19 +75,12 @@ import {
   type PrefabHeadFollowDebug,
   type UnityPrefabSourceGraph,
 } from "./unityPrefabRuntime";
+import { inferBodyAnimationKind } from "./runtimeMotion";
 import {
-  animationClipCacheKey,
-  createSmoothedLoopClip,
-  decodeUnityMotionClips,
-  inferBodyAnimationKind,
-  isLoopClipName,
-  makeAnimationTrackDebug,
-  prepareRuntimeAnimationClip,
-  retargetUnityPrefabAnimationClip,
-  type AnimationTrackDebug,
-  type BodyAnimationKind,
-  type RuntimeMotionRetargetDebug,
-} from "./runtimeMotion";
+  AnimationPlaybackRuntime,
+  type AnimationPlaybackSnapshot as RuntimeAnimationPlaybackSnapshot,
+  type BodyAnimationSelection as RuntimeBodyAnimationSelection,
+} from "./animationPlaybackRuntime";
 import {
   bindBodyRuntimeMaterials,
   getSekaiPreviewRimDirection,
@@ -270,12 +262,8 @@ function normalizeHairShadowMode(mode: HairShadowMode): HairShadowMode {
   return mode === "head_proximity" ? "sekai_head_position" : mode;
 }
 
-export type BodyAnimationSelection = {
-  motionUrl: string | null;
-  motionKind?: BodyAnimationKind | null;
-  loopUrl: string | null;
-  loopKind?: BodyAnimationKind | null;
-};
+export type BodyAnimationSelection = RuntimeBodyAnimationSelection;
+export type AnimationPlaybackSnapshot = RuntimeAnimationPlaybackSnapshot;
 
 export type RuntimeHeadMorphDebug = {
   meshName: string;
@@ -381,27 +369,6 @@ type CombinedCharacterImportOptions = {
   clearAnimationCache?: boolean;
 };
 
-export type AnimationPlaybackSnapshot = {
-  selectedUrl: string | null;
-  selectedLoopUrl: string | null;
-  activeClipName: string | null;
-  queuedLoopClipName: string | null;
-  currentTime: number;
-  duration: number;
-  paused: boolean;
-  speed: number;
-  faceMotionEnabled: boolean;
-  bodyHeadTracksEnabled: boolean;
-  bodyTrackDebug: AnimationTrackDebug | null;
-  bodyLoopTrackDebug: AnimationTrackDebug | null;
-  bodyRetargetDebug: AnimationRetargetDebug | null;
-  error: string | null;
-};
-
-export type AnimationRetargetDebug = RuntimeMotionRetargetDebug & {
-  prefabHeadFollow?: PrefabHeadFollowDebug;
-};
-
 export type FaceMotionKeyframe = {
   time: number;
   value: number;
@@ -461,13 +428,6 @@ type CharacterHairMaterialController = {
   headTransformName: string | null;
   headTransformPath: string | null;
 };
-
-function getErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -1100,21 +1060,9 @@ export class Haruki3DEngine {
     missingHeadBones: [],
   };
   private currentBodyAnimationRoot: THREE.Object3D | null = null;
-  private currentAnimationUrl: string | null = null;
-  private currentAnimationKind: BodyAnimationKind | null = null;
-  private currentAnimationLoopUrl: string | null = null;
-  private currentAnimationLoopKind: BodyAnimationKind | null = null;
-  private currentAnimationClipName: string | null = null;
-  private currentAnimationDuration = 0;
-  private currentAnimationAction: THREE.AnimationAction | null = null;
-  private currentLoopAction: THREE.AnimationAction | null = null;
-  private currentAnimationMixer: THREE.AnimationMixer | null = null;
-  private currentAnimationFinishedHandler: THREE.EventListener<any, any, any> | null = null;
-  private currentAnimationError: string | null = null;
-  private currentAnimationRetargetDebug: AnimationRetargetDebug | null = null;
+  private readonly animationPlayback: AnimationPlaybackRuntime;
   private controllerOutlineColor: THREE.Color | null = null;
   private controllerOutlineBlending = 0;
-  private queuedLoopClipName: string | null = null;
   private currentFaceMotionSet: FaceMotionSet | null = null;
   private currentFaceMotionClip: FaceMotionClip | null = null;
   private currentFaceMotionLoopClip: FaceMotionClip | null = null;
@@ -1131,14 +1079,8 @@ export class Haruki3DEngine {
     targetPath: null,
     reason: null,
   };
-  private readonly animationClipCache = new Map<string, THREE.AnimationClip[]>();
-  private readonly smoothedLoopClipCache = new WeakMap<THREE.AnimationClip, THREE.AnimationClip>();
-  private animationPlaybackSpeed = 1;
-  private animationPaused = false;
   private faceMotionEnabled = true;
-  private bodyHeadTracksEnabled = true;
   private springRuntimeMode: SpringRuntimeMode = "unity-prefab";
-  private animationRevision = 0;
   private characterHeight = 1;
   private readonly tempMatrixA = new THREE.Matrix4();
   private readonly tempMatrixB = new THREE.Matrix4();
@@ -1198,6 +1140,9 @@ export class Haruki3DEngine {
     if (!options.container && !options.canvas) {
       throw new Error("Haruki 3D engine requires a container or canvas.");
     }
+    this.animationPlayback = new AnimationPlaybackRuntime({
+      onLoopPromoted: () => this.promoteFaceMotionLoop(),
+    });
     this.container = options.container ?? null;
     this.ownsCanvas = options.canvas === undefined;
     this.autoRender = options.autoRender ?? true;
@@ -1338,10 +1283,7 @@ export class Haruki3DEngine {
   ): Promise<PartImportSnapshot> {
     const revision = ++this.importRevision;
     const preservedAnimation = options.preserveAnimation
-      ? {
-          activeClipName: this.currentAnimationClipName,
-          currentTime: this.currentAnimationAction?.time ?? 0,
-        }
+      ? this.animationPlayback.capturePosition()
       : null;
     if (options.disposeBeforeLoad) {
       this.releaseCurrentCharacterResources({
@@ -1403,33 +1345,11 @@ export class Haruki3DEngine {
     );
     this.currentSpringRuntime = this.createSpringRuntime(loaded.prefabSourceGraph.root);
     this.syncUnityPrefabSourceGraph();
-    await this.refreshAnimationPlayback({
+    await this.reloadAnimationPlayback({
       resetSpring: preservedAnimation === null,
     });
     if (preservedAnimation) {
-      if (this.currentAnimationAction) {
-        const restoreLoop = Boolean(
-          this.currentAnimationLoopUrl &&
-          preservedAnimation.activeClipName &&
-          (
-            preservedAnimation.activeClipName === this.queuedLoopClipName ||
-            isLoopClipName(
-              preservedAnimation.activeClipName,
-              this.currentAnimationLoopUrl
-            )
-          )
-        );
-        if (restoreLoop) {
-          this.activateQueuedLoopForSeek();
-        }
-        const duration = Math.max(this.currentAnimationDuration, 0);
-        this.currentAnimationAction.time = duration > 0
-          ? restoreLoop
-            ? THREE.MathUtils.euclideanModulo(preservedAnimation.currentTime, duration)
-            : THREE.MathUtils.clamp(preservedAnimation.currentTime, 0, duration)
-          : Math.max(preservedAnimation.currentTime, 0);
-        this.currentAnimationMixer?.update(0);
-      }
+      this.animationPlayback.restorePosition(preservedAnimation);
       this.applyCurrentFaceMotionFrame();
       this.syncOfficialModelCombineSetup();
       this.currentExtraBoneRuntime?.update();
@@ -2073,50 +1993,10 @@ export class Haruki3DEngine {
     const utjControlledNodeNames =
       this.currentSpringRuntime?.getControlledTrackNodeNames() ??
       new Set<string>();
-    const prefabHeadFollow = this.getPrefabHeadFollowDebugSnapshot();
-    const bodyRetargetDebug = this.currentAnimationRetargetDebug
-      ? {
-          ...this.currentAnimationRetargetDebug,
-          prefabHeadFollow,
-        }
-      : this.currentPrefabSourceGraph
-        ? {
-            mode: "unity-prefab" as const,
-            bindingCount: 0,
-            sourceTrackCount: 0,
-            emittedTrackCount: 0,
-            resolvedTargetCount: 0,
-            resolvedBodyTargetCount: 0,
-            resolvedFaceTargetCount: 0,
-            unresolvedTrackCount: 0,
-            duplicateTargetTrackCount: 0,
-            sampleUnresolvedTracks: [],
-            sampleResolvedHeadTargets: [],
-            prefabHeadFollow,
-          }
-        : null;
-    return {
-      selectedUrl: this.currentAnimationUrl,
-      selectedLoopUrl: this.currentAnimationLoopUrl,
-      activeClipName: this.currentAnimationClipName,
-      queuedLoopClipName: this.queuedLoopClipName,
-      currentTime: this.currentAnimationAction?.time ?? 0,
-      duration: this.currentAnimationDuration,
-      paused: this.animationPaused,
-      speed: this.animationPlaybackSpeed,
+    return this.animationPlayback.getSnapshot({
       faceMotionEnabled: this.faceMotionEnabled,
-      bodyHeadTracksEnabled: this.bodyHeadTracksEnabled,
-      bodyTrackDebug: makeAnimationTrackDebug(
-        this.currentAnimationAction?.getClip() ?? null,
-        utjControlledNodeNames
-      ),
-      bodyLoopTrackDebug: makeAnimationTrackDebug(
-        this.currentLoopAction?.getClip() ?? null,
-        utjControlledNodeNames
-      ),
-      bodyRetargetDebug,
-      error: this.currentAnimationError,
-    };
+      utjControlledNodeNames,
+    });
   }
 
   getFaceMotionSnapshot(): FaceMotionPlaybackSnapshot {
@@ -2134,13 +2014,11 @@ export class Haruki3DEngine {
   }
 
   setAnimationPaused(paused: boolean) {
-    this.animationPaused = paused;
-    this.applyAnimationPlaybackSettings();
+    this.animationPlayback.setPaused(paused);
   }
 
   setAnimationSpeed(speed: number) {
-    this.animationPlaybackSpeed = speed;
-    this.applyAnimationPlaybackSettings();
+    this.animationPlayback.setSpeed(speed);
   }
 
   setFaceMotionEnabled(enabled: boolean) {
@@ -2153,11 +2031,10 @@ export class Haruki3DEngine {
   }
 
   setBodyHeadTracksEnabled(enabled: boolean) {
-    if (this.bodyHeadTracksEnabled === enabled) {
+    if (!this.animationPlayback.setBodyHeadTracksEnabled(enabled)) {
       return;
     }
-    this.bodyHeadTracksEnabled = enabled;
-    void this.refreshAnimationPlayback();
+    void this.reloadAnimationPlayback();
   }
 
   setUtjSpringBoneEnabled(enabled: boolean) {
@@ -2207,38 +2084,24 @@ export class Haruki3DEngine {
   }
 
   seekAnimation(time: number) {
-    const duration = Math.max(this.currentAnimationDuration, 0);
-    const nextTime = duration > 0
-      ? THREE.MathUtils.clamp(time, 0, duration)
-      : Math.max(time, 0);
-    this.animationPaused = true;
-    this.applyAnimationPlaybackSettings();
-    if (this.currentAnimationAction) {
-      this.currentAnimationAction.paused = false;
-      this.currentAnimationAction.time = nextTime;
-    }
-    this.currentAnimationMixer?.update(0);
-    this.currentFaceMotionTime = nextTime;
-    this.applyCurrentFaceMotionFrame();
-    this.syncOfficialModelCombineSetup();
-    this.resetCurrentSpringRuntimeState();
-    this.applyAnimationPlaybackSettings();
+    this.applyAnimationSeekResult(this.animationPlayback.seek(time));
   }
 
   seekAnimationPhase(phase: number) {
-    const duration = Math.max(this.currentAnimationDuration, 0);
-    const clampedPhase = THREE.MathUtils.clamp(
-      Number.isFinite(phase) ? phase : 0,
-      0,
-      1
-    );
-    this.seekAnimation(duration * clampedPhase);
+    this.applyAnimationSeekResult(this.animationPlayback.seekPhase(phase));
     return this.getAnimationSnapshot();
   }
 
   seekAnimationLoopPhase(phase: number) {
-    this.activateQueuedLoopForSeek();
-    return this.seekAnimationPhase(phase);
+    this.applyAnimationSeekResult(this.animationPlayback.seekLoopPhase(phase));
+    return this.getAnimationSnapshot();
+  }
+
+  private applyAnimationSeekResult(nextTime: number) {
+    this.currentFaceMotionTime = nextTime;
+    this.applyCurrentFaceMotionFrame();
+    this.syncOfficialModelCombineSetup();
+    this.resetCurrentSpringRuntimeState();
   }
 
   setPresentationMode(mode: PjskPresentationMode) {
@@ -2260,7 +2123,7 @@ export class Haruki3DEngine {
   private stepCharacterDynamics(delta: number, advanceAnimation: boolean) {
     const stepDelta = Math.max(0, delta);
     if (advanceAnimation) {
-      this.currentAnimationMixer?.update(stepDelta);
+      this.animationPlayback.step(stepDelta);
       this.updateFaceMotion(stepDelta);
     }
     this.syncOfficialModelCombineSetup();
@@ -2488,8 +2351,7 @@ export class Haruki3DEngine {
       previousSelection !== null &&
       runtimeRoleId(previousSelection.characterId, previousSelection.unit) ===
         runtimeRoleId(selection.characterId, selection.unit) &&
-      this.currentAnimationUrl === nextAnimationUrl &&
-      this.currentAnimationLoopUrl === nextLoopUrl;
+      this.animationPlayback.matchesSelection(nextAnimationUrl, nextLoopUrl);
     if (!sameResolvedSelection) {
       // Match the official preview update path: preserve the outer engine, rebuild the full character graph.
       await this.importCombinedCharacter(combined, {
@@ -2574,7 +2436,7 @@ export class Haruki3DEngine {
         defaultLoopUrl ? "face_loop" : null
       );
     }
-    if (animationUrl && (force || !this.currentAnimationUrl)) {
+    if (animationUrl && (force || !this.animationPlayback.hasSelection())) {
       await this.setAnimationSelection({
         motionUrl: animationUrl,
         motionKind: defaultAnimationKind,
@@ -2628,17 +2490,8 @@ export class Haruki3DEngine {
   }
 
   async setAnimationSelection(selection: BodyAnimationSelection | null) {
-    this.currentAnimationUrl = selection?.motionUrl ?? null;
-    this.currentAnimationKind = inferBodyAnimationKind(
-      this.currentAnimationUrl,
-      selection?.motionKind
-    );
-    this.currentAnimationLoopUrl = selection?.loopUrl ?? null;
-    this.currentAnimationLoopKind = inferBodyAnimationKind(
-      this.currentAnimationLoopUrl,
-      selection?.loopKind
-    );
-    await this.refreshAnimationPlayback();
+    this.animationPlayback.setSelection(selection);
+    await this.reloadAnimationPlayback();
     return this.getAnimationSnapshot();
   }
 
@@ -3082,20 +2935,16 @@ export class Haruki3DEngine {
       clearAnimationCache?: boolean;
     } = {}
   ) {
-    this.stopAnimationPlayback();
+    this.animationPlayback.release({
+      preserveSelection: options.preserveAnimationSelection,
+      clearCache: options.clearAnimationCache,
+    });
     if (!options.preserveAnimationSelection) {
-      this.currentAnimationUrl = null;
-      this.currentAnimationKind = null;
-      this.currentAnimationLoopUrl = null;
-      this.currentAnimationLoopKind = null;
       this.currentFaceMotionSet = null;
       this.currentFaceMotionClip = null;
       this.currentFaceMotionLoopClip = null;
       this.currentFaceMotionTime = 0;
       this.currentFaceMotionError = null;
-    }
-    if (options.clearAnimationCache) {
-      this.animationClipCache.clear();
     }
     this.currentSpringRuntime?.resetPose();
     this.currentSpringRuntime = null;
@@ -3442,7 +3291,7 @@ export class Haruki3DEngine {
 
   private updateFaceMotion(delta: number) {
     if (
-      this.animationPaused ||
+      this.animationPlayback.isPaused() ||
       !this.faceMotionEnabled ||
       !this.currentFaceMotionClip ||
       this.currentHeadMorphRuntimes.length === 0
@@ -3450,7 +3299,7 @@ export class Haruki3DEngine {
       return;
     }
 
-    this.currentFaceMotionTime += delta * this.animationPlaybackSpeed;
+    this.currentFaceMotionTime += delta * this.animationPlayback.getSpeed();
     const duration = this.currentFaceMotionClip.duration;
     if (duration > 0 && this.currentFaceMotionTime > duration) {
       if (this.currentFaceMotionLoopClip) {
@@ -3735,318 +3584,23 @@ export class Haruki3DEngine {
     this.animationFrame = requestAnimationFrame(() => this.render());
   }
 
-  private applyAnimationPlaybackSettings() {
-    const actions = [this.currentAnimationAction, this.currentLoopAction];
-    for (const action of actions) {
-      if (!action) {
-        continue;
-      }
-      action.paused = this.animationPaused;
-      action.enabled = true;
-      action.setEffectiveTimeScale(
-        this.animationPaused ? 0 : this.animationPlaybackSpeed
-      );
-    }
-  }
-
-  private configureAnimationAction(action: THREE.AnimationAction) {
-    action.zeroSlopeAtStart = false;
-    action.zeroSlopeAtEnd = false;
-  }
-
-  private getSmoothedLoopClip(
-    clip: THREE.AnimationClip,
-    sourceUrl: string | null
-  ) {
-    void sourceUrl;
-    const cached = this.smoothedLoopClipCache.get(clip);
-    if (cached) {
-      return cached;
-    }
-    const smoothed = createSmoothedLoopClip(clip, 60);
-    if (smoothed === clip) {
-      return clip;
-    }
-    this.smoothedLoopClipCache.set(clip, smoothed);
-    return smoothed;
-  }
-
-  private stopAnimationPlayback() {
-    if (this.currentAnimationMixer && this.currentAnimationFinishedHandler) {
-      this.currentAnimationMixer.removeEventListener(
-        "finished",
-        this.currentAnimationFinishedHandler
-      );
-    }
-    this.currentAnimationAction?.stop();
-    this.currentLoopAction?.stop();
-    this.currentAnimationMixer?.stopAllAction();
-    this.currentAnimationAction = null;
-    this.currentLoopAction = null;
-    this.currentAnimationMixer = null;
-    this.currentAnimationFinishedHandler = null;
-    this.currentAnimationClipName = null;
-    this.currentAnimationDuration = 0;
-    this.currentAnimationRetargetDebug = null;
-    this.queuedLoopClipName = null;
-  }
-
-  private preparePlayableBodyAnimationClip(
-    sourceClip: THREE.AnimationClip,
-    updateRetargetDebug = true
-  ): THREE.AnimationClip | null {
-    const clip = prepareRuntimeAnimationClip(
-      sourceClip,
-      this.bodyHeadTracksEnabled
-    );
-    if (!this.currentPrefabSourceGraph) {
-      if (updateRetargetDebug) {
-        this.currentAnimationRetargetDebug = {
-          mode: "none",
-          bindingCount: 0,
-          sourceTrackCount: clip.tracks.length,
-          emittedTrackCount: clip.tracks.length,
-          resolvedTargetCount: clip.tracks.length,
-          resolvedBodyTargetCount: 0,
-          resolvedFaceTargetCount: 0,
-          unresolvedTrackCount: 0,
-          duplicateTargetTrackCount: 0,
-          sampleUnresolvedTracks: [],
-          sampleResolvedHeadTargets: [],
-          prefabHeadFollow: this.currentPrefabHeadFollowDebug,
-        };
-      }
-      return clip;
-    }
-
-    if (!this.currentBodyAnimationRoot) {
-      this.currentAnimationError = "Unity Prefab animation requires a loaded prefab root.";
-      return null;
-    }
-
-    const retargeted = retargetUnityPrefabAnimationClip(
-      clip,
-      this.currentBodyAnimationRoot,
-      this.currentRuntimeExtension
-    );
-    if (updateRetargetDebug) {
-      this.currentAnimationRetargetDebug = {
-        ...retargeted.debug,
-        prefabHeadFollow: this.currentPrefabHeadFollowDebug,
-      };
-    }
-    if (retargeted.error) {
-      this.currentAnimationError = retargeted.error;
-      return null;
-    }
-    return retargeted.clip;
-  }
-
-  private async refreshAnimationPlayback(
+  private async reloadAnimationPlayback(
     options: { resetSpring?: boolean } = {}
   ) {
-    const revision = ++this.animationRevision;
-    const resetSpring = options.resetSpring ?? true;
-    this.stopAnimationPlayback();
-    this.currentAnimationError = null;
-
-    if (!this.currentAnimationUrl || !this.currentBodyAnimationRoot) {
-      this.syncOfficialModelCombineSetup();
-      this.currentExtraBoneRuntime?.update();
-      if (resetSpring) {
-        this.resetCurrentSpringRuntimeState();
-      }
+    const result = await this.animationPlayback.refresh({
+      root: this.currentBodyAnimationRoot,
+      retargetWithUnityPrefab: this.currentPrefabSourceGraph !== null,
+      runtimeExtension: this.currentRuntimeExtension,
+      prefabHeadFollow: this.getPrefabHeadFollowDebugSnapshot(),
+    });
+    if (!result.poseApplied) {
       return;
     }
-
-    const clipCacheKey = animationClipCacheKey(
-      this.currentAnimationUrl,
-      this.currentAnimationKind
-    );
-    let clips = this.animationClipCache.get(clipCacheKey);
-    if (!clips) {
-      if (this.currentAnimationKind !== "unity-json") {
-        this.currentAnimationError = `Unity motion .msgpack.br is required for ${this.currentAnimationUrl}.`;
-        return;
-      }
-      try {
-        clips = decodeUnityMotionClips(
-          await fetchRuntimeMessagePack(this.currentAnimationUrl)
-        );
-        this.animationClipCache.set(clipCacheKey, clips);
-      } catch (error) {
-        if (revision !== this.animationRevision) {
-          return;
-        }
-        this.currentAnimationError = getErrorMessage(error);
-        return;
-      }
-    }
-
-    if (revision !== this.animationRevision) {
-      return;
-    }
-
-    if (!clips.length) {
-      this.currentAnimationError = `No clips found in ${this.currentAnimationUrl}`;
-      return;
-    }
-
-    this.currentAnimationMixer = new THREE.AnimationMixer(
-      this.currentBodyAnimationRoot
-    );
-    const sourceClip = clips.find((candidate) => !isLoopClipName(candidate.name, this.currentAnimationUrl))
-      ?? clips[0];
-    const clip = this.preparePlayableBodyAnimationClip(
-      sourceClip
-    );
-    if (!clip) {
-      return;
-    }
-    const clipName = clip.name || this.currentAnimationUrl;
-    this.currentAnimationClipName = clipName;
-    this.currentAnimationDuration = clip.duration;
-    this.currentAnimationAction = this.currentAnimationMixer.clipAction(
-      clip,
-      this.currentBodyAnimationRoot
-    );
-    this.configureAnimationAction(this.currentAnimationAction);
-    this.currentAnimationAction.reset();
-
-    let loopClip: THREE.AnimationClip | null = null;
-    const loopUrl = this.currentAnimationLoopUrl;
-    if (loopUrl === this.currentAnimationUrl) {
-      const sourceLoopClip = clips.find((candidate) => isLoopClipName(candidate.name, loopUrl))
-        ?? clips.find((candidate) => candidate !== sourceClip)
-        ?? null;
-      loopClip = sourceLoopClip
-        ? this.preparePlayableBodyAnimationClip(
-          sourceLoopClip,
-          false
-        )
-        : null;
-    } else if (loopUrl) {
-      const loopClipCacheKey = animationClipCacheKey(
-        loopUrl,
-        this.currentAnimationLoopKind
-      );
-      let loopClips = this.animationClipCache.get(loopClipCacheKey);
-      if (!loopClips) {
-        if (this.currentAnimationLoopKind === "unity-json") {
-          try {
-            loopClips = decodeUnityMotionClips(
-              await fetchRuntimeMessagePack(loopUrl)
-            );
-            this.animationClipCache.set(loopClipCacheKey, loopClips);
-          } catch {
-            loopClips = undefined;
-          }
-        }
-      }
-      const sourceLoopClip = loopClips?.[0] ?? null;
-      loopClip = sourceLoopClip
-        ? this.preparePlayableBodyAnimationClip(
-          sourceLoopClip,
-          false
-        )
-        : null;
-    }
-
-    if (loopClip) {
-      const playableLoopClip = this.getSmoothedLoopClip(loopClip, loopUrl);
-      this.currentLoopAction = this.currentAnimationMixer.clipAction(
-        playableLoopClip,
-        this.currentBodyAnimationRoot
-      );
-      this.configureAnimationAction(this.currentLoopAction);
-      this.currentLoopAction.reset();
-      this.currentLoopAction.enabled = false;
-      this.currentLoopAction.loop = THREE.LoopRepeat;
-      this.currentLoopAction.clampWhenFinished = false;
-      this.currentAnimationAction.loop = THREE.LoopOnce;
-      this.currentAnimationAction.clampWhenFinished = true;
-      this.queuedLoopClipName = playableLoopClip.name || loopUrl || `${clipName}_loop`;
-
-      this.currentAnimationFinishedHandler = (event) => {
-        if (
-          event.action !== this.currentAnimationAction ||
-          !this.currentLoopAction ||
-          !this.currentAnimationMixer
-        ) {
-          return;
-        }
-
-        if (this.currentAnimationFinishedHandler) {
-          this.currentAnimationMixer.removeEventListener(
-            "finished",
-            this.currentAnimationFinishedHandler
-          );
-          this.currentAnimationFinishedHandler = null;
-        }
-
-        this.currentAnimationAction?.stop();
-        this.currentLoopAction.enabled = true;
-        this.currentLoopAction.reset();
-        this.currentLoopAction.play();
-        this.currentAnimationAction = this.currentLoopAction;
-        this.currentLoopAction = null;
-        this.currentAnimationClipName = this.queuedLoopClipName;
-        this.currentAnimationDuration = playableLoopClip.duration;
-        this.queuedLoopClipName = null;
-        this.promoteFaceMotionLoop();
-        this.applyAnimationPlaybackSettings();
-      };
-
-      this.currentAnimationMixer.addEventListener(
-        "finished",
-        this.currentAnimationFinishedHandler
-      );
-      this.currentAnimationAction.play();
-    } else {
-      this.currentAnimationAction.loop = THREE.LoopRepeat;
-      this.currentAnimationAction.clampWhenFinished = false;
-      this.currentAnimationAction.play();
-      this.queuedLoopClipName = null;
-    }
-
-    this.applyAnimationPlaybackSettings();
-    this.currentAnimationMixer.update(0);
     this.syncOfficialModelCombineSetup();
     this.currentExtraBoneRuntime?.update();
-    if (resetSpring) {
+    if (options.resetSpring ?? true) {
       this.resetCurrentSpringRuntimeState();
     }
-  }
-
-  private activateQueuedLoopForSeek() {
-    if (
-      !this.currentLoopAction ||
-      !this.currentAnimationMixer ||
-      !this.currentAnimationAction
-    ) {
-      return;
-    }
-
-    if (this.currentAnimationFinishedHandler) {
-      this.currentAnimationMixer.removeEventListener(
-        "finished",
-        this.currentAnimationFinishedHandler
-      );
-      this.currentAnimationFinishedHandler = null;
-    }
-
-    this.currentAnimationAction.stop();
-    this.currentLoopAction.enabled = true;
-    this.currentLoopAction.reset();
-    this.currentLoopAction.play();
-    this.currentAnimationAction = this.currentLoopAction;
-    this.currentLoopAction = null;
-    this.currentAnimationClipName =
-      this.queuedLoopClipName ?? this.currentAnimationAction.getClip().name;
-    this.currentAnimationDuration = this.currentAnimationAction.getClip().duration;
-    this.queuedLoopClipName = null;
-    this.promoteFaceMotionLoop();
-    this.applyAnimationPlaybackSettings();
   }
 
   private getPrefabHeadFollowDebugSnapshot(): PrefabHeadFollowDebug {

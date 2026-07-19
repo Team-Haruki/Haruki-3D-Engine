@@ -108,6 +108,11 @@ export {
   retargetUnityPrefabAnimationClip,
 } from "./engine/runtimeMotion";
 export {
+  AnimationPlaybackRuntime,
+  type AnimationPlaybackContext,
+  type AnimationPlaybackPosition,
+} from "./engine/animationPlaybackRuntime";
+export {
   buildUnityPrefabSourceGraph,
   installUnityRuntimeNativeMeshes,
   makeUnityPrefabHeadFollowDebugSnapshot,
