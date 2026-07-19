@@ -422,43 +422,39 @@ test("capture camera preset uses official CostumeShop camera parameters and keep
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const cameraSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/cameraRuntime.ts"),
+    "utf8"
+  );
 
   assert.equal(configOptions.cameraPreset, "capture");
   assert.equal(configOptions.cameraProfile, "official-default");
-  assert.match(engineSource, /export type PjskCameraPreset = "default" \| "capture";/);
-  assert.match(engineSource, /export type PjskCameraProfile = "official-default" \| "full-body";/);
-  assert.match(engineSource, /const COSTUME_SHOP_CAMERA = \{/);
-  assert.match(engineSource, /zoomDuration: 0\.35/);
-  assert.match(engineSource, /bottomLowerLimitPosition: 0\.4/);
-  assert.match(engineSource, /bottomUpperLimitPosition: 0\.85/);
-  assert.match(engineSource, /topLowerLimitPosition: 1\.25/);
-  assert.match(engineSource, /topUpperLimitPosition: 0\.85/);
-  assert.match(engineSource, /nearZ: 2\.3/);
-  assert.match(engineSource, /farZ: 4\.5/);
-  assert.match(engineSource, /fov: 25/);
-  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = \{/);
-  assert.match(engineSource, /const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = \{/);
-  assert.match(
-    engineSource,
-    /const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = \{\s+cameraRootYawDegrees: 0,\s+zoomValue: 0,\s+zoomMoveValue: 1,/s
-  );
-  assert.match(engineSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
-  assert.match(engineSource, /zoomMoveValue: 0/);
-  assert.match(engineSource, /localCameraRotationYDegrees: 180/);
+  assert.match(cameraSource, /export type PjskCameraPreset = "default" \| "capture";/);
+  assert.match(cameraSource, /export type PjskCameraProfile = "official-default" \| "full-body";/);
+  assert.match(cameraSource, /const COSTUME_SHOP_CAMERA = \{/);
+  assert.match(cameraSource, /zoomDuration: 0\.35/);
+  assert.match(cameraSource, /bottomLowerLimitPosition: 0\.4/);
+  assert.match(cameraSource, /bottomUpperLimitPosition: 0\.85/);
+  assert.match(cameraSource, /topLowerLimitPosition: 1\.25/);
+  assert.match(cameraSource, /topUpperLimitPosition: 0\.85/);
+  assert.match(cameraSource, /nearZ: 2\.3/);
+  assert.match(cameraSource, /farZ: 4\.5/);
+  assert.match(cameraSource, /fov: 25/);
+  assert.match(cameraSource, /profile === "official-default"/);
+  assert.match(cameraSource, /zoomValue: 0, zoomMoveValue: 1/);
+  assert.match(cameraSource, /zoomValue: COSTUME_SHOP_CAMERA\.zoomDuration/);
+  assert.match(cameraSource, /zoomMoveValue: 0/);
+  assert.match(cameraSource, /localCameraRotationYDegrees: 180/);
   assert.match(engineSource, /costumeShopState:/);
-  assert.match(engineSource, /getCostumeShopCameraState/);
-  assert.match(engineSource, /calculateCostumeShopCameraPose/);
+  assert.match(engineSource, /getCostumeShopCameraPose/);
   assert.doesNotMatch(engineSource, /ID5_DEBUG_CAMERA_/);
   assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_TARGET_SCALE/);
   assert.doesNotMatch(engineSource, /CAPTURE_CAMERA_OFFSET_SCALE/);
   assert.match(
     engineSource,
-    /this\.setCameraTarget\(pose\.target\);\s+this\.camera\.position\.copy\(pose\.position\);\s+this\.camera\.fov = COSTUME_SHOP_CAMERA\.fov;/s
+    /this\.setCameraTarget\(pose\.target\);\s+this\.camera\.position\.copy\(pose\.position\);\s+this\.camera\.fov = pose\.fov;/s
   );
-  assert.match(
-    engineSource,
-    /this\.camera\.fov = DEFAULT_CAMERA_FOV;/
-  );
+  assert.match(engineSource, /getDefaultCameraPose\(this\.characterHeight\)/);
   assert.match(harnessSource, /cameraPreset: "capture"/);
   assert.match(harnessSource, /return normalizeCameraPreset\(params\.get\("cameraPreset"\)\);/);
   assert.match(harnessSource, /return normalizeCameraProfile\(params\.get\("cameraProfile"\)\);/);
@@ -675,20 +671,24 @@ test("projected character shadows are separate scene objects", () => {
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const shadowSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/projectedShadow.ts"),
+    "utf8"
+  );
 
-  assert.match(engineSource, /class CharacterProjectedShadowController/);
-  assert.match(engineSource, /CharacterDirectionalShadow/);
-  assert.match(engineSource, /CharacterCrossShadow/);
-  assert.match(engineSource, /PROJECTED_SHADOW_BONE_NAMES = \["Left_Toe", "Right_Toe"\] as const/);
-  assert.match(engineSource, /PROJECTED_CROSS_SHADOW_OFFSET_FLOOR = 0\.015/);
-  assert.match(engineSource, /PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR = 0\.01/);
-  assert.match(engineSource, /PROJECTED_SHADOW_INVISIBLE_HEIGHT = 0\.2/);
-  assert.match(engineSource, /directionalShadow: false/);
-  assert.match(engineSource, /for \(const boneName of PROJECTED_SHADOW_BONE_NAMES\)/);
-  assert.match(engineSource, /pair\.directionalAnchor\.visible = this\.settings\.directionalShadow/);
-  assert.match(engineSource, /pair\.crossAnchor\.visible = !this\.settings\.directionalShadow/);
+  assert.match(shadowSource, /class CharacterProjectedShadowController/);
+  assert.match(shadowSource, /CharacterDirectionalShadow/);
+  assert.match(shadowSource, /CharacterCrossShadow/);
+  assert.match(shadowSource, /projectedShadowTargetBoneNames = \["Left_Toe", "Right_Toe"\] as const/);
+  assert.match(shadowSource, /CROSS_OFFSET_FLOOR = 0\.015/);
+  assert.match(shadowSource, /DIRECTIONAL_OFFSET_FLOOR = 0\.01/);
+  assert.match(shadowSource, /INVISIBLE_HEIGHT = 0\.2/);
+  assert.match(shadowSource, /directionalShadow: false/);
+  assert.match(shadowSource, /for \(const boneName of projectedShadowTargetBoneNames\)/);
+  assert.match(shadowSource, /pair\.directionalAnchor\.visible = this\.settings\.directionalShadow/);
+  assert.match(shadowSource, /pair\.crossAnchor\.visible = !this\.settings\.directionalShadow/);
   assert.match(engineSource, /this\.scene\.add\(this\.projectedShadow\.group\)/);
-  assert.match(engineSource, /distanceToFloor = this\.settings\.height \* heightRatio/);
+  assert.match(shadowSource, /distanceToFloor = this\.settings\.height \* heightRatio/);
   assert.match(engineSource, /setProjectedShadowSettings\(settings: ProjectedShadowSettingsInput/);
 });
 
@@ -748,8 +748,12 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const shadowSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/projectedShadow.ts"),
+    "utf8"
+  );
 
-  assert.match(engineSource, /export type RuntimeProjectedShadowDebug =/);
+  assert.match(shadowSource, /export type RuntimeProjectedShadowDebug =/);
   assert.match(engineSource, /projectedShadow\?: RuntimeProjectedShadowDebug/);
   assert.match(engineSource, /projectedShadow: this\.projectedShadow\.getDebugSnapshot/);
   assert.match(engineSource, /export type HairShadowMode = "off" \| "sekai_head_position" \| "head_proximity";/);
@@ -763,8 +767,8 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
     /useLambert:\s*params\.useLambert \?\?\s*params\.lighting\?\.useLambert/
   );
   assert.doesNotMatch(engineSource, /lighting\?\.hairShadow === true/);
-  assert.match(engineSource, /CharacterDirectionalShadow/);
-  assert.match(engineSource, /CharacterCrossShadow/);
+  assert.match(shadowSource, /CharacterDirectionalShadow/);
+  assert.match(shadowSource, /CharacterCrossShadow/);
 });
 
 test("face shadow updates preserve exported limiter parameters", () => {

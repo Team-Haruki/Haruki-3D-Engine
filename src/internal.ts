@@ -92,3 +92,10 @@ export {
   type Haruki3DKernel,
   type Haruki3DKernelOptions,
 } from "./kernel/Haruki3DKernel";
+export {
+  getCostumeShopCameraPose,
+  getDefaultCameraPose,
+  shiftCameraPoseRight,
+} from "./engine/cameraRuntime";
+export { createCaptureBackgroundTexture } from "./engine/captureBackground";
+export { CharacterProjectedShadowController } from "./engine/projectedShadow";

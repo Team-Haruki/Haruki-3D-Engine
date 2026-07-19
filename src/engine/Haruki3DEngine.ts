@@ -56,35 +56,37 @@ import {
   type HarukiRuntimeRenderRecipe,
 } from "../kernel/renderRecipe";
 import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
+import {
+  getCostumeShopCameraPose,
+  getDefaultCameraPose,
+  shiftCameraPoseRight,
+  type PjskCameraProfile,
+  type PjskCameraPreset,
+  type RuntimeCameraDebug,
+} from "./cameraRuntime";
+import { createCaptureBackgroundTexture } from "./captureBackground";
+import {
+  CharacterProjectedShadowController,
+  defaultProjectedShadowSettings,
+  projectedShadowTargetBoneNames,
+  type ProjectedShadowSettings,
+  type ProjectedShadowSettingsInput,
+  type RuntimeProjectedShadowDebug,
+} from "./projectedShadow";
 
-const DEFAULT_CAMERA_TARGET_SCALE = new THREE.Vector3(0.04835, 0.48222, 0.07241);
-const DEFAULT_CAMERA_OFFSET_SCALE = new THREE.Vector3(-0.08532, 0.12848, 1.93551);
-const DEFAULT_CAMERA_FOV = 35;
-type CostumeShopCameraState = {
-  cameraRootYawDegrees: number;
-  zoomValue: number;
-  zoomMoveValue: number;
-};
-const COSTUME_SHOP_CAMERA = {
-  zoomDuration: 0.35,
-  bottomLowerLimitPosition: 0.4,
-  bottomUpperLimitPosition: 0.85,
-  topLowerLimitPosition: 1.25,
-  topUpperLimitPosition: 0.85,
-  nearZ: 2.3,
-  farZ: 4.5,
-  fov: 25,
-} as const;
-const COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE = {
-  cameraRootYawDegrees: 0,
-  zoomValue: 0,
-  zoomMoveValue: 1,
-} as const;
-const COSTUME_SHOP_CAMERA_FULL_BODY_STATE = {
-  cameraRootYawDegrees: 0,
-  zoomValue: COSTUME_SHOP_CAMERA.zoomDuration,
-  zoomMoveValue: 0,
-} as const;
+export type {
+  PjskCameraProfile,
+  PjskCameraPreset,
+  RuntimeCameraDebug,
+} from "./cameraRuntime";
+export {
+  defaultProjectedShadowSettings,
+} from "./projectedShadow";
+export type {
+  ProjectedShadowSettings,
+  ProjectedShadowSettingsInput,
+  RuntimeProjectedShadowDebug,
+} from "./projectedShadow";
 const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR = 2.0;
 const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR = 6.0;
 const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE = 0.01 / 0.255;
@@ -105,7 +107,6 @@ const COSTUME_SHOP_FACE_SHADOW_LIGHT_DIRECTION = convertUnityDirectionToThree(
 ).normalize();
 const COSTUME_SHOP_USE_FACE_SHADOW_LIMITER = true;
 const COSTUME_SHOP_FACE_SHADOW_LIMIT_RANGE = 0;
-const CAPTURE_CAMERA_LATERAL_SHIFT_SCALE = -0.0245;
 const CHARACTER_EYE_STENCIL_BIT = 0x01;
 const CHARACTER_EYELASH_STENCIL_BIT = 0x02;
 const CHARACTER_EYEBROW_STENCIL_BIT = 0x04;
@@ -126,44 +127,10 @@ const EYELASH_THROUGH_HAIR_ALPHA = 0.55;
 const EYELASH_THROUGH_HAIR_ALPHA_CUTOFF = 0.25;
 const EYEBROW_THROUGH_HAIR_ALPHA = 0.55;
 const FACE_SHADOW_HORIZONTAL_EPSILON = 0.00001;
-const PROJECTED_SHADOW_BONE_NAMES = ["Left_Toe", "Right_Toe"] as const;
-const PROJECTED_CROSS_SHADOW_OFFSET_FLOOR = 0.015;
-const PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR = 0.01;
-const PROJECTED_SHADOW_INVISIBLE_HEIGHT = 0.2;
-
-export type ProjectedShadowSettings = {
-  width: number;
-  height: number;
-  opacity: number;
-  crossSize: number;
-  crossOpacity: number;
-  floorY: number;
-  adjustShadow: boolean;
-  adjustAlpha: boolean;
-  invisibleHeight: number;
-  directionalShadow: boolean;
-};
-
-export type ProjectedShadowSettingsInput = Partial<ProjectedShadowSettings>;
-
-export const defaultProjectedShadowSettings: ProjectedShadowSettings = {
-  width: 0.72,
-  height: 1.06,
-  opacity: 0.28,
-  crossSize: 0.46,
-  crossOpacity: 0.22,
-  floorY: 0,
-  adjustShadow: false,
-  adjustAlpha: true,
-  invisibleHeight: PROJECTED_SHADOW_INVISIBLE_HEIGHT,
-  directionalShadow: false,
-};
 
 type SpringRuntimeController = UnityPrefabSpringRuntime;
 
 export type PjskPresentationMode = "interactive" | "capture";
-export type PjskCameraPreset = "default" | "capture";
-export type PjskCameraProfile = "official-default" | "full-body";
 
 export type HarukiCameraControls = {
   readonly target: THREE.Vector3;
@@ -378,31 +345,6 @@ export type RuntimeOutlineShellDebug = {
   sourceRenderOrder: number;
 };
 
-export type RuntimeCameraDebug = {
-  preset: PjskCameraPreset;
-  profile: PjskCameraProfile | null;
-  costumeShopState: {
-    cameraRootYawDegrees: number;
-    zoomValue: number;
-    zoomMoveValue: number;
-    zoomRatio: number;
-    localCameraPosition: { x: number; y: number; z: number };
-    localCameraRotationYDegrees: number;
-  } | null;
-  position: { x: number; y: number; z: number };
-  target: { x: number; y: number; z: number };
-  offset: { x: number; y: number; z: number };
-  distance: number;
-  polarDegrees: number;
-  azimuthDegrees: number;
-  fovDegrees: number;
-  aspect: number;
-  zoom: number;
-  minPolarDegrees: number;
-  maxPolarDegrees: number;
-  characterHeight: number;
-};
-
 export type RuntimeFaceLightDebug = {
   lightDirection: { x: number; y: number; z: number };
   previewLightDirection: { x: number; y: number; z: number };
@@ -420,27 +362,6 @@ export type RuntimeFaceLightDebug = {
   faceSdfLimit: number;
   headYawDegrees: number;
   lightYawDegrees: number;
-};
-
-export type RuntimeProjectedShadowDebug = {
-  visible: boolean;
-  floorY: number;
-  characterHeight: number;
-  settings: ProjectedShadowSettings;
-  targetPosition: { x: number; y: number; z: number };
-  targetPositions: Array<{ x: number; y: number; z: number }>;
-  directional: {
-    position: { x: number; y: number; z: number };
-    forward: { x: number; y: number; z: number };
-    scale: { x: number; y: number; z: number };
-    opacity: number;
-    alpha: number;
-  };
-  cross: {
-    position: { x: number; y: number; z: number };
-    scale: { x: number; y: number; z: number };
-    opacity: number;
-  };
 };
 
 export type RuntimeDebugSnapshot = {
@@ -1191,7 +1112,7 @@ function createSekaiOutlineMaterial(
       value: new THREE.Vector3(
         SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR,
         1 / (SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR - SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR),
-        COSTUME_SHOP_CAMERA.fov / COSTUME_SHOP_CAMERA.fov
+        1
       ),
     };
     shader.uniforms.uOutlineClipOffset = { value: outlineClipOffset };
@@ -1260,189 +1181,6 @@ function normalizeFaceShadowHorizontal(
 function faceShadowYawRangeFactor(headYawDegrees: number, lightYawDegrees: number) {
   const delta = Math.abs(lightYawDegrees - headYawDegrees);
   return THREE.MathUtils.clamp(1.0 - Math.abs(delta - 180.0) / 180.0, 0.0, 1.0);
-}
-
-function getDefaultCameraTarget(characterHeight: number) {
-  return DEFAULT_CAMERA_TARGET_SCALE.clone().multiplyScalar(characterHeight);
-}
-
-function getDefaultCameraPosition(characterHeight: number) {
-  return getDefaultCameraTarget(characterHeight)
-    .add(DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(characterHeight));
-}
-
-function calculateCostumeShopCameraPose(
-  state: CostumeShopCameraState = COSTUME_SHOP_CAMERA_FULL_BODY_STATE
-) {
-  const zoomValue = THREE.MathUtils.clamp(
-    state.zoomValue,
-    0,
-    COSTUME_SHOP_CAMERA.zoomDuration
-  );
-  const zoomRatio = COSTUME_SHOP_CAMERA.zoomDuration > 0
-    ? zoomValue / COSTUME_SHOP_CAMERA.zoomDuration
-    : 0;
-  const bottomY = THREE.MathUtils.lerp(
-    COSTUME_SHOP_CAMERA.bottomLowerLimitPosition,
-    COSTUME_SHOP_CAMERA.bottomUpperLimitPosition,
-    zoomRatio
-  );
-  const topY = THREE.MathUtils.lerp(
-    COSTUME_SHOP_CAMERA.topLowerLimitPosition,
-    COSTUME_SHOP_CAMERA.topUpperLimitPosition,
-    zoomRatio
-  );
-  const y = THREE.MathUtils.lerp(
-    bottomY,
-    topY,
-    THREE.MathUtils.clamp(state.zoomMoveValue, 0, 1)
-  );
-  const z = THREE.MathUtils.lerp(
-    COSTUME_SHOP_CAMERA.nearZ,
-    COSTUME_SHOP_CAMERA.farZ,
-    zoomRatio
-  );
-  const cameraRootYawDegrees = Number.isFinite(state.cameraRootYawDegrees)
-    ? state.cameraRootYawDegrees
-    : 0;
-  const rotationY = THREE.MathUtils.degToRad(cameraRootYawDegrees);
-  const localCameraPosition = new THREE.Vector3(0, y, z);
-  const position = localCameraPosition.clone()
-    .applyAxisAngle(new THREE.Vector3(0, 1, 0), rotationY);
-  return {
-    target: new THREE.Vector3(0, y, 0),
-    position,
-    state: {
-      cameraRootYawDegrees,
-      zoomValue,
-      zoomMoveValue: THREE.MathUtils.clamp(state.zoomMoveValue, 0, 1),
-      zoomRatio,
-      localCameraPosition,
-      localCameraRotationYDegrees: 180,
-    },
-  };
-}
-
-function getCostumeShopCameraState(profile: PjskCameraProfile) {
-  return profile === "official-default"
-    ? COSTUME_SHOP_CAMERA_OFFICIAL_DEFAULT_STATE
-    : COSTUME_SHOP_CAMERA_FULL_BODY_STATE;
-}
-
-function makeSeededRandom(seed: number) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0;
-    return state / 0x100000000;
-  };
-}
-
-function drawCaptureTriangleBackground(width: number, height: number) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    return canvas;
-  }
-
-  const primary = context.createLinearGradient(0, height, width, 0);
-  primary.addColorStop(0, "#f9fffe");
-  primary.addColorStop(0.52, "#edfaff");
-  primary.addColorStop(1, "#fff8fe");
-  context.fillStyle = primary;
-  context.fillRect(0, 0, width, height);
-
-  const overlay = context.createLinearGradient(0, 0, width, height);
-  overlay.addColorStop(0, "rgba(255, 246, 252, 0.34)");
-  overlay.addColorStop(1, "rgba(219, 246, 255, 0.40)");
-  context.fillStyle = overlay;
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = "rgba(255, 255, 255, 0.48)";
-  context.fillRect(0, 0, width, height);
-
-  const random = makeSeededRandom(width * 73856093 ^ height * 19349663);
-  const colors = [
-    [166, 236, 255],
-    [214, 206, 255],
-    [255, 204, 238],
-    [255, 237, 182],
-  ] as const;
-  const aspect = width / Math.max(height, 1);
-  const wideShift = Math.min(0.12, Math.max(0, (aspect - 1) * 0.08));
-
-  const drawTriangle = (
-    x: number,
-    y: number,
-    rotation: number,
-    size: number,
-    color: readonly number[],
-    alpha: number
-  ) => {
-    context.save();
-    context.translate(x, y);
-    context.rotate(rotation);
-    context.beginPath();
-    for (let index = 0; index < 3; index += 1) {
-      const angle = -Math.PI / 2 + index * Math.PI * 2 / 3;
-      const px = Math.cos(angle) * size * 0.56;
-      const py = Math.sin(angle) * size * 0.56;
-      if (index === 0) {
-        context.moveTo(px, py);
-      } else {
-        context.lineTo(px, py);
-      }
-    }
-    context.closePath();
-    context.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, ${alpha})`;
-    context.fill();
-    context.restore();
-  };
-
-  const drawRandomTriangles = (count: number, baseSize: number) => {
-    for (let index = 0; index < count; index += 1) {
-      const edgeRoll = random();
-      let x: number;
-      let y: number;
-      if (edgeRoll < 0.78) {
-        const edge = random();
-        if (edge < 0.26) {
-          x = (-0.04 + random() * 0.22) * width;
-          y = random() * height;
-        } else if (edge < 0.50) {
-          x = (0.82 - wideShift + random() * (0.21 + wideShift)) * width;
-          y = random() * height;
-        } else if (edge < 0.78) {
-          x = random() * width;
-          y = (-0.04 + random() * (0.24 + wideShift * 0.5)) * height;
-        } else {
-          x = random() * width;
-          y = (0.80 - wideShift * 0.8 + random() * (0.23 + wideShift * 0.8)) * height;
-        }
-      } else {
-        x = (0.12 + random() * 0.76) * width;
-        y = (0.12 + random() * 0.76) * height;
-      }
-      const dx = (x - width * 0.5) / width * 2;
-      const dy = (y - height * 0.5) / height * 2;
-      const edgeDistance = Math.max(0.28, dx * dx + dy * dy);
-      const size = baseSize * (0.72 + random() * 0.46) * edgeDistance;
-      const alpha = (0.08 + random() * 0.13) * Math.min(1.25, edgeDistance + 0.25);
-      drawTriangle(
-        x,
-        y,
-        random() * Math.PI * 2,
-        size,
-        colors[Math.floor(random() * colors.length)],
-        alpha
-      );
-    }
-  };
-
-  const scale = Math.min(width, height) / 1000;
-  drawRandomTriangles(Math.max(8, Math.round(18 * scale)), 150 * scale);
-  drawRandomTriangles(Math.max(24, Math.round(80 * scale)), 72 * scale);
-  return canvas;
 }
 
 function bodyDebugModeToUniform(mode: BodyDebugMode) {
@@ -3652,266 +3390,6 @@ function retargetUnityPrefabAnimationClip(
   };
 }
 
-function createProjectedShadowTexture(size = 128) {
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) {
-    throw new Error("Canvas 2D context is required for projected shadow texture.");
-  }
-  const gradient = context.createRadialGradient(
-    size * 0.5,
-    size * 0.5,
-    size * 0.05,
-    size * 0.5,
-    size * 0.5,
-    size * 0.5
-  );
-  gradient.addColorStop(0.0, "rgba(0, 0, 0, 0.72)");
-  gradient.addColorStop(0.45, "rgba(0, 0, 0, 0.32)");
-  gradient.addColorStop(1.0, "rgba(0, 0, 0, 0.0)");
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-type CharacterProjectedShadowUpdate = {
-  targetWorldPositions: THREE.Vector3[];
-  lightWorldPosition: THREE.Vector3 | null;
-  characterHeight: number;
-  visible: boolean;
-};
-
-type ProjectedShadowPair = {
-  targetWorldPosition: THREE.Vector3;
-  initialToeHeight: number | null;
-  directionalAnchor: THREE.Group;
-  crossAnchor: THREE.Group;
-  directionalMaterial: THREE.MeshBasicMaterial;
-  crossMaterial: THREE.MeshBasicMaterial;
-  directionalAlpha: number;
-};
-
-function normalizeProjectedShadowSettings(
-  input: ProjectedShadowSettingsInput = {},
-  base: ProjectedShadowSettings = defaultProjectedShadowSettings
-): ProjectedShadowSettings {
-  const positive = (value: number | undefined, fallback: number, min = 0) =>
-    Number.isFinite(value) ? Math.max(value!, min) : fallback;
-  const unit = (value: number | undefined, fallback: number) =>
-    Number.isFinite(value) ? THREE.MathUtils.clamp(value!, 0, 1) : fallback;
-  return {
-    width: positive(input.width, base.width, 0.001),
-    height: positive(input.height, base.height, 0.001),
-    opacity: unit(input.opacity, base.opacity),
-    crossSize: positive(input.crossSize, base.crossSize, 0.001),
-    crossOpacity: unit(input.crossOpacity, base.crossOpacity),
-    floorY: Number.isFinite(input.floorY) ? input.floorY! : base.floorY,
-    adjustShadow: input.adjustShadow ?? base.adjustShadow,
-    adjustAlpha: input.adjustAlpha ?? base.adjustAlpha,
-    invisibleHeight: positive(input.invisibleHeight, base.invisibleHeight, 0.001),
-    directionalShadow: input.directionalShadow ?? base.directionalShadow,
-  };
-}
-
-class CharacterProjectedShadowController {
-  readonly group = new THREE.Group();
-
-  private readonly defaultDirection = new THREE.Vector3(-0.35, 0, 0.94).normalize();
-  private settings = { ...defaultProjectedShadowSettings };
-  private readonly pairs: ProjectedShadowPair[] = [];
-
-  constructor() {
-    const shadowTexture = createProjectedShadowTexture();
-    for (const boneName of PROJECTED_SHADOW_BONE_NAMES) {
-      const directionalMaterial = this.createShadowMaterial(shadowTexture, this.settings.opacity);
-      const crossMaterial = this.createShadowMaterial(shadowTexture, this.settings.crossOpacity);
-      const directionalAnchor = new THREE.Group();
-      const crossAnchor = new THREE.Group();
-
-      const directionalMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), directionalMaterial);
-      directionalMesh.name = `CharacterDirectionalShadow_${boneName}`;
-      directionalMesh.rotation.x = -Math.PI / 2;
-      directionalMesh.renderOrder = -100;
-      directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
-      directionalAnchor.add(directionalMesh);
-
-      const crossMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), crossMaterial);
-      crossMesh.name = `CharacterCrossShadow_${boneName}`;
-      crossMesh.rotation.x = -Math.PI / 2;
-      crossMesh.renderOrder = -99;
-      crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
-      crossAnchor.add(crossMesh);
-
-      directionalAnchor.visible = this.settings.directionalShadow;
-      crossAnchor.visible = !this.settings.directionalShadow;
-      this.group.add(directionalAnchor);
-      this.group.add(crossAnchor);
-      this.pairs.push({
-        targetWorldPosition: new THREE.Vector3(),
-        initialToeHeight: null,
-        directionalAnchor,
-        crossAnchor,
-        directionalMaterial,
-        crossMaterial,
-        directionalAlpha: this.settings.opacity,
-      });
-    }
-
-    this.group.name = "CharacterProjectedShadow";
-    this.group.visible = false;
-  }
-
-  private createShadowMaterial(shadowTexture: THREE.Texture, opacity: number) {
-    return new THREE.MeshBasicMaterial({
-      color: "#000000",
-      map: shadowTexture,
-      transparent: true,
-      opacity,
-      depthWrite: false,
-      depthTest: true,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      side: THREE.DoubleSide,
-    });
-  }
-
-  setSettings(input: ProjectedShadowSettingsInput = {}) {
-    this.settings = normalizeProjectedShadowSettings(input, this.settings);
-    for (const pair of this.pairs) {
-      const directionalMesh = pair.directionalAnchor.children[0];
-      if (directionalMesh) {
-        directionalMesh.scale.set(this.settings.width, this.settings.height, 1);
-      }
-      const crossMesh = pair.crossAnchor.children[0];
-      if (crossMesh) {
-        crossMesh.scale.set(this.settings.crossSize, this.settings.crossSize, 1);
-      }
-      pair.directionalAnchor.visible = this.settings.directionalShadow;
-      pair.crossAnchor.visible = !this.settings.directionalShadow;
-    }
-  }
-
-  update(state: CharacterProjectedShadowUpdate) {
-    const targets = state.targetWorldPositions;
-    this.group.visible = state.visible && targets.length > 0;
-    if (!this.group.visible) {
-      for (const pair of this.pairs) {
-        pair.initialToeHeight = null;
-        pair.targetWorldPosition.set(0, 0, 0);
-      }
-      return;
-    }
-
-    for (const [index, pair] of this.pairs.entries()) {
-      const target = targets[Math.min(index, targets.length - 1)];
-      pair.targetWorldPosition.copy(target);
-      pair.initialToeHeight ??= target.y;
-      pair.directionalAnchor.visible = this.settings.directionalShadow;
-      pair.crossAnchor.visible = !this.settings.directionalShadow;
-
-      const direction = this.resolveDirectionalShadowDirection(target, state.lightWorldPosition);
-      const effectiveHeight = Math.max(0.001, state.characterHeight);
-      const heightRatio = (target.y - this.settings.floorY) / effectiveHeight;
-      const distanceToFloor = this.settings.height * heightRatio;
-      const directionalX = target.x + direction.x * distanceToFloor;
-      const directionalZ = target.z + direction.z * distanceToFloor;
-      pair.directionalAnchor.position.set(
-        this.settings.adjustShadow ? target.x : directionalX,
-        this.settings.floorY + PROJECTED_DIRECTIONAL_SHADOW_OFFSET_FLOOR,
-        this.settings.adjustShadow ? target.z : directionalZ
-      );
-      pair.directionalAnchor.rotation.y = Math.atan2(direction.x, direction.z);
-      pair.directionalAlpha = this.calculateDirectionalShadowAlpha(pair, target.y);
-      pair.directionalMaterial.opacity = pair.directionalAlpha;
-
-      const crossHeightRatio = (target.y - this.settings.floorY) / this.settings.invisibleHeight;
-      const crossAlpha = crossHeightRatio < 0 ? 1 : 1 - Math.min(crossHeightRatio, 1);
-      pair.crossAnchor.position.set(
-        target.x,
-        this.settings.floorY + PROJECTED_CROSS_SHADOW_OFFSET_FLOOR,
-        target.z
-      );
-      pair.crossMaterial.opacity = this.settings.crossOpacity * crossAlpha;
-    }
-  }
-
-  private calculateDirectionalShadowAlpha(pair: ProjectedShadowPair, targetY: number) {
-    if (!this.settings.adjustAlpha) {
-      return this.settings.opacity;
-    }
-    const t = (targetY - (pair.initialToeHeight ?? this.settings.floorY)) / this.settings.invisibleHeight;
-    const factor = t < 0 ? 1 : 1 - Math.min(t, 1);
-    return this.settings.opacity * factor;
-  }
-
-  private resolveDirectionalShadowDirection(
-    targetWorldPosition: THREE.Vector3,
-    lightWorldPosition: THREE.Vector3 | null
-  ) {
-    if (!lightWorldPosition) {
-      return this.defaultDirection.clone();
-    }
-    const direction = new THREE.Vector3(
-      targetWorldPosition.x - lightWorldPosition.x,
-      0,
-      targetWorldPosition.z - lightWorldPosition.z
-    );
-    if (direction.lengthSq() < 0.000001) {
-      return this.defaultDirection.clone();
-    }
-    return direction.normalize();
-  }
-
-  getDebugSnapshot(
-    characterHeight: number
-  ): RuntimeProjectedShadowDebug {
-    const pair = this.pairs[0];
-    pair.directionalAnchor.updateMatrixWorld(true);
-    pair.crossAnchor.updateMatrixWorld(true);
-    const directionalForward = new THREE.Vector3(0, 0, 1)
-      .applyQuaternion(pair.directionalAnchor.getWorldQuaternion(new THREE.Quaternion()))
-      .normalize();
-    const targetPosition = this.pairs
-      .reduce((sum, current) => sum.add(current.targetWorldPosition), new THREE.Vector3())
-      .multiplyScalar(1 / Math.max(this.pairs.length, 1));
-    return {
-      visible: this.group.visible,
-      floorY: Number(this.settings.floorY.toFixed(4)),
-      characterHeight: Number(characterHeight.toFixed(4)),
-      settings: { ...this.settings },
-      targetPosition: vectorDebugSnapshot(targetPosition),
-      targetPositions: this.pairs.map((current) => vectorDebugSnapshot(current.targetWorldPosition)),
-      directional: {
-        position: vectorDebugSnapshot(pair.directionalAnchor.position),
-        forward: vectorDebugSnapshot(directionalForward),
-        scale: vectorDebugSnapshot(new THREE.Vector3(
-          this.settings.width,
-          1,
-          this.settings.height
-        )),
-        opacity: Number(pair.directionalMaterial.opacity.toFixed(4)),
-        alpha: Number(pair.directionalAlpha.toFixed(4)),
-      },
-      cross: {
-        position: vectorDebugSnapshot(pair.crossAnchor.position),
-        scale: vectorDebugSnapshot(new THREE.Vector3(
-          this.settings.crossSize,
-          1,
-          this.settings.crossSize
-        )),
-        opacity: Number(pair.crossMaterial.opacity.toFixed(4)),
-      },
-    };
-  }
-}
-
 export class Haruki3DEngine {
   private readonly container: HTMLElement | null;
   private readonly ownsCanvas: boolean;
@@ -4061,8 +3539,9 @@ export class Haruki3DEngine {
     const viewportMinimum = this.ownsCanvas ? 320 : 1;
     const width = Math.max(viewport.clientWidth, viewportMinimum);
     const height = Math.max(viewport.clientHeight, viewportMinimum);
-    this.camera = new THREE.PerspectiveCamera(DEFAULT_CAMERA_FOV, width / height, 0.1, 100);
-    this.camera.position.copy(getDefaultCameraPosition(light.characterHeight));
+    const initialCameraPose = getDefaultCameraPose(light.characterHeight);
+    this.camera = new THREE.PerspectiveCamera(initialCameraPose.fov, width / height, 0.1, 100);
+    this.camera.position.copy(initialCameraPose.position);
 
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -4078,7 +3557,7 @@ export class Haruki3DEngine {
     }
     this.updateCaptureBackgroundTexture();
 
-    this.cameraTarget.copy(getDefaultCameraTarget(light.characterHeight));
+    this.cameraTarget.copy(initialCameraPose.target);
     if (options.controlsFactory) {
       this.controls = options.controlsFactory({
         camera: this.camera,
@@ -4862,24 +4341,25 @@ export class Haruki3DEngine {
     const offset = position.clone().sub(target);
     const spherical = new THREE.Spherical().setFromVector3(offset);
     const costumeShopPose = this.currentCameraPreset === "capture"
-      ? calculateCostumeShopCameraPose(getCostumeShopCameraState(this.currentCameraProfile ?? "full-body"))
+      ? getCostumeShopCameraPose(this.currentCameraProfile ?? "full-body")
       : null;
+    const costumeShopState = costumeShopPose?.costumeShopState ?? null;
     return {
       preset: this.currentCameraPreset,
       profile: this.currentCameraProfile,
-      costumeShopState: costumeShopPose === null
+      costumeShopState: costumeShopState === null
         ? null
         : {
-            cameraRootYawDegrees: Number(costumeShopPose.state.cameraRootYawDegrees.toFixed(3)),
-            zoomValue: Number(costumeShopPose.state.zoomValue.toFixed(4)),
-            zoomMoveValue: Number(costumeShopPose.state.zoomMoveValue.toFixed(4)),
-            zoomRatio: Number(costumeShopPose.state.zoomRatio.toFixed(4)),
+            cameraRootYawDegrees: Number(costumeShopState.cameraRootYawDegrees.toFixed(3)),
+            zoomValue: Number(costumeShopState.zoomValue.toFixed(4)),
+            zoomMoveValue: Number(costumeShopState.zoomMoveValue.toFixed(4)),
+            zoomRatio: Number(costumeShopState.zoomRatio.toFixed(4)),
             localCameraPosition: {
-              x: Number(costumeShopPose.state.localCameraPosition.x.toFixed(4)),
-              y: Number(costumeShopPose.state.localCameraPosition.y.toFixed(4)),
-              z: Number(costumeShopPose.state.localCameraPosition.z.toFixed(4)),
+              x: Number(costumeShopState.localCameraPosition.x.toFixed(4)),
+              y: Number(costumeShopState.localCameraPosition.y.toFixed(4)),
+              z: Number(costumeShopState.localCameraPosition.z.toFixed(4)),
             },
-            localCameraRotationYDegrees: costumeShopPose.state.localCameraRotationYDegrees,
+            localCameraRotationYDegrees: costumeShopState.localCameraRotationYDegrees,
           },
       position: {
         x: Number(position.x.toFixed(4)),
@@ -5166,7 +4646,7 @@ export class Haruki3DEngine {
   private resolveProjectedShadowTargetWorldPositions() {
     const root = this.currentBodyAnimationRoot ?? this.characterRoot;
     root.updateMatrixWorld(true);
-    const toePositions = PROJECTED_SHADOW_BONE_NAMES
+    const toePositions = projectedShadowTargetBoneNames
       .map((name) => this.findNodeByImportedName(root, name))
       .filter((node): node is THREE.Object3D => node !== null)
       .map((node) => node.getWorldPosition(new THREE.Vector3()));
@@ -5826,6 +5306,7 @@ export class Haruki3DEngine {
       window.removeEventListener("resize", this.handleResize);
     }
     this.controls?.dispose();
+    this.projectedShadow.dispose();
     this.captureBackgroundTexture?.dispose();
     this.renderer.dispose();
     if (this.ownsCanvas && this.renderer.domElement.parentElement === this.container) {
@@ -5857,8 +5338,9 @@ export class Haruki3DEngine {
     }
     this.characterHeight = nextHeight;
     this.characterRoot.scale.setScalar(nextHeight);
-    this.setCameraTarget(getDefaultCameraTarget(nextHeight));
-    this.camera.position.copy(getDefaultCameraPosition(nextHeight));
+    const pose = getDefaultCameraPose(nextHeight);
+    this.setCameraTarget(pose.target);
+    this.camera.position.copy(pose.position);
     this.syncCameraTarget();
   }
 
@@ -5866,17 +5348,16 @@ export class Haruki3DEngine {
     this.currentCameraPreset = preset;
     if (preset === "capture") {
       this.currentCameraProfile = profile;
-      const pose = calculateCostumeShopCameraPose(getCostumeShopCameraState(profile));
+      const pose = getCostumeShopCameraPose(profile);
       this.setCameraTarget(pose.target);
       this.camera.position.copy(pose.position);
-      this.camera.fov = COSTUME_SHOP_CAMERA.fov;
+      this.camera.fov = pose.fov;
     } else {
       this.currentCameraProfile = null;
-      const target = getDefaultCameraTarget(this.characterHeight);
-      const offset = DEFAULT_CAMERA_OFFSET_SCALE.clone().multiplyScalar(this.characterHeight);
-      this.setCameraTarget(target);
-      this.camera.position.copy(target).add(offset);
-      this.camera.fov = DEFAULT_CAMERA_FOV;
+      const pose = getDefaultCameraPose(this.characterHeight);
+      this.setCameraTarget(pose.target);
+      this.camera.position.copy(pose.position);
+      this.camera.fov = pose.fov;
     }
     this.camera.updateProjectionMatrix();
     this.syncCameraTarget();
@@ -5888,16 +5369,16 @@ export class Haruki3DEngine {
       return;
     }
     const target = this.controls?.target ?? this.cameraTarget;
-    const offset = this.camera.position.clone().sub(target);
-    const forward = target.clone().sub(this.camera.position).normalize();
-    const up = new THREE.Vector3(0, 1, 0);
-    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
-    const shift = right.multiplyScalar(CAPTURE_CAMERA_LATERAL_SHIFT_SCALE * amount * this.characterHeight);
-    this.setCameraTarget(target.clone().add(shift));
-    this.camera.position.add(shift);
+    const pose = shiftCameraPoseRight(
+      this.camera.position,
+      target,
+      amount,
+      this.characterHeight
+    );
+    this.setCameraTarget(pose.target);
+    this.camera.position.copy(pose.position);
     this.syncCameraTarget();
     this.cameraDebugChangeCallback?.();
-    void offset;
   }
 
   private makeImportStatus(
@@ -7371,10 +6852,10 @@ export class Haruki3DEngine {
       320
     );
     this.captureBackgroundTexture?.dispose();
-    this.captureBackgroundTexture = new THREE.CanvasTexture(
-      drawCaptureTriangleBackground(textureWidth, textureHeight)
+    this.captureBackgroundTexture = createCaptureBackgroundTexture(
+      textureWidth,
+      textureHeight
     );
-    this.captureBackgroundTexture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = this.captureBackgroundTexture;
   }
 
