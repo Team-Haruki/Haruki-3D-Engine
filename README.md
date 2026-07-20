@@ -30,20 +30,20 @@ import {
 
 const kernel = createHaruki3DKernel({
   canvas: document.querySelector("canvas")!,
-  assetBaseUrl: "/assets/runtime/jp/",
+  assetBaseUrl: "/assets/pjsk-3d/6.6.0.30/jp/",
 });
 
 await kernel.load({
-  roleId: "5:light_sound",
-  bodyCostume3dId: 10,
-  headCostume3dId: 105,
-  hairCostume3dId: 205,
+  roleId: "14:theme_park",
+  bodyCostume3dId: 28,
+  headCostume3dId: 114,
+  hairCostume3dId: 214,
   headOptionalCostume3dId: null,
 });
 kernel.play();
 ```
 
-Full API notes are in [docs/api.md](docs/api.md).
+The complete browser integration contract is in [docs/api.md](docs/api.md).
 
 ## Capture Harness
 
