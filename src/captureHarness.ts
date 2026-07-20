@@ -28,7 +28,7 @@ type CaptureWindow = Window & {
   __PJSK_CAPTURE_SNAPSHOT__?: unknown;
   __HARUKI_CAPTURE_REQUEST__?: (
     request: HarukiCaptureRolePartsRequest
-  ) => Promise<HarukiCaptureRolePartsResult & { pngDataUrl: string }>;
+  ) => Promise<{ snapshots: HarukiCaptureRolePartsResult["snapshots"] }>;
 };
 
 type CaptureCharacterYawMode = CharacterYawMode | "face-camera";
@@ -323,19 +323,16 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       projectedShadow: request.projectedShadow ?? config.projectedShadow,
     });
     settledCapturePackageKey = packageKey;
-    const snapshots = {
-      ...result.snapshots,
-      utjSpringBoneTrace: engine.getUtjSpringBoneTraceSnapshot(),
-    };
-    const resultWithTrace = {
-      ...result,
-      snapshots,
-    };
-    const pngDataUrl = engine.getCanvas().toDataURL("image/png");
+    const snapshots = request.includeDebugSnapshots && result.snapshots
+      ? {
+        ...result.snapshots,
+        utjSpringBoneTrace: engine.getUtjSpringBoneTraceSnapshot(),
+      }
+      : null;
     getCaptureWindow().__PJSK_CAPTURE_SNAPSHOT__ = snapshots;
     getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
     document.body.dataset.captureReady = "true";
-    return { ...resultWithTrace, pngDataUrl };
+    return { snapshots };
   } catch (error) {
     setCaptureError(error);
     throw error;

@@ -1451,7 +1451,7 @@ test("composed spring setup keeps duplicate head and hair prefab paths part scop
   assert.match(springSource, /partPathKey\(runtimePartIndex, sourcePath\)/);
 });
 
-test("capture returns the rendered canvas directly instead of racing a page screenshot", () => {
+test("capture waits for the rendered frame before using the native DevTools screenshot", () => {
   const harnessSource = fs.readFileSync(
     path.join(repoRoot, "src/captureHarness.ts"),
     "utf8"
@@ -1461,7 +1461,8 @@ test("capture returns the rendered canvas directly instead of racing a page scre
     "utf8"
   );
 
-  assert.match(harnessSource, /engine\.getCanvas\(\)\.toDataURL\("image\/png"\)/);
-  assert.match(serverSource, /data:image\/png;base64,/);
-  assert.doesNotMatch(serverSource, /Page\.captureScreenshot/);
+  assert.doesNotMatch(harnessSource, /toDataURL\(/);
+  assert.match(harnessSource, /await captureAdapter\.captureRoleParts/);
+  assert.match(serverSource, /await this\.client\.send\("Runtime\.evaluate"/);
+  assert.match(serverSource, /await this\.client\.send\("Page\.captureScreenshot"/);
 });

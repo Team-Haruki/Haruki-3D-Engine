@@ -40,10 +40,11 @@ export type HarukiCaptureRolePartsRequest = HarukiPrepareCaptureFrameRequest & {
   hairCostume3dId: number;
   headOptionalCostume3dId?: number | null;
   imageId?: string;
+  includeDebugSnapshots?: boolean;
 };
 
 export type HarukiCaptureRolePartsResult = {
   selection: CustomPartSelection;
   combinedCharacter: RuntimeCombinedCharacterAsset;
-  snapshots: HarukiEngineSnapshots;
+  snapshots: HarukiEngineSnapshots | null;
 };

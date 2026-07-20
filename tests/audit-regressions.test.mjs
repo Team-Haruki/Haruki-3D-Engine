@@ -144,9 +144,11 @@ test("capture runtime forwards the exact head source into the browser", async ()
   const CaptureRuntimeSession = vm.runInContext("CaptureRuntimeSession", context);
   const session = new CaptureRuntimeSession();
   let browserRequest = null;
+  const methods = [];
   session.ensureStarted = async () => {};
   session.client = {
     send: async (method, params) => {
+      methods.push({ method, params });
       if (method === "Runtime.evaluate" && params.expression.startsWith("window.__HARUKI_CAPTURE_REQUEST__(")) {
         const serialized = params.expression.slice(
           "window.__HARUKI_CAPTURE_REQUEST__(".length,
@@ -155,18 +157,18 @@ test("capture runtime forwards the exact head source into the browser", async ()
         browserRequest = JSON.parse(serialized);
         return {
           result: {
-            value: {
-              snapshots: null,
-              pngDataUrl: `data:image/png;base64,${Buffer.from("png").toString("base64")}`,
-            },
+            value: {},
           },
         };
+      }
+      if (method === "Page.captureScreenshot") {
+        return { data: Buffer.from("png").toString("base64") };
       }
       return {};
     },
   };
 
-  await session.capture({
+  const result = await session.capture({
     ...validCaptureRequest(),
     headPackagePath: "parts/_sources/head/exclusive",
     width: 700,
@@ -176,6 +178,87 @@ test("capture runtime forwards the exact head source into the browser", async ()
   });
 
   assert.equal(browserRequest.headPackagePath, "parts/_sources/head/exclusive");
+  assert.equal(result.png.toString("utf8"), "png");
+  assert.deepEqual(
+    methods.map(({ method }) => method),
+    ["Emulation.setDeviceMetricsOverride", "Runtime.evaluate", "Page.captureScreenshot"]
+  );
+  assert.deepEqual({ ...methods.at(-1).params }, {
+    format: "png",
+    fromSurface: true,
+    captureBeyondViewport: false,
+  });
+});
+
+test("normal captures skip debug snapshots and browser-side PNG encoding", () => {
+  const adapterSource = readSource("src/capture/captureAdapter.ts");
+  const harnessSource = readSource("src/captureHarness.ts");
+
+  assert.match(adapterSource, /includeDebugSnapshots/);
+  assert.match(adapterSource, /snapshots:\s*request\.includeDebugSnapshots/);
+  assert.match(harnessSource, /includeDebugSnapshots/);
+  assert.doesNotMatch(harnessSource, /toDataURL\(/);
+});
+
+test("unchanged capture presentation rechecks size without rebuilding an unchanged viewport", () => {
+  const source = readSource("src/engine/Haruki3DEngine.ts");
+  const presentation = sourceSlice(source, "setCapturePresentation", "private stepCharacterDynamics");
+  const viewport = sourceSlice(source, "setViewportSize", "renderFrame");
+
+  assert.match(presentation, /this\.capturePresentationEnabled === enabled/);
+  assert.match(presentation, /if \(enabled\) \{\s*this\.handleResize\(\)/);
+  assert.match(presentation, /return;/);
+  assert.match(viewport, /this\.viewportWidth === nextWidth/);
+  assert.match(viewport, /this\.viewportHeight === nextHeight/);
+  assert.match(viewport, /this\.viewportPixelRatio === nextPixelRatio/);
+  assert.match(viewport, /return;/);
+});
+
+test("capture ack omits renderer debug snapshots", async () => {
+  const source = readSource("capture-server.mjs");
+  const snippet = sourceSlice(
+    source,
+    "async function captureRoleParts",
+    "const server ="
+  );
+  const context = vm.createContext({
+    Buffer,
+    Date,
+    captureOutputDir: "/captures",
+    captureSession: {
+      capture: async () => ({
+        png: Buffer.from("png"),
+        snapshots: { debug: "x".repeat(100_000) },
+      }),
+      restart: async () => {},
+    },
+    crypto: { randomUUID: () => "uuid" },
+    ensurePngRgba: (value) => value,
+    fs: {
+      mkdirSync: () => {},
+      writeFileSync: () => {},
+      renameSync: () => {},
+      existsSync: () => false,
+      rmSync: () => {},
+      utimesSync: () => {},
+    },
+    path: { join: (...parts) => parts.join("/") },
+    process: { pid: 1 },
+    tempCaptureTtlMs: 6 * 60 * 60 * 1000,
+    validateCaptureRequest: (value) => value,
+  });
+  vm.runInContext(snippet, context);
+  const captureRoleParts = vm.runInContext("captureRoleParts", context);
+
+  const result = await captureRoleParts({
+    imageId: "capture-ack",
+    cacheMode: "persistent",
+    timeoutMs: 45_000,
+    ttlMs: 0,
+  });
+
+  assert.deepEqual(Object.keys(result).sort(), ["cacheMode", "imageId", "output"]);
+  assert.ok(JSON.stringify(result).length < 1024);
 });
 
 test("capture request bounds renderer work supplied by callers", () => {

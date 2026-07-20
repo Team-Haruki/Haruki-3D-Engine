@@ -275,7 +275,11 @@ recreate it after a WebGL context loss or runtime-version switch.
 
 The Docker capture service is not part of the public browser API. It uses
 `HarukiCaptureAdapter` from `haruki-3d-engine/internal` for phase seeking,
-warmup, capture framing, debug snapshots, and PNG output.
+warmup, capture framing, opt-in debug snapshots, and PNG output. Normal
+service captures do not request snapshots; direct internal Adapter/Harness
+diagnostics may set `includeDebugSnapshots` to `true` and read the result in
+the capture page. PNG encoding is performed by Chromium's DevTools screenshot
+command after the capture frame is ready.
 
 The server endpoints remain:
 

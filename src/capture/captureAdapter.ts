@@ -58,10 +58,12 @@ export class HarukiCaptureAdapter {
     return {
       selection,
       combinedCharacter,
-      snapshots: this.engine.getSnapshots({
-        springDebugBones: request.springDebugBones,
-        springDebugAllOffsets: request.springDebugAllOffsets,
-      }),
+      snapshots: request.includeDebugSnapshots
+        ? this.engine.getSnapshots({
+          springDebugBones: request.springDebugBones,
+          springDebugAllOffsets: request.springDebugAllOffsets,
+        })
+        : null,
     };
   }
 

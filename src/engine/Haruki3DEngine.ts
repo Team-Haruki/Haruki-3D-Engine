@@ -844,8 +844,11 @@ export class Haruki3DEngine {
   private readonly bodySlot: THREE.Group;
   private readonly headSlot: THREE.Group;
   private readonly sceneReference = new THREE.Group();
-  private capturePresentationEnabled = false;
+  private capturePresentationEnabled: boolean | null = null;
   private captureBackgroundTexture: THREE.CanvasTexture | null = null;
+  private viewportWidth = 0;
+  private viewportHeight = 0;
+  private viewportPixelRatio = 0;
   private animationFrame = 0;
   private importRevision = 0;
   private customSelectionQueue: Promise<unknown> = Promise.resolve();
@@ -952,8 +955,12 @@ export class Haruki3DEngine {
       canvas: options.canvas,
     });
     this.renderer.autoClearStencil = true;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const initialPixelRatio = Math.min(window.devicePixelRatio, 2);
+    this.renderer.setPixelRatio(initialPixelRatio);
     this.renderer.setSize(width, height, this.ownsCanvas);
+    this.viewportWidth = width;
+    this.viewportHeight = height;
+    this.viewportPixelRatio = initialPixelRatio;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     if (this.container && this.renderer.domElement.parentElement !== this.container) {
       this.container.appendChild(this.renderer.domElement);
@@ -1588,6 +1595,12 @@ export class Haruki3DEngine {
   }
 
   setCapturePresentation(enabled: boolean) {
+    if (this.capturePresentationEnabled === enabled) {
+      if (enabled) {
+        this.handleResize();
+      }
+      return;
+    }
     this.capturePresentationEnabled = enabled;
     if (enabled) {
       this.scene.fog = null;
@@ -1681,11 +1694,22 @@ export class Haruki3DEngine {
     const viewportMinimum = this.ownsCanvas ? 320 : 1;
     const nextWidth = Math.max(Math.trunc(width) || 0, viewportMinimum);
     const nextHeight = Math.max(Math.trunc(height) || 0, viewportMinimum);
+    const nextPixelRatio = Math.min(window.devicePixelRatio, 2);
+    if (
+      this.viewportWidth === nextWidth &&
+      this.viewportHeight === nextHeight &&
+      this.viewportPixelRatio === nextPixelRatio
+    ) {
+      return;
+    }
     this.camera.aspect = nextWidth / nextHeight;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(nextPixelRatio);
     this.renderer.setSize(nextWidth, nextHeight, this.ownsCanvas);
     this.updateCaptureBackgroundTexture(nextWidth, nextHeight);
+    this.viewportWidth = nextWidth;
+    this.viewportHeight = nextHeight;
+    this.viewportPixelRatio = nextPixelRatio;
   }
 
   renderFrame() {

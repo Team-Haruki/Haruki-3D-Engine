@@ -658,6 +658,7 @@ class CaptureRuntimeSession {
     this.restarting = false;
     this.idleStopped = false;
     this.startPromise = null;
+    this.viewport = null;
   }
 
   status() {
@@ -752,6 +753,11 @@ class CaptureRuntimeSession {
         deviceScaleFactor: defaultScale,
         mobile: false,
       }, timeoutMs);
+      this.viewport = {
+        width: defaultWidth,
+        height: defaultHeight,
+        scale: defaultScale,
+      };
       await this.client.send("Page.navigate", { url: pageUrl }, timeoutMs);
       await waitForRuntimeReady(this.client, timeoutMs);
       this.ready = true;
@@ -775,6 +781,7 @@ class CaptureRuntimeSession {
     this.idleStopped = idleStopped;
     this.client?.close();
     this.client = null;
+    this.viewport = null;
     const chromium = this.chromium;
     this.chromium = null;
     const oldTempRoot = this.tempRoot;
@@ -799,12 +806,23 @@ class CaptureRuntimeSession {
 
   async capture(request) {
     await this.ensureStarted(request.timeoutMs);
-    await this.client.send("Emulation.setDeviceMetricsOverride", {
-      width: request.width,
-      height: request.height,
-      deviceScaleFactor: request.scale,
-      mobile: false,
-    }, request.timeoutMs);
+    if (
+      this.viewport?.width !== request.width ||
+      this.viewport?.height !== request.height ||
+      this.viewport?.scale !== request.scale
+    ) {
+      await this.client.send("Emulation.setDeviceMetricsOverride", {
+        width: request.width,
+        height: request.height,
+        deviceScaleFactor: request.scale,
+        mobile: false,
+      }, request.timeoutMs);
+      this.viewport = {
+        width: request.width,
+        height: request.height,
+        scale: request.scale,
+      };
+    }
     const result = await this.client.send("Runtime.evaluate", {
       expression: `window.__HARUKI_CAPTURE_REQUEST__(${JSON.stringify(request)})`,
       awaitPromise: true,
@@ -814,13 +832,17 @@ class CaptureRuntimeSession {
       throw new Error(result.exceptionDetails.text ?? "Capture request failed.");
     }
     const capture = result.result?.value;
-    const pngDataUrl = capture?.pngDataUrl;
-    if (typeof pngDataUrl !== "string" || !pngDataUrl.startsWith("data:image/png;base64,")) {
-      throw new Error("Capture page did not return PNG canvas data.");
+    const screenshot = await this.client.send("Page.captureScreenshot", {
+      format: "png",
+      fromSurface: true,
+      captureBeyondViewport: false,
+    }, request.timeoutMs);
+    if (typeof screenshot.data !== "string" || screenshot.data === "") {
+      throw new Error("Chromium did not return PNG screenshot data.");
     }
     return {
-      png: Buffer.from(pngDataUrl.slice("data:image/png;base64,".length), "base64"),
-      snapshots: capture.snapshots ?? null,
+      png: Buffer.from(screenshot.data, "base64"),
+      snapshots: capture?.snapshots ?? null,
     };
   }
 }
@@ -877,7 +899,6 @@ async function captureRoleParts(input) {
       imageId: request.imageId,
       cacheMode: request.cacheMode,
       output: outputPath,
-      snapshots: result.snapshots,
     };
   } finally {
     if (fs.existsSync(tempOutputPath)) {
