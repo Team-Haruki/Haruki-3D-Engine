@@ -332,20 +332,17 @@ export async function bindHeadRuntimeMaterials({
   eyeController?: CharacterEyeMaterialController | null;
   debug?: RuntimeMaterialDebug[];
 }) {
-  const slots: HeadRuntimeMaterialSlot[] = [];
   const overlayMeshesToAttach: Array<{ parent: THREE.Object3D; mesh: THREE.Mesh }> = [];
   const stencilPrepassMeshesToAttach: Array<{ parent: THREE.Object3D; mesh: THREE.Mesh }> = [];
   const topLayerMeshesToAttach: Array<{ parent: THREE.Object3D; mesh: THREE.Mesh }> = [];
 
-  for (const slot of headAsset.faceMaterials) {
-    const mainTex = await loadRuntimeTexture(textureLoader, slot.mainTex);
-    const shadowTex = await loadRuntimeTexture(textureLoader, slot.shadowTex);
-    const valueTex = await loadRuntimeTexture(textureLoader, slot.valueTex, THREE.NoColorSpace);
-    const faceShadowTex = await loadRuntimeTexture(
-      textureLoader,
-      slot.faceShadowTex,
-      THREE.NoColorSpace
-    );
+  const slots = await Promise.all(headAsset.faceMaterials.map(async (slot): Promise<HeadRuntimeMaterialSlot> => {
+    const [mainTex, shadowTex, valueTex, faceShadowTex] = await Promise.all([
+      loadRuntimeTexture(textureLoader, slot.mainTex),
+      loadRuntimeTexture(textureLoader, slot.shadowTex),
+      loadRuntimeTexture(textureLoader, slot.valueTex, THREE.NoColorSpace),
+      loadRuntimeTexture(textureLoader, slot.faceShadowTex, THREE.NoColorSpace),
+    ]);
     if (!slot.materialKind) {
       throw new Error(
         `Head material ${slot.materialName ?? slot.materialKey} is missing materialKind.`
@@ -500,7 +497,7 @@ export async function bindHeadRuntimeMaterials({
       topLayerMaterial.userData.pjskMaterialKey = slot.materialKey;
       topLayerMaterial.userData.pjskMaterialSlotIndex = slot.slotIndex;
     }
-    slots.push({
+    return {
       key: slot.materialKey,
       meshKey: normalizeMeshSlotName(slot.meshName),
       materialKey: slot.materialKey,
@@ -518,8 +515,8 @@ export async function bindHeadRuntimeMaterials({
           ? material.userData.pjskStencilPrepassMaterial
           : null,
       topLayerMaterial,
-    });
-  }
+    };
+  }));
 
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;

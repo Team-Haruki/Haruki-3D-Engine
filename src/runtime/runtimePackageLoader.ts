@@ -1,8 +1,7 @@
-import brotliWasm from "brotli-wasm";
-import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
 import { mergePartRuntimeCore } from "../../part-runtime-core.mjs";
 import type { RuntimeCombinedCharacterAsset } from "./runtimeTypes";
 import { CustomWardrobeController } from "../parts/customWardrobeController";
+import { decodeRuntimeMessagePackBrotli } from "./runtimeMessagePackDecoder";
 import {
   getCharacterIndexEntries,
   getDefaultCustomSelection,
@@ -96,12 +95,15 @@ async function loadPartPackageSetFromBaseUrl(
 ): Promise<PartPackageSet> {
   const role = parseRuntimeRoleIdOption(options.roleId);
   const scopedRoot = `parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}`;
-  const registry = normalizePartRegistry(await fetchRuntimeMessagePack(
-    resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/part-registry.msgpack.br`)
-  ) as PartRegistryInput);
-  const characterIndex = await fetchRuntimeMessagePack(
-    resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/character3d-index.msgpack.br`)
-  ) as Character3dIndex;
+  const [registryInput, characterIndex] = await Promise.all([
+    fetchRuntimeMessagePack(
+      resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/part-registry.msgpack.br`)
+    ) as Promise<PartRegistryInput>,
+    fetchRuntimeMessagePack(
+      resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/character3d-index.msgpack.br`)
+    ) as Promise<Character3dIndex>,
+  ]);
+  const registry = normalizePartRegistry(registryInput);
   const compatibility = null;
   const characterIndexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
   const packages = new Map<string, PartRuntimePackage>();
@@ -362,9 +364,7 @@ async function readMessagePackBrotliRuntime(response: Response, url: string) {
       await response.body?.cancel();
       return cached.value;
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const brotli = await brotliWasm;
-    const value = decodeRuntimeMessagePack(brotli.decompress(bytes));
+    const value = await decodeRuntimeMessagePackBrotli(await response.arrayBuffer());
     if (version && isCacheableRuntimeMetadataUrl(url)) {
       parsedRuntimeMetadata.delete(url);
       parsedRuntimeMetadata.set(url, { version, value });

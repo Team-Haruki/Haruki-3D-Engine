@@ -115,6 +115,7 @@ import {
   type HairShadowMode,
   type RenderIsolationMode,
 } from "./characterLightingRuntime";
+import { RuntimeTextureLoader } from "./runtimeTextureLoader";
 
 export type {
   BodyDebugMode,
@@ -191,6 +192,7 @@ export type PjskEngineOptions = {
   autoRender?: boolean;
   manageResize?: boolean;
   controlsFactory?: HarukiCameraControlsFactory;
+  ktx2TranscoderPath?: string;
 };
 
 export type PjskViewerEngineOptions = PjskEngineOptions;
@@ -834,7 +836,7 @@ export class Haruki3DEngine {
   private readonly clock = new THREE.Clock();
   private readonly directionalLight: THREE.DirectionalLight;
   private readonly fillLight: THREE.AmbientLight;
-  private readonly textureLoader: THREE.TextureLoader;
+  private readonly textureLoader: RuntimeTextureLoader;
   private readonly bodyMaterial: THREE.ShaderMaterial;
   private readonly hairMaterial: THREE.ShaderMaterial;
   private readonly faceMaterial: THREE.ShaderMaterial;
@@ -997,7 +999,10 @@ export class Haruki3DEngine {
 
     this.fillLight = new THREE.AmbientLight("#fff8f0", light.ambient);
     this.scene.add(this.fillLight);
-    this.textureLoader = new THREE.TextureLoader();
+    this.textureLoader = new RuntimeTextureLoader(
+      this.renderer,
+      options.ktx2TranscoderPath
+    );
 
     this.bodyMaterial = createSekaiBodyMaterial({
       baseColor: "#f5d6d0",
@@ -1158,9 +1163,12 @@ export class Haruki3DEngine {
       this.characterHeight
     );
     this.syncUnityPrefabSourceGraph();
-    await this.reloadAnimationPlayback({
-      resetSpring: preservedAnimation === null,
-    });
+    await Promise.all([
+      this.reloadAnimationPlayback({
+        resetSpring: preservedAnimation === null,
+      }),
+      this.renderer.compileAsync(this.scene, this.camera),
+    ]);
     if (preservedAnimation) {
       this.animationPlayback.restorePosition(preservedAnimation);
       this.faceMotion.applyCurrent();
@@ -2029,6 +2037,7 @@ export class Haruki3DEngine {
     }
     this.controls?.dispose();
     this.projectedShadow.dispose();
+    this.textureLoader.dispose();
     this.captureBackgroundTexture?.dispose();
     this.renderer.dispose();
     if (this.ownsCanvas && this.renderer.domElement.parentElement === this.container) {
@@ -2275,11 +2284,13 @@ export class Haruki3DEngine {
     }
 
     this.syncUnityPrefabSourceGraph();
-    await this.overrideBodyMaterials(prefabSourceGraph.root, characterAsset.bodyAsset);
-    await this.overrideHeadMaterials(prefabSourceGraph.root, characterAsset.headAsset, {
-      eyeController: readCharacterEyeMaterialController(characterAsset.runtimeExtension),
-      hairController: readCharacterHairMaterialController(characterAsset.runtimeExtension),
-    });
+    await Promise.all([
+      this.overrideBodyMaterials(prefabSourceGraph.root, characterAsset.bodyAsset),
+      this.overrideHeadMaterials(prefabSourceGraph.root, characterAsset.headAsset, {
+        eyeController: readCharacterEyeMaterialController(characterAsset.runtimeExtension),
+        hairController: readCharacterHairMaterialController(characterAsset.runtimeExtension),
+      }),
+    ]);
     this.installSekaiOutlineShells(prefabSourceGraph.root);
     return {
       root: prefabSourceGraph.root,

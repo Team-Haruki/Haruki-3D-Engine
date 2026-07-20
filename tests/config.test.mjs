@@ -927,7 +927,7 @@ test("custom selection mutations use the official full-character update path", (
   assert.match(engineSource, /preserveAnimation,\s+disposeBeforeLoad:\s*true/);
   assert.match(engineSource, /clearAnimationCache:\s*false/);
   assert.match(engineSource, /applyCustomRoleDefaultMotion\(combined, !preserveAnimation\)/);
-  assert.match(engineSource, /await this\.reloadAnimationPlayback\(\{\s+resetSpring: preservedAnimation === null,\s+\}\);\s+if \(preservedAnimation\)/);
+  assert.match(engineSource, /await Promise\.all\(\[\s+this\.reloadAnimationPlayback\(\{\s+resetSpring: preservedAnimation === null,\s+\}\),\s+this\.renderer\.compileAsync\(this\.scene, this\.camera\),\s+\]\);\s+if \(preservedAnimation\)/);
   assert.match(engineSource, /this\.animationPlayback\.restorePosition\(preservedAnimation\)/);
   const sameSelectionBranch = engineSource.slice(
     engineSource.indexOf("const sameResolvedSelection"),

@@ -212,18 +212,36 @@ export async function loadRuntimeTexture(
   if (!url) {
     return null;
   }
-  try {
-    const texture = await textureLoader.loadAsync(url);
+  const key = `${colorSpace}\u0000${url}`;
+  let requests = inFlightRuntimeTextures.get(textureLoader);
+  if (!requests) {
+    requests = new Map();
+    inFlightRuntimeTextures.set(textureLoader, requests);
+  }
+  const existing = requests.get(key);
+  if (existing) {
+    return existing;
+  }
+  const loading = textureLoader.loadAsync(url).then((texture) => {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.flipY = false;
     texture.colorSpace = colorSpace;
     texture.needsUpdate = true;
     return texture;
-  } catch {
-    return null;
-  }
+  }, () => null).finally(() => {
+    if (requests.get(key) === loading) {
+      requests.delete(key);
+    }
+  });
+  requests.set(key, loading);
+  return loading;
 }
+
+const inFlightRuntimeTextures = new WeakMap<
+  object,
+  Map<string, Promise<THREE.Texture | null>>
+>();
 
 export function extractMaterialColorMap(material: THREE.Material) {
   return (material as THREE.Material & { map?: THREE.Texture | null }).map ?? null;
@@ -532,14 +550,15 @@ export async function bindBodyRuntimeMaterials({
   bodyDebugMode: number;
   debug?: RuntimeMaterialDebug[];
 }) {
-  const slots: BodyRuntimeMaterialSlot[] = [];
-  for (const slot of bodyAsset.bodyMaterials) {
+  const slots = await Promise.all(bodyAsset.bodyMaterials.map(async (slot): Promise<BodyRuntimeMaterialSlot> => {
     if (!slot.materialKind) {
       throw new Error(`Body material ${slot.materialName ?? slot.materialKey} is missing materialKind.`);
     }
-    const mainTex = await loadRuntimeTexture(textureLoader, slot.mainTex);
-    const shadowTex = await loadRuntimeTexture(textureLoader, slot.shadowTex);
-    const valueTex = await loadRuntimeTexture(textureLoader, slot.valueTex, THREE.NoColorSpace);
+    const [mainTex, shadowTex, valueTex] = await Promise.all([
+      loadRuntimeTexture(textureLoader, slot.mainTex),
+      loadRuntimeTexture(textureLoader, slot.shadowTex),
+      loadRuntimeTexture(textureLoader, slot.valueTex, THREE.NoColorSpace),
+    ]);
     const lighting = tuneLightingForPreview(slot.materialKind, slot.lighting);
     const material = cloneBodyShaderMaterial(template, {
       mainTex,
@@ -561,7 +580,7 @@ export async function bindBodyRuntimeMaterials({
     material.userData.pjskMaterialKind = slot.materialKind;
     material.userData.pjskMaterialKey = slot.materialKey;
     material.userData.pjskMaterialSlotIndex = slot.slotIndex;
-    slots.push({
+    return {
       key: slot.materialKey,
       meshKey: normalizeMeshSlotName(slot.meshName),
       materialKey: slot.materialKey,
@@ -570,8 +589,8 @@ export async function bindBodyRuntimeMaterials({
       shadowTex: slot.shadowTex ?? null,
       valueTex: slot.valueTex ?? null,
       material,
-    });
-  }
+    };
+  }));
 
   root.traverse((node) => {
     const mesh = node as THREE.Mesh;

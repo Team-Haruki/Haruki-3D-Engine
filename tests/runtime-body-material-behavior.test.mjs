@@ -164,3 +164,73 @@ test("body material binding preserves exact Unity slots and texture sampling sta
     usedOriginalMap: true,
   }]);
 });
+
+test("body texture binding starts independent texture loads concurrently and deduplicates matching URLs", async () => {
+  const pending = new Map();
+  const calls = [];
+  const textureLoader = {
+    loadAsync(url) {
+      calls.push(url);
+      return new Promise((resolve) => pending.set(url, resolve));
+    },
+  };
+  const root = new THREE.Group();
+  const template = createSekaiBodyMaterial({
+    baseColor: "#ffffff",
+    shadowColor: "#808080",
+    lightDirection: new THREE.Vector3(0, 1, 0),
+    lightIntensity: 1,
+    ambientIntensity: 1,
+    shadowThreshold: 0.5,
+    shadowWeight: 1,
+  });
+
+  const binding = bindBodyRuntimeMaterials({
+    root,
+    bodyAsset: {
+      id: "body",
+      displayName: "Body",
+      source: { bundleRoot: "", manifestUrl: "", meshUrl: "" },
+      neckAnchor: { x: 0, y: 0, z: 0 },
+      skeleton: {
+        skeletonId: "body",
+        neckAttach: { fallbackPosition: { x: 0, y: 0, z: 0 } },
+      },
+      bodyMaterials: [{
+        meshName: "BodyA",
+        slotIndex: 0,
+        materialKey: "body:0",
+        materialKind: "body",
+        mainTex: "/shared.png",
+        shadowTex: "/shadow.png",
+      }, {
+        meshName: "BodyB",
+        slotIndex: 0,
+        materialKey: "body:1",
+        materialKind: "body",
+        mainTex: "/shared.png",
+        valueTex: "/value.png",
+      }],
+      proxy: {
+        bodyColor: "#ffffff",
+        shadowColor: "#808080",
+        bodyScale: 1,
+        torsoLength: 1,
+        shoulderWidth: 1,
+      },
+    },
+    headAsset: null,
+    textureLoader,
+    template,
+    bodyDebugMode: 0,
+  });
+
+  await Promise.resolve();
+  assert.deepEqual(calls, ["/shared.png", "/shadow.png", "/value.png"]);
+  for (const [url, resolve] of pending) {
+    const texture = new THREE.Texture();
+    texture.name = url;
+    resolve(texture);
+  }
+  await binding;
+});

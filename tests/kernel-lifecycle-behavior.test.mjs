@@ -43,6 +43,25 @@ test("a completed load prepares and renders exactly one initial frame", async ()
   await Promise.resolve();
 });
 
+test("prepare loads a recipe without rendering and the matching load reuses it", async () => {
+  const calls = [];
+  const engine = fakeEngine(calls, async () => {});
+  installAnimationFrameStubs();
+  const kernel = createHaruki3DKernelRuntime(engine, "/runtime/jp/");
+
+  await kernel.prepare(recipe());
+  assert.deepEqual(calls, [["load", "/runtime/jp/"]]);
+
+  await kernel.load(recipe());
+  assert.deepEqual(calls, [
+    ["load", "/runtime/jp/"],
+    ["step", 0, false, 0],
+    ["render"],
+  ]);
+  kernel.destroy();
+  await Promise.resolve();
+});
+
 function fakeEngine(calls, load) {
   return {
     loadRenderRecipe(request) {

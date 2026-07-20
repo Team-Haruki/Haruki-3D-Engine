@@ -49,6 +49,7 @@ const mimeByExtension = new Map([
   [".json", "application/json; charset=utf-8"],
   [".msgpack", "application/msgpack"],
   [".png", "image/png"],
+  [".ktx2", "image/ktx2"],
   [".jpg", "image/jpeg"],
   [".jpeg", "image/jpeg"],
   [".webp", "image/webp"],

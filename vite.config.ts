@@ -1,7 +1,9 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
+import { copyBasisTranscoder } from "./vite.basis.plugin";
 
 export default defineConfig({
+  plugins: [copyBasisTranscoder()],
   build: {
     lib: {
       entry: {

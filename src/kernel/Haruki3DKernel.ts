@@ -8,9 +8,11 @@ export type Haruki3DKernelOptions = {
   canvas: HTMLCanvasElement;
   assetBaseUrl: string;
   initialLight?: PreviewLightState;
+  ktx2TranscoderPath?: string;
 };
 
 export type Haruki3DKernel = {
+  prepare(recipe: HarukiRenderRecipe): Promise<void>;
   load(recipe: HarukiRenderRecipe): Promise<void>;
   play(): void;
   pause(): void;
@@ -43,6 +45,7 @@ export function createHaruki3DKernel(
     initialLight: { ...(options.initialLight ?? previewLightDefaults) },
     autoRender: false,
     manageResize: false,
+    ktx2TranscoderPath: options.ktx2TranscoderPath,
   });
   return createHaruki3DKernelRuntime(engine, assetBaseUrl);
 }
@@ -55,6 +58,7 @@ export function createHaruki3DKernelRuntime(
   let running = false;
   let destroyed = false;
   let loadSettled: Promise<void> = Promise.resolve();
+  let prepared: { key: string; promise: Promise<void> } | null = null;
   let lastFrameMs: number | null = null;
   let accumulator = 0;
   let elapsedTime = 0;
@@ -63,6 +67,24 @@ export function createHaruki3DKernelRuntime(
     if (destroyed) {
       throw new Error("Haruki 3D kernel has been destroyed.");
     }
+  };
+
+  const prepare = (recipe: HarukiRenderRecipe) => {
+    assertActive();
+    const key = renderRecipeKey(recipe);
+    if (prepared?.key === key) {
+      return prepared.promise;
+    }
+    const loading = engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl })
+      .then(() => undefined);
+    prepared = { key, promise: loading };
+    loadSettled = loading.then(() => undefined, () => undefined);
+    void loading.catch(() => {
+      if (prepared?.promise === loading) {
+        prepared = null;
+      }
+    });
+    return loading;
   };
 
   const render = (frameMs: number) => {
@@ -93,11 +115,9 @@ export function createHaruki3DKernelRuntime(
   };
 
   return {
+    prepare,
     async load(recipe) {
-      assertActive();
-      const loading = engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl });
-      loadSettled = loading.then(() => undefined, () => undefined);
-      await loading;
+      await prepare(recipe);
       if (destroyed) {
         return;
       }
@@ -134,10 +154,22 @@ export function createHaruki3DKernelRuntime(
         return;
       }
       destroyed = true;
+      prepared = null;
       running = false;
       cancelAnimationFrame(animationFrame);
       animationFrame = 0;
       void loadSettled.then(() => engine.destroy());
     },
   };
+}
+
+function renderRecipeKey(recipe: HarukiRenderRecipe) {
+  return [
+    recipe.roleId,
+    recipe.bodyCostume3dId,
+    recipe.headCostume3dId,
+    recipe.headPackagePath ?? "",
+    recipe.hairCostume3dId,
+    recipe.headOptionalCostume3dId ?? "",
+  ].join("\u0000");
 }

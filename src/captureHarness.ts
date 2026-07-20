@@ -287,6 +287,12 @@ function setCaptureError(error: unknown) {
   getCaptureWindow().__PJSK_CAPTURE_ERROR__ = message;
 }
 
+function waitForPresentedFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
 getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
   request: HarukiCaptureRolePartsRequest
 ) => {
@@ -322,6 +328,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
       faceSdfDebugLightMode: request.faceSdfDebugLightMode ?? config.faceSdfDebugLightMode,
       projectedShadow: request.projectedShadow ?? config.projectedShadow,
     });
+    await waitForPresentedFrame();
     settledCapturePackageKey = packageKey;
     const snapshots = request.includeDebugSnapshots && result.snapshots
       ? {

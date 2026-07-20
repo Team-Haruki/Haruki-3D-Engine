@@ -77,6 +77,13 @@ const observer = new ResizeObserver(resize);
 observer.observe(host);
 resize();
 
+await kernel.prepare({
+  roleId: "14:theme_park",
+  bodyCostume3dId: 28,
+  headCostume3dId: 114,
+  hairCostume3dId: 214,
+  headOptionalCostume3dId: null,
+});
 await kernel.load({
   roleId: "14:theme_park",
   bodyCostume3dId: 28,
@@ -104,6 +111,7 @@ type Haruki3DKernelOptions = {
   canvas: HTMLCanvasElement;
   assetBaseUrl: string;
   initialLight?: PreviewLightState;
+  ktx2TranscoderPath?: string;
 };
 ```
 
@@ -112,12 +120,18 @@ type Haruki3DKernelOptions = {
 | `canvas` | Caller-owned canvas used for WebGL output. |
 | `assetBaseUrl` | Versioned final Exporter runtime root for exactly one region. |
 | `initialLight` | Optional initial character light; defaults to `previewLightDefaults`. |
+| `ktx2TranscoderPath` | Optional Basis transcoder directory; defaults to `/basis/`. |
 
 `assetBaseUrl` is fixed for the lifetime of the kernel. To switch region or
 runtime version, destroy the old kernel and create a new one with the new base
 URL.
 
 ### `kernel.load(recipe)`
+
+`prepare(recipe)` performs the same package download, decode, assembly, and
+GPU preparation without rendering the initial frame. A following `load()` of
+the same recipe reuses that completed preparation. Call it while the surrounding
+page is loading when the next preview is already known.
 
 ```ts
 type HarukiRenderRecipe = {

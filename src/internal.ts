@@ -1,4 +1,7 @@
 export {
+  decodeRuntimeMessagePackBrotli,
+} from "./runtime/runtimeMessagePackDecoder";
+export {
   type HarukiCameraControls,
   type HarukiCameraControlsFactory,
   type AnimationPlaybackSnapshot,

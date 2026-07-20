@@ -29,6 +29,16 @@ test("engine serves and loads only final MessagePack Brotli runtime files", () =
   assert.doesNotMatch(loaderSource, /cache:\s*["']no-store["']/);
 });
 
+test("runtime KTX2 textures use the Basis loader and correct HTTP type", () => {
+  const serverSource = readSource("capture-server.mjs");
+  const textureLoaderSource = readSource("src/engine/runtimeTextureLoader.ts");
+  assert.match(serverSource, /\["\.ktx2", "image\/ktx2"\]/);
+  assert.match(textureLoaderSource, /KTX2Loader/);
+  assert.match(textureLoaderSource, /\.detectSupport\(renderer\)/);
+  assert.match(textureLoaderSource, /\/\\\.ktx2\(\?:\[\?#\]\|\$\)\/i/);
+  assert.match(textureLoaderSource, /this\.imageLoader\.loadAsync\(url\)/);
+});
+
 test("local capture development does not listen on every interface by default", () => {
   const source = readSource("vite.capture.config.ts");
 
@@ -200,6 +210,18 @@ test("normal captures skip debug snapshots and browser-side PNG encoding", () =>
   assert.doesNotMatch(harnessSource, /toDataURL\(/);
 });
 
+test("capture waits for a presented browser frame before acknowledging", () => {
+  const source = readSource("src/captureHarness.ts");
+  const requestHandler = sourceSlice(
+    source,
+    "getCaptureWindow().__HARUKI_CAPTURE_REQUEST__",
+    "async function bootstrapCapture"
+  );
+
+  assert.match(source, /requestAnimationFrame\(\(\) =>\s*requestAnimationFrame\(resolve\)\)/);
+  assert.match(requestHandler, /await waitForPresentedFrame\(\)/);
+});
+
 test("unchanged capture presentation rechecks size without rebuilding an unchanged viewport", () => {
   const source = readSource("src/engine/Haruki3DEngine.ts");
   const presentation = sourceSlice(source, "setCapturePresentation", "private stepCharacterDynamics");
@@ -212,6 +234,15 @@ test("unchanged capture presentation rechecks size without rebuilding an unchang
   assert.match(viewport, /this\.viewportHeight === nextHeight/);
   assert.match(viewport, /this\.viewportPixelRatio === nextPixelRatio/);
   assert.match(viewport, /return;/);
+});
+
+test("character import compiles shaders alongside animation preparation", () => {
+  const source = readSource("src/engine/Haruki3DEngine.ts");
+  const imported = sourceSlice(source, "async importCombinedCharacter", "setHairShadowMode");
+
+  assert.match(imported, /Promise\.all\(\[/);
+  assert.match(imported, /this\.renderer\.compileAsync\(this\.scene, this\.camera\)/);
+  assert.match(imported, /this\.reloadAnimationPlayback/);
 });
 
 test("capture ack omits renderer debug snapshots", async () => {
