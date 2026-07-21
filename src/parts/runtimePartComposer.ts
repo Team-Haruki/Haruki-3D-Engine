@@ -5,7 +5,6 @@ import type {
 import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
 
 export type RuntimePartType = "body" | "head" | "hair" | "head_optional";
-export type CustomPartSelectionOrigin = "custom" | "official_preset";
 
 export type PartRegistryEntry = {
   costume3dId: number;
@@ -28,23 +27,20 @@ export type PartRegistryEntry = {
   warnings?: string[] | null;
 };
 
-export type Character3dIndexEntry = {
-  id: number;
-  character3dId?: number;
+export type RuntimeRoleCatalogEntry = {
+  roleId: number;
   characterId: number;
-  bodyCostume3dId?: number;
-  headCostume3dId?: number;
-  hairCostume3dId?: number;
-  headOptionalCostume3dId?: number | null;
+  bodyCostume3dId: number;
+  headCostume3dId: number;
+  hairCostume3dId: number;
   unit?: string | null;
-  name?: string | null;
-  roleRuntimePath?: string | null;
+  roleRuntimePath: string;
 };
 
-export type Character3dIndex = {
-  version?: string;
-  entries?: Character3dIndexEntry[];
-  character3ds?: Character3dIndexEntry[];
+export type RuntimeRoleCatalog = {
+  version: number;
+  masterVersion: string;
+  roles: RuntimeRoleCatalogEntry[];
 };
 
 export type HeadHairCompatibility = {
@@ -129,7 +125,7 @@ export type RoleRuntimePackage = {
 
 export type PartPackageSet = {
   registry: PartRegistryEntry[];
-  characterIndex: Character3dIndexEntry[];
+  roles: RuntimeRoleCatalogEntry[];
   compatibility: HeadHairCompatibility | null;
   packages: Map<string, PartRuntimePackage>;
   roleRuntimes: Map<string, RoleRuntimePackage>;
@@ -144,7 +140,6 @@ export type CustomPartSelection = {
   headPackagePath?: string | null;
   hairCostume3dId: number;
   headOptionalCostume3dId?: number | null;
-  origin?: CustomPartSelectionOrigin;
 };
 
 export type ComposePartAssetInput = {
@@ -429,39 +424,29 @@ export function runtimeRoleId(characterId: number, unit: string | null | undefin
   return `${characterId}:${normalizeUnit(unit)}`;
 }
 
-export function getCharacterIndexEntries(index: Character3dIndex): Character3dIndexEntry[] {
-  return index.entries ?? index.character3ds ?? [];
-}
-
 export function getDefaultCustomSelection(partSet: PartPackageSet): CustomPartSelection | null {
-  const preset = partSet.characterIndex.find((entry) =>
-    hasCompletePresetParts(entry) &&
+  const role = partSet.roles.find((entry) =>
     hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "body", entry.bodyCostume3dId) &&
     hasLoadedHeadPart(partSet, entry.characterId, entry.unit ?? null, entry.headCostume3dId) &&
-    hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "hair", entry.hairCostume3dId) &&
-    (
-      !entry.headOptionalCostume3dId ||
-      hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "head_optional", entry.headOptionalCostume3dId)
-    )
+    hasLoadedPart(partSet, entry.characterId, entry.unit ?? null, "hair", entry.hairCostume3dId)
   );
-  if (preset) {
-    const bodyCostume3dId = preset.bodyCostume3dId!;
-    const headCostume3dId = preset.headCostume3dId!;
-    const hairCostume3dId = preset.hairCostume3dId!;
+  if (role) {
+    const bodyCostume3dId = role.bodyCostume3dId;
+    const headCostume3dId = role.headCostume3dId;
+    const hairCostume3dId = role.hairCostume3dId;
     return {
-      characterId: preset.characterId,
-      unit: preset.unit ?? null,
+      characterId: role.characterId,
+      unit: role.unit ?? null,
       bodyCostume3dId,
       headCostume3dId,
       headPackagePath: uniqueHeadPackagePath(
         partSet,
-        preset.characterId,
-        preset.unit ?? null,
+        role.characterId,
+        role.unit ?? null,
         headCostume3dId
       ),
       hairCostume3dId,
-      headOptionalCostume3dId: preset.headOptionalCostume3dId ?? null,
-      origin: "official_preset",
+      headOptionalCostume3dId: null,
     };
   }
 
@@ -482,7 +467,6 @@ export function getDefaultCustomSelection(partSet: PartPackageSet): CustomPartSe
     headPackagePath: head.packagePath,
     hairCostume3dId: hair.costume3dId,
     headOptionalCostume3dId: null,
-    origin: "custom",
   };
 }
 
@@ -638,17 +622,6 @@ function hasLoadedHeadPart(
 ) {
   return hasLoadedPart(partSet, characterId, unit, "head", costume3dId) ||
     hasLoadedPart(partSet, characterId, unit, "head_optional", costume3dId);
-}
-
-function hasCompletePresetParts(entry: Character3dIndexEntry): entry is Character3dIndexEntry & {
-  bodyCostume3dId: number;
-  headCostume3dId: number;
-  hairCostume3dId: number;
-} {
-  return typeof entry.characterId === "number" &&
-    typeof entry.bodyCostume3dId === "number" &&
-    typeof entry.headCostume3dId === "number" &&
-    typeof entry.hairCostume3dId === "number";
 }
 
 function requirePart(
@@ -911,9 +884,6 @@ function assertHeadHairCompatible(
   selectedHeadSlot?: RuntimePartType
 ) {
   if (!compatibility) {
-    return;
-  }
-  if (selection.origin === "official_preset") {
     return;
   }
   if (selectedHeadSlot === "head") {

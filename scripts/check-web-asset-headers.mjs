@@ -1,16 +1,17 @@
 import { pathToFileURL } from "node:url";
 
-const immutableMaxAge = 31_536_000;
+const assetMaxAge = 2_592_000;
 
 function contentType(headers) {
   return (headers.get("content-type") ?? "").split(";", 1)[0].trim().toLowerCase();
 }
 
-function hasImmutableCache(headers) {
+function hasAssetCache(headers) {
   const value = headers.get("cache-control") ?? "";
   const maxAge = /(?:^|,)\s*max-age=(\d+)/i.exec(value)?.[1];
-  return /(?:^|,)\s*immutable(?:\s*,|$)/i.test(value)
-    && Number(maxAge) >= immutableMaxAge;
+  return /(?:^|,)\s*public(?:\s*,|$)/i.test(value)
+    && Number(maxAge) === assetMaxAge
+    && !/(?:^|,)\s*immutable(?:\s*,|$)/i.test(value);
 }
 
 function hasRevalidation(headers) {
@@ -24,7 +25,7 @@ export function validateAssetHeaders(rawUrl, headers, webOrigin = null) {
   const type = contentType(headers);
   const errors = [];
   let expectedType = null;
-  let immutable = true;
+  let asset = true;
 
   if (pathname.endsWith(".msgpack.br")) expectedType = "application/msgpack";
   else if (pathname.endsWith(".ktx2")) expectedType = "image/ktx2";
@@ -35,7 +36,7 @@ export function validateAssetHeaders(rawUrl, headers, webOrigin = null) {
     }
   } else if (pathname.endsWith(".html")) {
     expectedType = "text/html";
-    immutable = false;
+    asset = false;
   } else {
     errors.push("unsupported asset extension");
   }
@@ -46,11 +47,11 @@ export function validateAssetHeaders(rawUrl, headers, webOrigin = null) {
   if (pathname.endsWith(".msgpack.br") && headers.has("content-encoding")) {
     errors.push("Content-Encoding must be absent for .msgpack.br");
   }
-  if (immutable && !hasImmutableCache(headers)) {
-    errors.push(`versioned assets require public max-age>=${immutableMaxAge} and immutable`);
+  if (asset && !hasAssetCache(headers)) {
+    errors.push(`assets require public max-age=${assetMaxAge} without immutable`);
   }
-  if (!immutable && (hasImmutableCache(headers) || !hasRevalidation(headers))) {
-    errors.push("HTML must be revalidated instead of cached as immutable");
+  if (!asset && (hasAssetCache(headers) || !hasRevalidation(headers))) {
+    errors.push("HTML must be revalidated instead of using the asset cache policy");
   }
 
   if (webOrigin && new URL(webOrigin).origin !== url.origin) {

@@ -8,7 +8,7 @@ The engine does not parse Unity bundles. It loads only the final, role-scoped
 Haruki runtime package:
 
 - `parts/by-role/<characterId>/<unit>/part-registry.msgpack.br`
-- `parts/by-role/<characterId>/<unit>/character3d-index.msgpack.br`
+- `parts/by-role/<characterId>/<unit>/runtime-role-catalog.msgpack.br`
 - `parts/compat/by-unit/<unit>/head-hair-compatibility.msgpack.br`
 - `parts/**/part-runtime.msgpack.br`
 - `parts/_cores/**/part-runtime-core.msgpack.br`
@@ -30,7 +30,7 @@ import {
 
 const kernel = createHaruki3DKernel({
   canvas: document.querySelector("canvas")!,
-  assetBaseUrl: "/assets/pjsk-3d/6.6.0.30/jp/",
+  assetBaseUrl: "/assets/pjsk-3d/jp/",
 });
 
 await kernel.load({

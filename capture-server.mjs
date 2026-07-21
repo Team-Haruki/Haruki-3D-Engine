@@ -160,7 +160,23 @@ function serveRuntimeFile(root, relativePath, req, res) {
     return;
   }
 
-  serveResolvedFile(filePath, req, res);
+  serveResolvedFile(filePath, req, res, {
+    "cache-control": "public, max-age=2592000",
+  });
+}
+
+function serveEngineFile(relativePath, req, res) {
+  const filePath = safeJoin(distDir, relativePath);
+  if (!filePath) {
+    res.writeHead(403);
+    res.end("forbidden");
+    return;
+  }
+  serveResolvedFile(filePath, req, res, {
+    "cache-control": relativePath.endsWith(".html")
+      ? "no-cache"
+      : "public, max-age=2592000",
+  });
 }
 
 function readRequestJson(req) {
@@ -947,7 +963,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" || req.method === "HEAD") {
       const relativePath = requestPath === "/" ? "capture.html" : requestPath;
-      serveFile(distDir, relativePath, req, res);
+      serveEngineFile(relativePath, req, res);
       return;
     }
     res.writeHead(405);

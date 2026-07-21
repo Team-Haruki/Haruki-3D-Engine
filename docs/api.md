@@ -66,7 +66,7 @@ const host = document.querySelector<HTMLElement>("#viewer")!;
 
 const kernel = createHaruki3DKernel({
   canvas,
-  assetBaseUrl: "/assets/pjsk-3d/6.6.0.30/jp/",
+  assetBaseUrl: "/assets/pjsk-3d/jp/",
 });
 
 const resize = () => {
@@ -118,7 +118,7 @@ type Haruki3DKernelOptions = {
 | Field | Meaning |
 | --- | --- |
 | `canvas` | Caller-owned canvas used for WebGL output. |
-| `assetBaseUrl` | Versioned final Exporter runtime root for exactly one region. |
+| `assetBaseUrl` | Stable final Exporter runtime root for exactly one region. |
 | `initialLight` | Optional initial character light; defaults to `previewLightDefaults`. |
 | `ktx2TranscoderPath` | Optional Basis transcoder directory; defaults to `/basis/`. |
 
@@ -223,7 +223,7 @@ The runtime root must be one final Exporter output for one region. The kernel
 loads:
 
 - `parts/by-role/<characterId>/<unit>/part-registry.msgpack.br`
-- `parts/by-role/<characterId>/<unit>/character3d-index.msgpack.br`
+- `parts/by-role/<characterId>/<unit>/runtime-role-catalog.msgpack.br`
 - `parts/compat/by-unit/<unit>/head-hair-compatibility.msgpack.br`
 - referenced `part-runtime.msgpack.br` core/delta packages and textures
 - referenced role runtime and Unity motion packages
@@ -236,15 +236,18 @@ not browser-kernel inputs.
 Same-origin hosting is the simplest deployment. For a separate asset origin,
 allow the web origin with CORS.
 
-Use these response headers for a versioned web deployment:
+Runtime asset paths are stable and updated incrementally. Refresh the role and
+part registries whenever the corresponding region masterdata is refreshed. The
+role Catalog carries that region's `masterVersion`; it is not a 3D release ID.
+Use these response headers:
 
 | File | `Content-Type` | Cache policy |
 | --- | --- | --- |
-| hashed `.js` / `.mjs` | `text/javascript` | `public, max-age=31536000, immutable` |
-| hashed `.wasm` | `application/wasm` | `public, max-age=31536000, immutable` |
-| `.ktx2` | `image/ktx2` | `public, max-age=31536000, immutable` |
-| `.msgpack.br` | `application/msgpack` | `public, max-age=31536000, immutable` |
-| entry HTML | `text/html` | revalidate; never `immutable` |
+| `.js` / `.mjs` | `text/javascript` | `public, max-age=2592000` |
+| `.wasm` | `application/wasm` | `public, max-age=2592000` |
+| `.ktx2` | `image/ktx2` | `public, max-age=2592000` |
+| `.msgpack.br` | `application/msgpack` | `public, max-age=2592000` |
+| entry HTML | `text/html` | revalidate |
 
 Serve `.msgpack.br` as already-compressed binary data:
 
@@ -267,18 +270,16 @@ Access-Control-Expose-Headers: X-Haruki-File-Version
 Without it the runtime still works; only the small in-memory parsed-metadata
 reuse is skipped.
 
-Use versioned runtime URLs and the browser's normal HTTP cache:
+Use stable per-region runtime URLs and the browser's normal HTTP cache:
 
 ```text
-/assets/pjsk-3d/<export-version>/<region>/
+/assets/pjsk-3d/<region>/
 ```
 
-Versioned files may use long-lived immutable caching. Registries at an
-unversioned URL must instead be revalidated with `ETag` or `Last-Modified`.
-The kernel does not create IndexedDB, Cache Storage, a service worker, or a
-second persistent asset cache. Browser eviction remains controlled by the
-browser; old runtime versions should be retired by the asset host's retention
-policy.
+The asset host may additionally provide `ETag` or `Last-Modified`. The kernel
+does not create IndexedDB, Cache Storage, a service worker, or a second
+persistent asset cache. Browser storage and eviction remain the browser's
+responsibility.
 
 Check a deployed asset origin with the repository's dependency-free header
 probe. Pass the web origin when assets are cross-origin so CORS and exposed
@@ -287,12 +288,12 @@ version headers are checked too:
 ```bash
 npm run check:web-headers -- \
   --origin https://viewer.example \
-  https://assets.example/6.6.0.30/jp/parts/by-role/5/light_sound/part-registry.msgpack.br \
+  https://assets.example/jp/parts/by-role/5/light_sound/part-registry.msgpack.br \
   https://viewer.example/assets/brotli_wasm_bg-NfWIZley.wasm
 ```
 
-The capture HTTP service deliberately uses `Cache-Control: no-store`; it is a
-capture/debug endpoint, not the production static asset host.
+The capture HTTP service uses the same one-month policy for runtime and engine
+files. Capture API responses and generated PNG endpoints remain `no-store`.
 
 Run the browser-kernel startup smoke test locally with Chromium:
 

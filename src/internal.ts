@@ -59,14 +59,14 @@ export {
   type CustomWardrobeControllerOptions,
 } from "./parts/customWardrobeController";
 export {
-  type Character3dIndex,
-  type Character3dIndexEntry,
   type CustomPartSelection,
   type HeadHairCompatibility,
   type PartPackageSet,
   type PartRegistryEntry,
   type PartRuntimePackage,
   type RoleRuntimePackage,
+  type RuntimeRoleCatalog,
+  type RuntimeRoleCatalogEntry,
   type RuntimePartType,
 } from "./parts/runtimePartComposer";
 export {

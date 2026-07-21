@@ -3,19 +3,19 @@ import type { RuntimeCombinedCharacterAsset } from "./runtimeTypes";
 import { CustomWardrobeController } from "../parts/customWardrobeController";
 import { decodeRuntimeMessagePackBrotli } from "./runtimeMessagePackDecoder";
 import {
-  getCharacterIndexEntries,
   getDefaultCustomSelection,
   getDeniedHeadHairCompatibilityKeys,
   headHairCompatibilityKey,
   runtimeRoleId,
   tryRuntimePartSlot,
-  type Character3dIndex,
   type HeadHairCompatibility,
   type PartPackageSet,
   type PartRegistryEntry,
   type PartRuntimePackage,
   type RoleRuntimePackage,
   type RuntimePartType,
+  type RuntimeRoleCatalog,
+  type RuntimeRoleCatalogEntry,
 } from "../parts/runtimePartComposer";
 
 type PartRegistryInput = PartRegistryEntry[] | {
@@ -95,29 +95,29 @@ async function loadPartPackageSetFromBaseUrl(
 ): Promise<PartPackageSet> {
   const role = parseRuntimeRoleIdOption(options.roleId);
   const scopedRoot = `parts/by-role/${role.characterId}/${runtimePathUnitSegment(role.unit)}`;
-  const [registryInput, characterIndex] = await Promise.all([
+  const [registryInput, roleCatalog] = await Promise.all([
     fetchRuntimeMessagePack(
       resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/part-registry.msgpack.br`)
     ) as Promise<PartRegistryInput>,
     fetchRuntimeMessagePack(
-      resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/character3d-index.msgpack.br`)
-    ) as Promise<Character3dIndex>,
+      resolveRuntimePackageUrl(baseUrl, `${scopedRoot}/runtime-role-catalog.msgpack.br`)
+    ) as Promise<RuntimeRoleCatalog>,
   ]);
   const registry = normalizePartRegistry(registryInput);
   const compatibility = null;
-  const characterIndexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
+  const roles = validateScopedRoleCatalog(roleCatalog, role.characterId, role.unit);
   const packages = new Map<string, PartRuntimePackage>();
   if (options.deferDefaultSelection) {
     return {
       registry,
-      characterIndex: characterIndexEntries,
+      roles,
       compatibility,
       packages,
       roleRuntimes: new Map<string, RoleRuntimePackage>(),
       baseUrl,
     };
   }
-  const candidates = selectPartRuntimeCandidates(registry, characterIndex, compatibility);
+  const candidates = selectPartRuntimeCandidates(registry, roles, compatibility);
   const batchSize = 24;
   const maxCandidates = 720;
   for (let offset = 0; offset < Math.min(candidates.length, maxCandidates); offset += batchSize) {
@@ -134,18 +134,18 @@ async function loadPartPackageSetFromBaseUrl(
         );
       }
     }
-    if (hasUsableCustomPartSelection(registry, characterIndex, compatibility, packages, baseUrl)) {
+    if (hasUsableCustomPartSelection(registry, roles, compatibility, packages, baseUrl)) {
       break;
     }
   }
-  if (!hasUsableCustomPartSelection(registry, characterIndex, compatibility, packages, baseUrl)) {
+  if (!hasUsableCustomPartSelection(registry, roles, compatibility, packages, baseUrl)) {
     throw new Error(
       `Part registry package did not expose a compatible loaded body/head/hair selection from ${baseUrl}.`
     );
   }
   const defaultSelection = getDefaultCustomSelection({
     registry,
-    characterIndex: characterIndexEntries,
+    roles,
     compatibility,
     packages,
     roleRuntimes: new Map<string, RoleRuntimePackage>(),
@@ -156,12 +156,12 @@ async function loadPartPackageSetFromBaseUrl(
     : null;
   const roleRuntimes = await loadRoleRuntimePackages(
     baseUrl,
-    characterIndexEntries,
+    roles,
     targetRoleIds
   );
   return {
     registry,
-    characterIndex: characterIndexEntries,
+    roles,
     compatibility,
     packages,
     roleRuntimes,
@@ -179,7 +179,7 @@ export async function ensureRoleRuntimePackage(
   if (existing) {
     return existing;
   }
-  const entry = partSet.characterIndex.find((candidate) =>
+  const entry = partSet.roles.find((candidate) =>
     candidate.roleRuntimePath &&
     candidate.characterId === characterId &&
     runtimeRoleId(candidate.characterId, candidate.unit ?? null) === roleId
@@ -202,11 +202,11 @@ export async function ensureRoleRuntimePackage(
 
 async function loadRoleRuntimePackages(
   baseUrl: string,
-  characterIndex: ReturnType<typeof getCharacterIndexEntries>,
+  roles: RuntimeRoleCatalogEntry[],
   targetRoleIds: ReadonlySet<string> | null = null
 ): Promise<Map<string, RoleRuntimePackage>> {
   const result = new Map<string, RoleRuntimePackage>();
-  const entries = characterIndex.filter((entry) =>
+  const entries = roles.filter((entry) =>
     entry.roleRuntimePath &&
     (!targetRoleIds || targetRoleIds.has(runtimeRoleId(entry.characterId, entry.unit ?? null)))
   );
@@ -323,6 +323,62 @@ function parseRuntimeRoleIdOption(roleId: string) {
   return { characterId, unit };
 }
 
+function validateScopedRoleCatalog(
+  catalog: RuntimeRoleCatalog,
+  characterId: number,
+  unit: string | null
+): RuntimeRoleCatalogEntry[] {
+  const roles = catalog?.version === 2 && typeof catalog.masterVersion === "string" && catalog.masterVersion.length > 0 && Array.isArray(catalog.roles)
+    ? catalog.roles
+    : [];
+  if (roles.length !== 1) {
+    throw new Error(`Runtime role catalog must contain exactly one scoped role for ${runtimeRoleId(characterId, unit)}.`);
+  }
+  const role = roles[0]!;
+  const expected = expectedRuntimeRoleIdentity(role.roleId);
+  const expectedRuntimePath = expected
+    ? `roles/${expected.characterId}/${runtimePathUnitSegment(expected.unit)}/role-runtime.msgpack.br`
+    : "";
+  if (
+    !expected ||
+    role.characterId !== characterId ||
+    runtimeRoleId(role.characterId, role.unit) !== runtimeRoleId(characterId, unit) ||
+    role.characterId !== expected.characterId ||
+    runtimeRoleId(role.characterId, role.unit) !== runtimeRoleId(expected.characterId, expected.unit) ||
+    !Number.isInteger(role.roleId) || role.roleId < 1 || role.roleId > 31 ||
+    !Number.isInteger(role.bodyCostume3dId) || role.bodyCostume3dId <= 0 ||
+    !Number.isInteger(role.headCostume3dId) || role.headCostume3dId <= 0 ||
+    !Number.isInteger(role.hairCostume3dId) || role.hairCostume3dId <= 0 ||
+    role.roleRuntimePath !== expectedRuntimePath
+  ) {
+    throw new Error(`Runtime role catalog is invalid for ${runtimeRoleId(characterId, unit)}.`);
+  }
+  return roles;
+}
+
+function expectedRuntimeRoleIdentity(roleId: number): { characterId: number; unit: string } | null {
+  if (!Number.isInteger(roleId) || roleId < 1 || roleId > 31) return null;
+  if (roleId <= 20) {
+    const unit = roleId <= 4
+      ? "light_sound"
+      : roleId <= 8
+        ? "idol"
+        : roleId <= 12
+          ? "street"
+          : roleId <= 16
+            ? "theme_park"
+            : "school_refusal";
+    return { characterId: roleId, unit };
+  }
+  if (roleId <= 26) {
+    return {
+      characterId: 21,
+      unit: ["piapro", "idol", "light_sound", "street", "theme_park", "school_refusal"][roleId - 21]!,
+    };
+  }
+  return { characterId: roleId - 5, unit: "piapro" };
+}
+
 function runtimePathUnitSegment(unit: string | null | undefined) {
   return unit || "default";
 }
@@ -382,7 +438,7 @@ async function readMessagePackBrotliRuntime(response: Response, url: string) {
 
 function isCacheableRuntimeMetadataUrl(url: string) {
   const path = url.split(/[?#]/, 1)[0] ?? url;
-  return /\/parts\/by-role\/[^/]+\/[^/]+\/(?:part-registry|character3d-index)\.msgpack\.br$/.test(path) ||
+  return /\/parts\/by-role\/[^/]+\/[^/]+\/(?:part-registry|runtime-role-catalog)\.msgpack\.br$/.test(path) ||
     /\/parts\/compat\/by-unit\/[^/]+\/head-hair-compatibility\.msgpack\.br$/.test(path) ||
     /\/roles\/[^/]+\/[^/]+\/(?:role-runtime|motion\/unity-motion)\.msgpack\.br$/.test(path);
 }
@@ -401,11 +457,10 @@ function normalizePartRegistry(input: PartRegistryInput): PartRegistryEntry[] {
 
 function selectPartRuntimeCandidates(
   registry: PartRegistryEntry[],
-  characterIndex: Character3dIndex | null,
+  roles: RuntimeRoleCatalogEntry[],
   compatibility: HeadHairCompatibility | null
 ) {
-  const indexEntries = characterIndex ? getCharacterIndexEntries(characterIndex) : [];
-  const preferredCharacterId = indexEntries.find((entry) =>
+  const preferredCharacterId = roles.find((entry) =>
     typeof entry.characterId === "number"
   )?.characterId ?? registry.find(isLoadableRegistryEntry)?.characterId ?? null;
   const ordered: PartRegistryEntry[] = [];
@@ -436,7 +491,7 @@ function selectPartRuntimeCandidates(
   const deniedHeadHairKeys = getDeniedHeadHairCompatibilityKeys(compatibility);
 
   if (preferredCharacterId !== null) {
-    for (const entry of indexEntries) {
+    for (const entry of roles) {
       if (entry.characterId !== preferredCharacterId) {
         continue;
       }
@@ -449,9 +504,6 @@ function selectPartRuntimeCandidates(
       }
       if (typeof entry.hairCostume3dId === "number") {
         addEntry(findRegistryEntry(entry.characterId, "hair", entry.hairCostume3dId, entry.unit));
-      }
-      if (typeof entry.headOptionalCostume3dId === "number") {
-        addEntry(findRegistryEntry(entry.characterId, "head_optional", entry.headOptionalCostume3dId, entry.unit));
       }
     }
     addEntry(registry
@@ -491,7 +543,7 @@ function selectPartRuntimeCandidates(
   }
 
   const preferredCostumeIds = new Set<number>();
-  for (const entry of indexEntries) {
+  for (const entry of roles) {
     if (preferredCharacterId !== null && entry.characterId !== preferredCharacterId) {
       continue;
     }
@@ -499,7 +551,6 @@ function selectPartRuntimeCandidates(
       entry.bodyCostume3dId,
       entry.headCostume3dId,
       entry.hairCostume3dId,
-      entry.headOptionalCostume3dId,
     ]) {
       if (typeof id === "number") {
         preferredCostumeIds.add(id);
@@ -535,7 +586,7 @@ function isLoadableRegistryEntry(entry: PartRegistryEntry) {
 
 function hasUsableCustomPartSelection(
   registry: PartRegistryEntry[],
-  characterIndex: Character3dIndex | null,
+  roles: RuntimeRoleCatalogEntry[],
   compatibility: HeadHairCompatibility | null,
   packages: Map<string, PartRuntimePackage>,
   baseUrl: string
@@ -555,7 +606,7 @@ function hasUsableCustomPartSelection(
   }
   const partSet = {
     registry,
-    characterIndex: characterIndex ? getCharacterIndexEntries(characterIndex) : [],
+    roles,
     compatibility,
     packages,
     roleRuntimes: new Map<string, RoleRuntimePackage>(),

@@ -1922,7 +1922,6 @@ export class Haruki3DEngine {
       headPackagePath: normalized.headPackagePath,
       hairCostume3dId: normalized.hairCostume3dId,
       headOptionalCostume3dId: normalized.headOptionalCostume3dId,
-      origin: "custom",
     };
     return {
       selection,

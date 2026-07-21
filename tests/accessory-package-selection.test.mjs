@@ -6,7 +6,7 @@ import { CustomWardrobeController } from "../dist/haruki-3d-engine-internal.js";
 function makePartSet(registry) {
   return {
     registry,
-    characterIndex: [],
+    roles: [],
     compatibility: null,
     packages: new Map([
       ["parts/body", {}],
@@ -271,17 +271,17 @@ test("default selection never treats the first loaded colliding source as unique
   }
 });
 
-test("official preset with colliding sources fails closed", () => {
+test("runtime role default with colliding sources fails closed", () => {
   const fixture = makeFixture();
   const partSet = makeComposablePartSet(fixture.registry, ["head"]);
-  partSet.characterIndex = [{
-    id: 1,
-    character3dId: 2,
+  partSet.roles = [{
+    roleId: 2,
     characterId: 2,
     unit: "light_sound",
     bodyCostume3dId: 100,
     headCostume3dId: 797009,
     hairCostume3dId: 102,
+    roleRuntimePath: "roles/2/light_sound/role-runtime.msgpack.br",
   }];
   const wardrobe = new CustomWardrobeController({ resolveUrl: (value) => value });
 
