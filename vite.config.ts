@@ -1,9 +1,12 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
-import { copyBasisTranscoder } from "./vite.basis.plugin";
+import { copyBasisTranscoder, externalizeBrotliWasm } from "./vite.basis.plugin";
 
 export default defineConfig({
-  plugins: [copyBasisTranscoder()],
+  plugins: [externalizeBrotliWasm(), copyBasisTranscoder()],
+  worker: {
+    plugins: () => [externalizeBrotliWasm()],
+  },
   build: {
     lib: {
       entry: {
@@ -18,6 +21,7 @@ export default defineConfig({
     rollupOptions: {
       external: ["three", "@pixiv/three-vrm"],
       output: {
+        assetFileNames: "assets/[name]-[hash][extname]",
         globals: {
           three: "THREE",
           "@pixiv/three-vrm": "THREE_VRM",

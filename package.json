@@ -24,6 +24,9 @@
     "preview:capture": "vite preview --config vite.capture.config.ts",
     "test": "node --test tests/*.test.mjs",
     "test:config": "node --test tests/config.test.mjs",
+    "test:browser": "playwright test",
+    "test:browser:chromium": "playwright test --project=chromium",
+    "check:web-headers": "node scripts/check-web-asset-headers.mjs",
     "capture:server": "node capture-server.mjs"
   },
   "dependencies": {
@@ -32,6 +35,7 @@
     "three": "^0.178.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/three": "^0.178.1",
     "typescript": "^5.8.3",
     "vite": "^8.1.5"

@@ -39,6 +39,33 @@ test("runtime KTX2 textures use the Basis loader and correct HTTP type", () => {
   assert.match(textureLoaderSource, /this\.imageLoader\.loadAsync\(url\)/);
 });
 
+test("browser decoders share one external Brotli WASM asset", () => {
+  const decoderSource = readSource("src/runtime/runtimeMessagePackDecodeCore.ts");
+  const brotliSource = readSource("src/runtime/brotliWasmRuntime.ts");
+  assert.match(decoderSource, /from "\.\/brotliWasmRuntime"/);
+  assert.match(brotliSource, /brotli_wasm_bg\.wasm\?url&no-inline/);
+
+  const decoderFiles = [
+    ...fs.readdirSync(path.join(repoRoot, "dist"))
+      .filter(name => name.startsWith("runtimeMessagePackDecodeCore-") && name.endsWith(".js"))
+      .map(name => path.join(repoRoot, "dist", name)),
+    ...fs.readdirSync(path.join(repoRoot, "dist/assets"))
+      .filter(name => name.startsWith("runtimeDecodeWorker-") && name.endsWith(".js"))
+      .map(name => path.join(repoRoot, "dist/assets", name)),
+  ];
+  assert.ok(decoderFiles.length >= 2);
+  for (const file of decoderFiles) {
+    assert.ok(fs.statSync(file).size < 100_000, `${path.basename(file)} still inlines Brotli WASM`);
+  }
+  const wasmFiles = [
+    ...fs.readdirSync(path.join(repoRoot, "dist"))
+      .filter(name => name.startsWith("brotli_wasm_bg") && name.endsWith(".wasm")),
+    ...fs.readdirSync(path.join(repoRoot, "dist/assets"))
+      .filter(name => name.startsWith("brotli_wasm_bg") && name.endsWith(".wasm")),
+  ];
+  assert.equal(wasmFiles.length, 1);
+});
+
 test("local capture development does not listen on every interface by default", () => {
   const source = readSource("vite.capture.config.ts");
 

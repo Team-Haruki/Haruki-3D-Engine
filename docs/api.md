@@ -229,6 +229,16 @@ not browser-kernel inputs.
 Same-origin hosting is the simplest deployment. For a separate asset origin,
 allow the web origin with CORS.
 
+Use these response headers for a versioned web deployment:
+
+| File | `Content-Type` | Cache policy |
+| --- | --- | --- |
+| hashed `.js` / `.mjs` | `text/javascript` | `public, max-age=31536000, immutable` |
+| hashed `.wasm` | `application/wasm` | `public, max-age=31536000, immutable` |
+| `.ktx2` | `image/ktx2` | `public, max-age=31536000, immutable` |
+| `.msgpack.br` | `application/msgpack` | `public, max-age=31536000, immutable` |
+| entry HTML | `text/html` | revalidate; never `immutable` |
+
 Serve `.msgpack.br` as already-compressed binary data:
 
 ```http
@@ -262,6 +272,31 @@ The kernel does not create IndexedDB, Cache Storage, a service worker, or a
 second persistent asset cache. Browser eviction remains controlled by the
 browser; old runtime versions should be retired by the asset host's retention
 policy.
+
+Check a deployed asset origin with the repository's dependency-free header
+probe. Pass the web origin when assets are cross-origin so CORS and exposed
+version headers are checked too:
+
+```bash
+npm run check:web-headers -- \
+  --origin https://viewer.example \
+  https://assets.example/6.6.0.30/jp/parts/by-role/5/light_sound/part-registry.msgpack.br \
+  https://viewer.example/assets/brotli_wasm_bg-NfWIZley.wasm
+```
+
+The capture HTTP service deliberately uses `Cache-Control: no-store`; it is a
+capture/debug endpoint, not the production static asset host.
+
+Run the browser-kernel startup smoke test locally with Chromium:
+
+```bash
+PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser:chromium
+```
+
+CI runs the same test in Chromium, Firefox, and WebKit. WebKit is a useful
+Safari-engine approximation; release-critical Safari behavior still needs a
+real macOS Safari check. Linux Firefox needs a virtual display for WebGL, so
+run the full local matrix with `xvfb-run -a npm run test:browser`.
 
 ## Error Handling
 

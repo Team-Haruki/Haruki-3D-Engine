@@ -1,4 +1,6 @@
 node_modules
 dist
+test-results
+playwright-report
 .DS_Store
 haruki-3d-engine.config.json

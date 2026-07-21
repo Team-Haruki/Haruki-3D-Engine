@@ -637,7 +637,7 @@ function createSekaiOutlineMaterial(
         "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);",
         useSecondNormal
           ? "vec3 outlineDirection = normalize(tangent.xyz);"
-          : "vec3 outlineDirection = objectNormal;",
+          : "vec3 outlineDirection = normalize(normal);",
         "#ifdef USE_COLOR",
         "float outlineMask = clamp(color.r, 0.0, 1.0);",
         "float outlineScale = outlineMask;",

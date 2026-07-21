@@ -248,6 +248,8 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
   assert.ok(engineSource.includes("float distanceFovFactor = clamp((outlineFovDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
   assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);"));
+  assert.ok(engineSource.includes("vec3 outlineDirection = normalize(normal);"));
+  assert.ok(!engineSource.includes("vec3 outlineDirection = objectNormal;"));
   assert.ok(engineSource.includes("float outlineScale = outlineMask;"));
   assert.ok(!engineSource.includes("if (vOutlineMask <= 0.01) discard;"));
 });

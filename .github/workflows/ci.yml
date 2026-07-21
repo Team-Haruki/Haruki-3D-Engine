@@ -36,3 +36,9 @@ jobs:
 
       - name: Test engine
         run: npm test
+
+      - name: Install browser test engines
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Test Chrome, Firefox, and WebKit
+        run: xvfb-run -a npm run test:browser

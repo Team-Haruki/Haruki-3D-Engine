@@ -1,4 +1,4 @@
-import brotliWasm from "brotli-wasm";
+import brotliWasm from "./brotliWasmRuntime";
 import { decodeRuntimeMessagePack } from "../../runtime-binary-codec.mjs";
 
 export async function decodeRuntimeMessagePackBrotliDirect(bytes: ArrayBuffer) {

@@ -1,11 +1,14 @@
 import { defineConfig } from "vite";
 import { fileURLToPath } from "node:url";
-import { copyBasisTranscoder } from "./vite.basis.plugin";
+import { copyBasisTranscoder, externalizeBrotliWasm } from "./vite.basis.plugin";
 
 const projectRoot = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig({
-  plugins: [copyBasisTranscoder()],
+  plugins: [externalizeBrotliWasm(), copyBasisTranscoder()],
+  worker: {
+    plugins: () => [externalizeBrotliWasm()],
+  },
   server: {
     host: "127.0.0.1",
     port: 4173,
