@@ -116,7 +116,7 @@ export class SekaiExtraBoneRuntime {
   update(): void {
     for (const entry of this.entries) {
       this.sourceEuler.setFromQuaternion(entry.referenceNode.quaternion, entry.order);
-      const sign = entry.coefficient > 0 ? -1 : entry.coefficient < 0 ? 1 : 0;
+      const sign = Math.sign(entry.coefficient);
       this.targetEuler.set(0, 0, 0, entry.order);
       if (entry.axisX) {
         this.targetEuler.x = this.sourceEuler.x * sign;

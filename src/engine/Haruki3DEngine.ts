@@ -631,10 +631,11 @@ function createSekaiOutlineMaterial(
       "#include <begin_vertex>",
       [
         "#include <begin_vertex>",
-        "vec4 outlineViewPosition = modelViewMatrix * vec4(position, 1.0);",
-        "float outlineFovDistance = (2.41400003 / projectionMatrix[1][1]) * max(-outlineViewPosition.z, 0.001) * uSekaiOutlineFactor.z;",
-        "float distanceFovFactor = clamp((outlineFovDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);",
-        "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);",
+        "vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;",
+        "float outlineDistance = length(outlineWorldPosition - cameraPosition);",
+        "float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);",
+        "outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);",
+        "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);",
         useSecondNormal
           ? "vec3 outlineDirection = normalize(tangent.xyz);"
           : "vec3 outlineDirection = normalize(normal);",

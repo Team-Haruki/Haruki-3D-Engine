@@ -255,8 +255,12 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(engineSource.includes("blending: THREE.NoBlending"));
   assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineWidth = {"));
   assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
-  assert.ok(engineSource.includes("float distanceFovFactor = clamp((outlineFovDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
-  assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, distanceFovFactor);"));
+  assert.ok(engineSource.includes("vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;"));
+  assert.ok(engineSource.includes("float outlineDistance = length(outlineWorldPosition - cameraPosition);"));
+  assert.ok(engineSource.includes("float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
+  assert.ok(engineSource.includes("outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);"));
+  assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);"));
+  assert.ok(!engineSource.includes("2.41400003 / projectionMatrix[1][1]"));
   assert.ok(engineSource.includes("vec3 outlineDirection = normalize(normal);"));
   assert.ok(!engineSource.includes("vec3 outlineDirection = objectNormal;"));
   assert.ok(engineSource.includes("float outlineScale = outlineMask;"));
@@ -1185,7 +1189,7 @@ test("Sekai ExtraBone runtime follows official rotation order and coefficient di
   );
 
   assert.match(extraBoneSource, /"XYZ",\s+"XZY",\s+"YXZ",\s+"YZX",\s+"ZXY",\s+"ZYX"/s);
-  assert.match(extraBoneSource, /const sign = entry\.coefficient > 0 \? -1 : entry\.coefficient < 0 \? 1 : 0/);
+  assert.match(extraBoneSource, /const sign = Math\.sign\(entry\.coefficient\)/);
   assert.match(extraBoneSource, /function lerpQuaternion/);
   assert.match(extraBoneSource, /const sign = from\.dot\(to\) < 0 \? -1 : 1/);
   assert.match(extraBoneSource, /THREE\.MathUtils\.clamp\(alpha, 0, 1\)/);
