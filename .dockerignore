@@ -2,6 +2,7 @@
 .github/
 node_modules/
 dist/
+dist-consumer/
 Dockerfile
 .dockerignore
 *.log

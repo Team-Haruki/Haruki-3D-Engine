@@ -24,7 +24,7 @@ export function externalizeBrotliWasm(): Plugin {
   };
 }
 
-export function copyBasisTranscoder(): Plugin {
+export function copyBasisTranscoder(outputDir = "dist/basis"): Plugin {
   return {
     name: "haruki-basis-transcoder",
     configureServer(server) {
@@ -39,7 +39,7 @@ export function copyBasisTranscoder(): Plugin {
       });
     },
     closeBundle() {
-      const output = path.resolve("dist/basis");
+      const output = path.resolve(outputDir);
       fs.mkdirSync(output, { recursive: true });
       for (const name of basisFiles) {
         fs.copyFileSync(path.join(basisRoot, name), path.join(output, name));

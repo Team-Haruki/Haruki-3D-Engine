@@ -1,3 +1,5 @@
+import brotliWasmUrl from "./brotliWasmAsset";
+
 const workerThresholdBytes = 64 * 1024;
 
 type PendingDecode = {
@@ -20,13 +22,13 @@ export async function decodeRuntimeMessagePackBrotli(bytes: ArrayBuffer) {
   const id = nextDecodeId++;
   return new Promise<unknown>((resolve, reject) => {
     pendingDecodes.set(id, { resolve, reject });
-    worker.postMessage({ id, bytes }, [bytes]);
+    worker.postMessage({ id, bytes, wasmUrl: brotliWasmUrl }, [bytes]);
   });
 }
 
 async function decodeDirect(bytes: ArrayBuffer) {
   const { decodeRuntimeMessagePackBrotliDirect } = await import("./runtimeMessagePackDecodeCore");
-  return decodeRuntimeMessagePackBrotliDirect(bytes);
+  return decodeRuntimeMessagePackBrotliDirect(bytes, brotliWasmUrl);
 }
 
 function getDecodeWorker() {

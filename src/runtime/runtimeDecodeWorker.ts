@@ -1,11 +1,11 @@
 import { decodeRuntimeMessagePackBrotliDirect } from "./runtimeMessagePackDecodeCore";
 
-type DecodeRequest = { id: number; bytes: ArrayBuffer };
+type DecodeRequest = { id: number; bytes: ArrayBuffer; wasmUrl: string };
 
 globalThis.onmessage = async (event: MessageEvent<DecodeRequest>) => {
-  const { id, bytes } = event.data;
+  const { id, bytes, wasmUrl } = event.data;
   try {
-    const value = await decodeRuntimeMessagePackBrotliDirect(bytes);
+    const value = await decodeRuntimeMessagePackBrotliDirect(bytes, wasmUrl);
     globalThis.postMessage({ id, value }, { transfer: collectArrayBuffers(value) });
   } catch (error) {
     globalThis.postMessage({

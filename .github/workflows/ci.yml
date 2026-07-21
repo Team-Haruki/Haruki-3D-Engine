@@ -37,6 +37,9 @@ jobs:
       - name: Test engine
         run: npm test
 
+      - name: Test package consumer build
+        run: npm run test:consumer
+
       - name: Install browser test engines
         run: npx playwright install --with-deps chromium firefox webkit
 

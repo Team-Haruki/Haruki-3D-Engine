@@ -183,7 +183,7 @@ interface Haruki3DKernel {
   play(): void;
   pause(): void;
   resize(width: number, height: number): void;
-  destroy(): void;
+  destroy(): Promise<void>;
 }
 ```
 
@@ -192,9 +192,10 @@ interface Haruki3DKernel {
 - `pause()` stops scheduling frames without releasing the loaded character.
 - `resize(width, height)` accepts CSS-pixel dimensions, updates the camera and
   renders one frame. The engine caps output device pixel ratio at `2`.
-- `destroy()` is idempotent. It stops rendering and releases Three.js, WebGL,
-  texture, geometry, animation, and SpringBone resources after any in-flight
-  load settles.
+- `destroy()` is idempotent and returns one shared promise. It stops rendering
+  immediately, waits for any in-flight load, then releases Three.js, WebGL,
+  texture, geometry, animation, and SpringBone resources. Await it when the
+  caller needs deterministic cleanup.
 
 The canvas and its CSS remain caller-owned. The kernel does not install a
 `ResizeObserver`, pointer handlers, OrbitControls, page visibility handlers,
@@ -209,6 +210,12 @@ document.addEventListener("visibilitychange", () => {
   else kernel.play();
 });
 ```
+
+Calls that mutate the loaded character are serialized inside the engine.
+Concurrent `prepare()` calls for the exact same recipe share one request, and
+a failed preparation can be retried. The current public API does not advertise
+request cancellation or byte-level progress because an aborted fetch alone
+cannot safely roll back a partially applied character mutation.
 
 ## Runtime Asset Contract
 
@@ -297,6 +304,23 @@ CI runs the same test in Chromium, Firefox, and WebKit. WebKit is a useful
 Safari-engine approximation; release-critical Safari behavior still needs a
 real macOS Safari check. Linux Firefox needs a virtual display for WebGL, so
 run the full local matrix with `xvfb-run -a npm run test:browser`.
+
+For a real final Exporter output, run the opt-in end-to-end suite. It builds an
+isolated container on `127.0.0.1:60008`, mounts the runtime read-only, builds
+the no-UI consumer example, exercises KTX2/MessagePack/Brotli loading, part and
+role switches, failed-request recovery, and forced WebGL context loss, then
+removes its container and capture directory:
+
+```bash
+HARUKI_RUNTIME_E2E_ROOT=/path/to/pjsk-3d-output \
+  npm run test:browser:runtime:local
+```
+
+Override `HARUKI_RUNTIME_E2E_PORT` if `60008` is occupied. The software WebGL
+backends used by automated Chromium and WebKit expose forced context loss but
+may not emit a restore event; that case is reported as skipped. Firefox's
+software backend currently completes the restore path. A real GPU and macOS
+Safari remain the final context-restoration checks.
 
 ## Error Handling
 

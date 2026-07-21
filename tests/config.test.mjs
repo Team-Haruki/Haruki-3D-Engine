@@ -50,6 +50,7 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
       executable: "/usr/bin/chromium"
     },
     server: {
+      host: "127.0.0.1",
       port: 18080
     }
   }));
@@ -69,6 +70,7 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(runtime.chromium, "/usr/bin/chromium");
   assert.equal(server.runtimeRoot, "/data/runtime-from-config");
   assert.equal(server.captureOutputDir, "/data/captures-from-config");
+  assert.equal(server.host, "127.0.0.1");
   assert.equal(server.port, 18080);
   assert.equal(server.defaultWidth, 700);
   assert.equal(server.defaultHeight, 500);
@@ -94,6 +96,13 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
   assert.equal(server.tempCaptureTtlMs, 30 * 60 * 1000);
   assert.equal(server.captureGCIntervalMs, 15 * 60 * 1000);
   assert.equal(server.idleShutdownMs, 45 * 60 * 1000);
+});
+
+test("capture server bind host can be restricted without changing container defaults", () => {
+  assert.equal(resolveCaptureServerOptions({}, {}).host, "0.0.0.0");
+  assert.equal(resolveCaptureServerOptions({}, {
+    HARUKI_SERVER_HOST: "127.0.0.1",
+  }).host, "127.0.0.1");
 });
 
 test("capture server accepts documented HARUKI_CAPTURE camera and spring env names", () => {

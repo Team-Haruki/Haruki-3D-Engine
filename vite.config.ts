@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { copyBasisTranscoder, externalizeBrotliWasm } from "./vite.basis.plugin";
 
 export default defineConfig({
+  base: "./",
   plugins: [externalizeBrotliWasm(), copyBasisTranscoder()],
   worker: {
     plugins: () => [externalizeBrotliWasm()],

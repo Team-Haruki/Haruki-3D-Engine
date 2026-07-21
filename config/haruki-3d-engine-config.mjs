@@ -61,6 +61,7 @@ export function resolveCaptureServerOptions(config, env = process.env) {
     runtimeRoot: path.resolve(stringValue(env.HARUKI_RUNTIME_ROOT, capture.runtimeRoot, "/data/runtime")),
     captureOutputDir: path.resolve(stringValue(env.HARUKI_CAPTURE_OUTPUT_DIR, capture.outputDir, "/data/captures")),
     chromiumPath: stringValue(env.CHROMIUM, chromium.executable, "chromium"),
+    host: stringValue(env.HARUKI_SERVER_HOST, server.host, "0.0.0.0"),
     port: intAtLeast(env.PORT, server.port, 8080, 1),
     defaultWidth: intAtLeast(env.HARUKI_CAPTURE_WIDTH, capture.width, 1400, 320),
     defaultHeight: intAtLeast(env.HARUKI_CAPTURE_HEIGHT, capture.height, 1000, 320),

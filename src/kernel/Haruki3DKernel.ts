@@ -17,7 +17,7 @@ export type Haruki3DKernel = {
   play(): void;
   pause(): void;
   resize(width: number, height: number): void;
-  destroy(): void;
+  destroy(): Promise<void>;
 };
 
 const FIXED_FRAME_SECONDS = 1 / 60;
@@ -58,6 +58,7 @@ export function createHaruki3DKernelRuntime(
   let running = false;
   let destroyed = false;
   let loadSettled: Promise<void> = Promise.resolve();
+  let destroySettled: Promise<void> | null = null;
   let prepared: { key: string; promise: Promise<void> } | null = null;
   let lastFrameMs: number | null = null;
   let accumulator = 0;
@@ -150,15 +151,16 @@ export function createHaruki3DKernelRuntime(
       engine.renderFrame();
     },
     destroy() {
-      if (destroyed) {
-        return;
-      }
+      if (destroySettled) return destroySettled;
       destroyed = true;
       prepared = null;
       running = false;
       cancelAnimationFrame(animationFrame);
       animationFrame = 0;
-      void loadSettled.then(() => engine.destroy());
+      destroySettled = loadSettled.then(() => {
+        engine.destroy();
+      });
+      return destroySettled;
     },
   };
 }

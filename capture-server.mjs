@@ -21,6 +21,7 @@ const {
   runtimeRoot,
   captureOutputDir,
   chromiumPath,
+  host,
   port,
   defaultWidth,
   defaultHeight,
@@ -960,9 +961,10 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, "0.0.0.0", () => {
+server.listen(port, host, () => {
   console.log(JSON.stringify({
     service: "haruki-3d-capture",
+    host,
     port,
     runtimeRoot,
     captureOutputDir,

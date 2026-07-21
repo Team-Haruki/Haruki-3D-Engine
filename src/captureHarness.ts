@@ -378,4 +378,6 @@ async function bootstrapCapture() {
 
 void bootstrapCapture();
 
-window.addEventListener("beforeunload", () => engine.destroy());
+window.addEventListener("beforeunload", () => {
+  void engine.destroy();
+});

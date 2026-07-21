@@ -41,9 +41,15 @@ test("runtime KTX2 textures use the Basis loader and correct HTTP type", () => {
 
 test("browser decoders share one external Brotli WASM asset", () => {
   const decoderSource = readSource("src/runtime/runtimeMessagePackDecodeCore.ts");
+  const callerSource = readSource("src/runtime/runtimeMessagePackDecoder.ts");
+  const workerSource = readSource("src/runtime/runtimeDecodeWorker.ts");
   const brotliSource = readSource("src/runtime/brotliWasmRuntime.ts");
-  assert.match(decoderSource, /from "\.\/brotliWasmRuntime"/);
-  assert.match(brotliSource, /brotli_wasm_bg\.wasm\?url&no-inline/);
+  const assetSource = readSource("src/runtime/brotliWasmAsset.ts");
+  assert.match(decoderSource, /loadBrotliWasm\(wasmUrl\)/);
+  assert.match(callerSource, /postMessage\(\{ id, bytes, wasmUrl: brotliWasmUrl \}/);
+  assert.match(workerSource, /decodeRuntimeMessagePackBrotliDirect\(bytes, wasmUrl\)/);
+  assert.doesNotMatch(brotliSource, /brotli_wasm_bg/);
+  assert.match(assetSource, /brotli_wasm_bg\.wasm\?url&no-inline/);
 
   const decoderFiles = [
     ...fs.readdirSync(path.join(repoRoot, "dist"))
