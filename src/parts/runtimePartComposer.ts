@@ -505,6 +505,12 @@ export function composeRuntimeCombinedCharacterAsset(
   };
   const selectedHead = resolveHeadRuntime(partSet, resolvedSelection, selectedHeadEntry);
   const head = selectedHead && runtimePartSlot(selectedHead.part) === "head" ? selectedHead : hair;
+  const roleDefaultHair = runtimePartSlot(selectedHeadEntry) === "head"
+    ? resolveRoleDefaultHairRegistryEntry(partSet, selection)
+    : null;
+  const roleDefaultFaceRuntime = roleDefaultHair
+    ? partSet.packages.get(roleDefaultHair.packagePath) ?? null
+    : null;
   const accessory = selectedHead && runtimePartSlot(selectedHead.part) === "head_optional" ? selectedHead : null;
   const optional = resolveOptionalHeadRuntime(partSet, selection);
 
@@ -524,7 +530,8 @@ export function composeRuntimeCombinedCharacterAsset(
   const headManifest = normalizeHeadManifestFromParts(
     filterRuntimeContributors([head, accessory, optional].filter(Boolean) as PartRuntimePackage[], headHairComposition),
     resolvedSelection,
-    resolveUrl
+    resolveUrl,
+    roleDefaultFaceRuntime
   );
   const runtimeExtension = composeRuntimeExtension(
     contributingRuntimes,
@@ -543,6 +550,25 @@ export function composeRuntimeCombinedCharacterAsset(
     headAsset: headManifest,
     runtimeExtension,
   };
+}
+
+export function resolveRoleDefaultHairRegistryEntry(
+  partSet: PartPackageSet,
+  selection: Pick<CustomPartSelection, "characterId" | "unit">
+): PartRegistryEntry | null {
+  const role = partSet.roles.find((entry) =>
+    entry.characterId === selection.characterId && sameUnit(entry.unit, selection.unit)
+  );
+  if (!role) {
+    return null;
+  }
+  return partSet.registry.find((entry) =>
+    entry.characterId === role.characterId &&
+    sameUnit(entry.unit, role.unit) &&
+    entry.costume3dId === role.hairCostume3dId &&
+    tryRuntimePartSlot(entry) === "hair" &&
+    isUsableRegistryEntry(entry)
+  ) ?? null;
 }
 
 function findFirstLoadedPart(
@@ -985,7 +1011,8 @@ function applyRoleRuntimeMotion(
 function normalizeHeadManifestFromParts(
   runtimes: PartRuntimePackage[],
   selection: CustomPartSelection,
-  resolveUrl: (path: string) => string
+  resolveUrl: (path: string) => string,
+  roleDefaultFaceRuntime: PartRuntimePackage | null
 ): HeadAssetManifest {
   const head = runtimes.find((runtime) => runtimePartSlot(runtime.part) === "head") ?? runtimes[0];
   const manifest = cloneRecord(head.manifest) as HeadAssetManifest;
@@ -1025,7 +1052,11 @@ function normalizeHeadManifestFromParts(
     skeletonUrl: resolveMaybeUrl(manifest.source?.skeletonUrl, resolveHeadUrl),
     animationUrls: manifest.source?.animationUrls?.map((url) => resolveRequiredUrl(url, resolveHeadUrl)),
   };
-  manifest.faceMaterials = mergeMaterialSlots(manifest.faceMaterials, runtimes, resolveUrl);
+  manifest.faceMaterials = inheritMissingRoleEyeTextures(
+    mergeMaterialSlots(manifest.faceMaterials, runtimes, resolveUrl),
+    roleDefaultFaceRuntime,
+    resolveUrl
+  );
   manifest.morphChannelBindings = runtimes.flatMap((runtime) =>
     Array.isArray(runtime.morphChannelBindings) ? runtime.morphChannelBindings : []
   ) as HeadAssetManifest["morphChannelBindings"];
@@ -2183,11 +2214,35 @@ function normalizePathSegment(value: string | null | undefined): string | null {
 }
 
 type MaterialSlotWithTextures = {
+  materialKind?: string | null;
   mainTex?: string | null;
   shadowTex?: string | null;
   valueTex?: string | null;
   faceShadowTex?: string | null;
 };
+
+function inheritMissingRoleEyeTextures<T extends MaterialSlotWithTextures>(
+  selected: T[],
+  roleDefaultFaceRuntime: PartRuntimePackage | null,
+  resolveUrl: (path: string) => string
+): T[] {
+  if (!roleDefaultFaceRuntime) {
+    return selected;
+  }
+  const fallbacks = mergeMaterialSlots<T>([], [roleDefaultFaceRuntime], resolveUrl);
+  const fallbackByKind = new Map(
+    fallbacks
+      .filter((slot) => slot.materialKind === "eye" || slot.materialKind === "eyelight")
+      .map((slot) => [slot.materialKind, slot])
+  );
+  return selected.map((slot) => {
+    if (slot.mainTex || (slot.materialKind !== "eye" && slot.materialKind !== "eyelight")) {
+      return slot;
+    }
+    const fallback = fallbackByKind.get(slot.materialKind);
+    return fallback?.mainTex ? { ...slot, mainTex: fallback.mainTex } : slot;
+  });
+}
 
 function mergeMaterialSlots<T extends MaterialSlotWithTextures>(
   base: T[] | undefined,

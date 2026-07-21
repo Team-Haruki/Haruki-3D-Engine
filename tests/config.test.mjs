@@ -250,6 +250,12 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.match(engineSource, /return kinds\.length > 0 && kinds\.every\(isFaceLayerMaterialKind\);/);
   assert.match(engineSource, /return kinds\.find\(\(kind\) => !isFaceLayerMaterialKind\(kind\)\) \?\? kinds\[0\] \?\? null;/);
   assert.ok(engineSource.includes('material.name = "pjsk_shell_outline";'));
+  assert.ok(engineSource.includes("function extractSekaiOutlineMainTexture"));
+  assert.ok(engineSource.includes("map: sourceMainTex"));
+  assert.ok(engineSource.includes("SEKAI_OUTLINE_MATERIAL_TINT"));
+  assert.ok(engineSource.includes("SEKAI_OUTLINE_GLOBAL_BLENDING"));
+  assert.ok(engineSource.includes("vertexColors: false"));
+  assert.ok(engineSource.includes('useVertexColor ? "attribute vec3 color;" : ""'));
   assert.ok(engineSource.includes("transparent: false"));
   assert.ok(engineSource.includes("depthWrite: true"));
   assert.ok(engineSource.includes("blending: THREE.NoBlending"));
@@ -263,7 +269,7 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(!engineSource.includes("2.41400003 / projectionMatrix[1][1]"));
   assert.ok(engineSource.includes("vec3 outlineDirection = normalize(normal);"));
   assert.ok(!engineSource.includes("vec3 outlineDirection = objectNormal;"));
-  assert.ok(engineSource.includes("float outlineScale = outlineMask;"));
+  assert.ok(engineSource.includes("float outlineScale = clamp(color.r, 0.0, 1.0);"));
   assert.ok(!engineSource.includes("if (vOutlineMask <= 0.01) discard;"));
 });
 

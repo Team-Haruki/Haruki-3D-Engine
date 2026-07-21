@@ -147,6 +147,8 @@ const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR = 2.0;
 const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR = 6.0;
 const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE = 0.01 / 0.255;
 const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE = 0.6 / 0.255;
+const SEKAI_OUTLINE_MATERIAL_TINT = { r: 0.52, g: 0.47, b: 0.55 };
+const SEKAI_OUTLINE_GLOBAL_BLENDING = 0.5;
 const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
 const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(
   sekaiCostumeShopDirectionalLightRotationDegrees.x,
@@ -577,10 +579,21 @@ function shouldSkipOutlineMaterialKinds(kinds: unknown[]) {
   return kinds.length > 0 && kinds.every(isFaceLayerMaterialKind);
 }
 
+function extractSekaiOutlineMainTexture(material: THREE.Material): THREE.Texture | null {
+  if (material instanceof THREE.ShaderMaterial) {
+    const texture = material.uniforms.uMainTex?.value;
+    if (texture instanceof THREE.Texture) {
+      return texture;
+    }
+  }
+  return (material as THREE.Material & { map?: THREE.Texture | null }).map ?? null;
+}
+
 function createSekaiOutlineMaterial(
   useVertexColor: boolean,
   lighting?: MaterialLightingSettings,
-  useSecondNormal = false
+  useSecondNormal = false,
+  sourceMainTex: THREE.Texture | null = null
 ) {
   const sourceOutlineWidth = lighting?.outlineWidth && lighting.outlineWidth > 0
     ? lighting.outlineWidth
@@ -588,9 +601,15 @@ function createSekaiOutlineMaterial(
   const outlineWidthMin = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE;
   const outlineWidthMax = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE;
   const outlineClipOffset = THREE.MathUtils.clamp(lighting?.outlineOffset ?? 0, 0, 20) * 0.00008;
-  const outlineColor = new THREE.Color("#000000");
+  const sourceWeight = 1 - SEKAI_OUTLINE_GLOBAL_BLENDING;
+  const outlineColor = new THREE.Color().setRGB(
+    SEKAI_OUTLINE_MATERIAL_TINT.r * sourceWeight,
+    SEKAI_OUTLINE_MATERIAL_TINT.g * sourceWeight,
+    SEKAI_OUTLINE_MATERIAL_TINT.b * sourceWeight
+  );
   const material = new THREE.MeshBasicMaterial({
     color: outlineColor,
+    map: sourceMainTex,
     side: THREE.BackSide,
     transparent: false,
     opacity: 1,
@@ -600,7 +619,7 @@ function createSekaiOutlineMaterial(
     polygonOffset: true,
     polygonOffsetFactor: 1,
     polygonOffsetUnits: 1,
-    vertexColors: useVertexColor,
+    vertexColors: false,
   });
   material.name = "pjsk_shell_outline";
   material.userData.pjskBaseOutlineColor = `#${outlineColor.getHexString()}`;
@@ -624,6 +643,7 @@ function createSekaiOutlineMaterial(
         "uniform vec2 uSekaiOutlineWidth;",
         "uniform vec3 uSekaiOutlineFactor;",
         "uniform float uOutlineClipOffset;",
+        useVertexColor ? "attribute vec3 color;" : "",
         useSecondNormal ? "attribute vec4 tangent;" : "",
       ].join("\n")
     );
@@ -639,12 +659,9 @@ function createSekaiOutlineMaterial(
         useSecondNormal
           ? "vec3 outlineDirection = normalize(tangent.xyz);"
           : "vec3 outlineDirection = normalize(normal);",
-        "#ifdef USE_COLOR",
-        "float outlineMask = clamp(color.r, 0.0, 1.0);",
-        "float outlineScale = outlineMask;",
-        "#else",
-        "float outlineScale = 1.0;",
-        "#endif",
+        useVertexColor
+          ? "float outlineScale = clamp(color.r, 0.0, 1.0);"
+          : "float outlineScale = 1.0;",
         "transformed += outlineDirection * outlineWidth * outlineScale;",
       ].join("\n")
     );
@@ -2332,6 +2349,9 @@ export class Haruki3DEngine {
 
       const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const sourceMaterialNames = meshMaterials.map((material) => material.name);
+      const sourceMaterial = meshMaterials.find((material) =>
+        !isFaceLayerMaterialKind(material.userData.pjskMaterialKind)
+      ) ?? meshMaterials[0];
       const lighting = meshMaterials
         .map((material) => material.userData.pjskLighting as MaterialLightingSettings | undefined)
         .find(Boolean);
@@ -2341,7 +2361,8 @@ export class Haruki3DEngine {
       const outlineMaterial = createSekaiOutlineMaterial(
         Boolean(mesh.geometry.getAttribute("color")),
         lighting,
-        useSecondNormal
+        useSecondNormal,
+        extractSekaiOutlineMainTexture(sourceMaterial)
       );
       this.characterLighting.applyOutlineMaterial(outlineMaterial);
       const outline = mesh instanceof THREE.SkinnedMesh

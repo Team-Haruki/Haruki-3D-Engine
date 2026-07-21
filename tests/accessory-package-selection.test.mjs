@@ -360,3 +360,62 @@ test("legacy optional-head selector rejects independent sources with the same ra
     /Ambiguous head_optional registry entry.*cannot identify one original source/
   );
 });
+
+test("complete heads inherit missing role eye textures without importing default hair geometry", async () => {
+  const fixture = makeFixture();
+  const defaultHair = {
+    costume3dId: 202,
+    partType: "hair",
+    characterId: 2,
+    unit: "light_sound",
+    packagePath: "parts/default-hair",
+    status: "available",
+  };
+  const registry = [...fixture.registry, defaultHair];
+  const partSet = makeComposablePartSet(registry, ["head"]);
+  partSet.roles = [{
+    roleId: 2,
+    characterId: 2,
+    unit: "light_sound",
+    bodyCostume3dId: 100,
+    headCostume3dId: 3,
+    hairCostume3dId: 202,
+    roleRuntimePath: "roles/2/light_sound/role-runtime.msgpack.br",
+  }];
+  const completeHead = partSet.packages.get(fixture.exclusive.packagePath);
+  completeHead.materialSlots = [
+    { name: "mtl_chr_eye_00", materialKind: "eye" },
+    { name: "mtl_chr_ehl_00", materialKind: "eyelight" },
+    { name: "mtl_chr_00", materialKind: "face", mainTex: "custom-face.ktx2" },
+  ];
+  completeHead.characterTextures = { face: "custom-face.ktx2" };
+  const defaultHairRuntime = partSet.packages.get(defaultHair.packagePath);
+  defaultHairRuntime.materialSlots = [
+    { name: "mtl_chr_eye_00", materialKind: "eye", mainTex: "default-eye.ktx2" },
+    { name: "mtl_chr_ehl_00", materialKind: "eyelight", mainTex: "default-eyelight.ktx2" },
+    { name: "mtl_chr_00", materialKind: "face", mainTex: "default-face.ktx2" },
+  ];
+  defaultHairRuntime.characterTextures = {
+    eye: "default-eye.ktx2",
+    eyelight: "default-eyelight.ktx2",
+    face: "default-face.ktx2",
+  };
+
+  const wardrobe = new CustomWardrobeController({ resolveUrl: (value) => value });
+  wardrobe.loadPartPackageSet(partSet, { composeDefault: false });
+  wardrobe.selectRole(2, "light_sound");
+  const combined = await wardrobe.setCustomSelection(selection(fixture.exclusive.packagePath));
+
+  assert.deepEqual(
+    combined.headAsset.faceMaterials.map(({ materialKind, mainTex }) => ({ materialKind, mainTex })),
+    [
+      { materialKind: "eye", mainTex: "parts/default-hair/default-eye.ktx2" },
+      { materialKind: "eyelight", mainTex: "parts/default-hair/default-eyelight.ktx2" },
+      { materialKind: "face", mainTex: `${fixture.exclusive.packagePath}/custom-face.ktx2` },
+    ]
+  );
+  assert.deepEqual(
+    combined.runtimeExtension.textureRoles.map((entry) => entry.source),
+    ["parts/body", fixture.exclusive.packagePath]
+  );
+});

@@ -5,7 +5,9 @@ import {
   listSelectableParts,
   resolveHeadRegistryEntry,
   resolveOptionalHeadRegistryEntry,
+  resolveRoleDefaultHairRegistryEntry,
   runtimeRoleId,
+  tryRuntimePartSlot,
   type CustomPartSelection,
   type PartPackageSet,
   type PartRegistryEntry,
@@ -166,11 +168,15 @@ export class CustomWardrobeController {
     if (!this.partSet || !this.options.loadPartRuntime) {
       return;
     }
+    const selectedHead = resolveHeadRegistryEntry(this.partSet, selection);
     const entries = [
       this.findRegistryEntry(selection, "body", selection.bodyCostume3dId),
-      resolveHeadRegistryEntry(this.partSet, selection),
+      selectedHead,
       this.findRegistryEntry(selection, "hair", selection.hairCostume3dId),
       resolveOptionalHeadRegistryEntry(this.partSet, selection),
+      tryRuntimePartSlot(selectedHead) === "head"
+        ? resolveRoleDefaultHairRegistryEntry(this.partSet, selection)
+        : null,
     ].filter((entry): entry is PartRegistryEntry =>
       entry !== null && entry.status !== "empty"
     );
