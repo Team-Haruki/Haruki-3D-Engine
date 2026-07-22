@@ -297,6 +297,7 @@ getCaptureWindow().__HARUKI_CAPTURE_REQUEST__ = async (
   request: HarukiCaptureRolePartsRequest
 ) => {
   try {
+    await engine.waitForPostProcessorReady();
     const config = readCaptureConfig();
     if (!config) {
       throw new Error("Missing captureBase for role parts capture.");
@@ -352,6 +353,7 @@ async function bootstrapCapture() {
     return;
   }
   try {
+    await engine.waitForPostProcessorReady();
     getCaptureWindow().__PJSK_CAPTURE_READY__ = false;
     document.body.dataset.captureReady = "false";
     engine.setPresentationMode("capture");
@@ -369,6 +371,7 @@ async function bootstrapCapture() {
       config.utjTraceBones,
       config.utjTraceMaxEvents
     );
+    engine.renderFrame();
     getCaptureWindow().__PJSK_CAPTURE_READY__ = true;
     document.body.dataset.captureReady = "true";
   } catch (error) {

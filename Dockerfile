@@ -25,8 +25,8 @@ ENV NODE_ENV=production \
   HARUKI_CAPTURE_TEMP_TTL=6h \
   HARUKI_CAPTURE_GC_INTERVAL=1h \
   HARUKI_CAPTURE_IDLE_SHUTDOWN=1h \
-  HARUKI_CAPTURE_WIDTH=1400 \
-  HARUKI_CAPTURE_HEIGHT=1000 \
+  HARUKI_CAPTURE_WIDTH=1024 \
+  HARUKI_CAPTURE_HEIGHT=1024 \
   HARUKI_CAPTURE_SCALE=2 \
   HARUKI_CAPTURE_WARMUP_FRAMES=60 \
   HARUKI_CAPTURE_WARMUP_MODE=animation \
@@ -41,6 +41,7 @@ COPY config ./config
 COPY capture-server.mjs ./capture-server.mjs
 COPY png-rgba.mjs ./png-rgba.mjs
 COPY region-routing.mjs runtime-binary-codec.mjs ./
+COPY THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
 
 EXPOSE 8080
 CMD ["node", "capture-server.mjs"]

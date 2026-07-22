@@ -30,7 +30,7 @@ type Haruki3DKernelEngine = Pick<
   | "renderFrame"
   | "setViewportSize"
   | "stepRuntimeFrame"
->;
+> & Partial<Pick<Haruki3DEngine, "waitForPostProcessorReady">>;
 
 export function createHaruki3DKernel(
   options: Haruki3DKernelOptions
@@ -76,7 +76,10 @@ export function createHaruki3DKernelRuntime(
     if (prepared?.key === key) {
       return prepared.promise;
     }
-    const loading = engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl })
+    const loading = Promise.all([
+      engine.waitForPostProcessorReady?.() ?? Promise.resolve(),
+      engine.loadRenderRecipe({ ...recipe, baseUrl: assetBaseUrl }),
+    ])
       .then(() => undefined);
     prepared = { key, promise: loading };
     loadSettled = loading.then(() => undefined, () => undefined);

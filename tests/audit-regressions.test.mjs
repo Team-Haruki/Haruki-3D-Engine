@@ -114,8 +114,8 @@ function loadCaptureRequestValidator() {
       invisibleHeight: 0.2,
       directionalShadow: false,
     },
-    defaultWidth: 1400,
-    defaultHeight: 1000,
+    defaultWidth: 1024,
+    defaultHeight: 1024,
     defaultScale: 2,
     defaultTimeoutMs: 45000,
     MAX_CAPTURE_DIMENSION: 2048,
@@ -330,6 +330,7 @@ test("capture request bounds renderer work supplied by callers", () => {
   const request = validateCaptureRequest(validCaptureRequest({
     width: 999999,
     height: 999999,
+    scale: 1,
     warmupMs: 999999999,
     warmupFrames: 999999999,
     timeoutMs: 999999999,
@@ -342,6 +343,18 @@ test("capture request bounds renderer work supplied by callers", () => {
   assert.ok(request.warmupFrames <= 600);
   assert.ok(request.timeoutMs <= 300000);
   assert.ok(request.traceUtjMaxEvents <= 10000);
+});
+
+test("capture request rejects stretched or larger-than-2K physical output", () => {
+  const validateCaptureRequest = loadCaptureRequestValidator();
+  assert.throws(
+    () => validateCaptureRequest(validCaptureRequest({ width: 1024, height: 768 })),
+    /must be square/
+  );
+  assert.throws(
+    () => validateCaptureRequest(validCaptureRequest({ width: 2048, height: 2048, scale: 2 })),
+    /must not exceed 2048 physical pixels/
+  );
 });
 
 test("DevTools commands reject when Chromium does not answer", async () => {

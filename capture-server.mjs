@@ -75,6 +75,13 @@ const MAX_CAPTURE_TIMEOUT_MS = 300000;
 const MAX_TRACE_EVENTS = 10000;
 let pendingCaptureCount = 0;
 
+if (defaultWidth !== defaultHeight) {
+  throw new Error(`Capture defaults must be square, got ${defaultWidth}x${defaultHeight}.`);
+}
+if (defaultWidth * defaultScale > MAX_CAPTURE_DIMENSION) {
+  throw new Error(`Capture defaults must not exceed ${MAX_CAPTURE_DIMENSION} physical pixels per side.`);
+}
+
 function enqueue(task) {
   if (pendingCaptureCount >= MAX_PENDING_CAPTURES) {
     throw new Error("Capture queue is full.");
@@ -285,6 +292,15 @@ function validateCaptureRequest(input) {
       throw new Error("headPackagePath must be a non-empty string of at most 1024 characters without NUL bytes.");
     }
   }
+  const width = readIntInRange(input.width, defaultWidth, 320, MAX_CAPTURE_DIMENSION);
+  const height = readIntInRange(input.height, defaultHeight, 320, MAX_CAPTURE_DIMENSION);
+  const scale = Math.min(Math.max(readNumber(input.scale, defaultScale), 1), 2);
+  if (width !== height) {
+    throw new Error(`Capture output must be square, got ${width}x${height}.`);
+  }
+  if (width * scale > MAX_CAPTURE_DIMENSION) {
+    throw new Error(`Capture output must not exceed ${MAX_CAPTURE_DIMENSION} physical pixels per side.`);
+  }
   return {
     imageId,
     cacheMode,
@@ -319,9 +335,9 @@ function validateCaptureRequest(input) {
     faceSdfDebugMode: normalizeFaceSdfDebugMode(input.faceSdfDebugMode),
     faceSdfDebugLightMode: normalizeFaceSdfDebugLightMode(input.faceSdfDebugLightMode),
     projectedShadow: readProjectedShadow(input.projectedShadow),
-    width: readIntInRange(input.width, defaultWidth, 320, MAX_CAPTURE_DIMENSION),
-    height: readIntInRange(input.height, defaultHeight, 320, MAX_CAPTURE_DIMENSION),
-    scale: Math.min(Math.max(readNumber(input.scale, defaultScale), 1), 2),
+    width,
+    height,
+    scale,
     timeoutMs: readIntInRange(input.timeoutMs, defaultTimeoutMs, 5000, MAX_CAPTURE_TIMEOUT_MS),
     traceUtjBones: readStringList(input.traceUtjBones, input.traceUtjBone),
     traceUtjMaxEvents: Math.min(
@@ -891,7 +907,14 @@ function scheduleIdleShutdown() {
 }
 
 async function captureRoleParts(input) {
-  const request = validateCaptureRequest(input);
+  let request;
+  try {
+    request = validateCaptureRequest(input);
+  } catch (error) {
+    const invalidRequest = new Error(error instanceof Error ? error.message : String(error));
+    invalidRequest.statusCode = 400;
+    throw invalidRequest;
+  }
   fs.mkdirSync(captureOutputDir, { recursive: true });
   const outputPath = path.join(captureOutputDir, `${request.imageId}.png`);
   const tempOutputPath = path.join(
@@ -970,7 +993,7 @@ const server = http.createServer(async (req, res) => {
     res.end("method not allowed");
   } catch (error) {
     scheduleIdleShutdown();
-    sendJson(res, 500, {
+    sendJson(res, Number.isInteger(error?.statusCode) ? error.statusCode : 500, {
       ok: false,
       error: error instanceof Error ? error.message : String(error),
     });

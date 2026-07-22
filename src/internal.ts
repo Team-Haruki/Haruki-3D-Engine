@@ -125,8 +125,17 @@ export {
 export {
   CharacterLightingRuntime,
   bodyDebugModeToUniform,
+  evaluateSekaiOutlineFovFactor,
   faceSdfDebugModeToUniform,
+  sekaiCostumeShopOutlineSettings,
 } from "./engine/characterLightingRuntime";
+export {
+  SekaiPreviewPostProcessor,
+  rcasSharpnessStopsToLinear,
+  resolveSekaiPreviewPostProcessSize,
+  resolveSekaiPreviewPixelRatio,
+  sekaiPreviewPostProcessDefaults,
+} from "./engine/sekaiPreviewPostProcessor";
 export {
   buildUnityPrefabSourceGraph,
   createUnityPrefabConstraintRuntime,

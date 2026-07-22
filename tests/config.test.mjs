@@ -99,7 +99,11 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
 });
 
 test("capture server bind host can be restricted without changing container defaults", () => {
-  assert.equal(resolveCaptureServerOptions({}, {}).host, "0.0.0.0");
+  const defaults = resolveCaptureServerOptions({}, {});
+  assert.equal(defaults.host, "0.0.0.0");
+  assert.equal(defaults.defaultWidth, 1024);
+  assert.equal(defaults.defaultHeight, 1024);
+  assert.equal(defaults.defaultScale, 2);
   assert.equal(resolveCaptureServerOptions({}, {
     HARUKI_SERVER_HOST: "127.0.0.1",
   }).host, "127.0.0.1");
@@ -241,6 +245,10 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
   );
+  const prefabRuntimeSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
+    "utf8"
+  );
 
   assert.ok(engineSource.includes("function shouldSkipOutlineMaterialKinds"));
   assert.ok(engineSource.includes("function getOutlineSourceMaterialKinds"));
@@ -261,6 +269,10 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(engineSource.includes("blending: THREE.NoBlending"));
   assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineWidth = {"));
   assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
+  assert.ok(engineSource.includes("sekaiCostumeShopOutlineSettings.widthMin"));
+  assert.ok(engineSource.includes("evaluateSekaiOutlineFovFactor(camera.fov)"));
+  assert.ok(!engineSource.includes("SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE"));
+  assert.ok(!engineSource.includes("polygonOffset: true"));
   assert.ok(engineSource.includes("vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;"));
   assert.ok(engineSource.includes("float outlineDistance = length(outlineWorldPosition - cameraPosition);"));
   assert.ok(engineSource.includes("float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
@@ -268,6 +280,11 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);"));
   assert.ok(!engineSource.includes("2.41400003 / projectionMatrix[1][1]"));
   assert.ok(engineSource.includes("vec3 outlineDirection = normalize(normal);"));
+  assert.ok(engineSource.includes("vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));"));
+  assert.ok(engineSource.includes("cross(baseNormal, baseTangent) * tangent.w"));
+  assert.ok(prefabRuntimeSource.includes('geometry.setAttribute("tangent"'));
+  assert.ok(prefabRuntimeSource.includes('geometry.setAttribute("uv2"'));
+  assert.ok(!prefabRuntimeSource.includes('geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(source.uv1!'));
   assert.ok(!engineSource.includes("vec3 outlineDirection = objectNormal;"));
   assert.ok(engineSource.includes("float outlineScale = clamp(color.r, 0.0, 1.0);"));
   assert.ok(!engineSource.includes("if (vOutlineMask <= 0.01) discard;"));
@@ -343,8 +360,9 @@ test("docker runtime image includes capture server support modules", () => {
   assert.match(dockerfile, /COPY capture-server\.mjs \.\/capture-server\.mjs/);
   assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
   assert.match(dockerfile, /runtime-binary-codec\.mjs/);
-  assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1400/);
-  assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1000/);
+  assert.match(dockerfile, /COPY THIRD_PARTY_NOTICES\.md \.\/THIRD_PARTY_NOTICES\.md/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1024/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1024/);
   assert.match(dockerfile, /HARUKI_CAPTURE_SCALE=2/);
   assert.match(dockerfile, /HARUKI_CAPTURE_WARMUP_FRAMES=60/);
   assert.match(dockerfile, /HARUKI_CAPTURE_SPRING_RUNTIME_MODE=unity-prefab/);

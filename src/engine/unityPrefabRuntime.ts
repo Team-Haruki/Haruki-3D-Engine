@@ -137,8 +137,10 @@ type RuntimeNativeMeshSource = {
   submeshes?: RuntimeNativeSubmeshSource[];
   positions?: RuntimeNumericArray;
   normals?: RuntimeNumericArray;
+  tangents?: RuntimeNumericArray;
   uv0?: RuntimeNumericArray;
   uv1?: RuntimeNumericArray;
+  uv2?: RuntimeNumericArray;
   colors?: RuntimeNumericArray;
   skinIndices?: RuntimeNumericArray;
   skinWeights?: RuntimeNumericArray;
@@ -731,12 +733,17 @@ function buildUnityRuntimeNativeGeometry(source: RuntimeNativeMeshSource) {
   if ((source.normals?.length ?? 0) === vertexCount * 3) {
     geometry.setAttribute("normal", new THREE.Float32BufferAttribute(source.normals!, 3));
   }
+  if ((source.tangents?.length ?? 0) === vertexCount * 4) {
+    geometry.setAttribute("tangent", new THREE.Float32BufferAttribute(source.tangents!, 4));
+  }
   if ((source.uv0?.length ?? 0) === vertexCount * 2) {
     geometry.setAttribute("uv", new THREE.Float32BufferAttribute(source.uv0!, 2));
   }
   if ((source.uv1?.length ?? 0) === vertexCount * 2) {
     geometry.setAttribute("uv1", new THREE.Float32BufferAttribute(source.uv1!, 2));
-    geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(source.uv1!, 2));
+  }
+  if ((source.uv2?.length ?? 0) === vertexCount * 2) {
+    geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(source.uv2!, 2));
   }
   if ((source.colors?.length ?? 0) === vertexCount * 4) {
     geometry.setAttribute("color", new THREE.Float32BufferAttribute(source.colors!, 4));

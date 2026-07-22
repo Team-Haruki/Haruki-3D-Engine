@@ -109,6 +109,8 @@ import {
 } from "./headMaterialRuntime";
 import {
   CharacterLightingRuntime,
+  evaluateSekaiOutlineFovFactor,
+  sekaiCostumeShopOutlineSettings,
   type BodyDebugMode,
   type FaceSdfDebugLightMode,
   type FaceSdfDebugMode,
@@ -116,6 +118,10 @@ import {
   type RenderIsolationMode,
 } from "./characterLightingRuntime";
 import { RuntimeTextureLoader } from "./runtimeTextureLoader";
+import {
+  SekaiPreviewPostProcessor,
+  resolveSekaiPreviewPixelRatio,
+} from "./sekaiPreviewPostProcessor";
 
 export type {
   BodyDebugMode,
@@ -143,10 +149,6 @@ export type {
   ProjectedShadowSettingsInput,
   RuntimeProjectedShadowDebug,
 } from "./projectedShadow";
-const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR = 2.0;
-const SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR = 6.0;
-const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE = 0.01 / 0.255;
-const SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE = 0.6 / 0.255;
 const SEKAI_OUTLINE_MATERIAL_TINT = { r: 0.52, g: 0.47, b: 0.55 };
 const SEKAI_OUTLINE_GLOBAL_BLENDING = 0.5;
 const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
@@ -595,11 +597,6 @@ function createSekaiOutlineMaterial(
   useSecondNormal = false,
   sourceMainTex: THREE.Texture | null = null
 ) {
-  const sourceOutlineWidth = lighting?.outlineWidth && lighting.outlineWidth > 0
-    ? lighting.outlineWidth
-    : 0.001;
-  const outlineWidthMin = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE;
-  const outlineWidthMax = sourceOutlineWidth * SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MAX_SCALE;
   const outlineClipOffset = THREE.MathUtils.clamp(lighting?.outlineOffset ?? 0, 0, 20) * 0.00008;
   const sourceWeight = 1 - SEKAI_OUTLINE_GLOBAL_BLENDING;
   const outlineColor = new THREE.Color().setRGB(
@@ -616,24 +613,28 @@ function createSekaiOutlineMaterial(
     depthWrite: true,
     depthTest: true,
     blending: THREE.NoBlending,
-    polygonOffset: true,
-    polygonOffsetFactor: 1,
-    polygonOffsetUnits: 1,
     vertexColors: false,
   });
+  const outlineFactor = new THREE.Vector3(
+    sekaiCostumeShopOutlineSettings.distanceNear,
+    1 / (
+      sekaiCostumeShopOutlineSettings.distanceFar -
+      sekaiCostumeShopOutlineSettings.distanceNear
+    ),
+    evaluateSekaiOutlineFovFactor(25)
+  );
   material.name = "pjsk_shell_outline";
   material.userData.pjskBaseOutlineColor = `#${outlineColor.getHexString()}`;
   material.userData.pjskBaseOutlineOpacity = 1;
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSekaiOutlineWidth = {
-      value: new THREE.Vector2(outlineWidthMin, outlineWidthMax),
+      value: new THREE.Vector2(
+        sekaiCostumeShopOutlineSettings.widthMin,
+        sekaiCostumeShopOutlineSettings.widthMax
+      ),
     };
     shader.uniforms.uSekaiOutlineFactor = {
-      value: new THREE.Vector3(
-        SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR,
-        1 / (SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_FAR - SEKAI_OUTLINE_RECONSTRUCTION_DISTANCE_NEAR),
-        1
-      ),
+      value: outlineFactor,
     };
     shader.uniforms.uOutlineClipOffset = { value: outlineClipOffset };
     shader.vertexShader = shader.vertexShader.replace(
@@ -645,6 +646,8 @@ function createSekaiOutlineMaterial(
         "uniform float uOutlineClipOffset;",
         useVertexColor ? "attribute vec3 color;" : "",
         useSecondNormal ? "attribute vec4 tangent;" : "",
+        useSecondNormal ? "attribute vec2 uv1;" : "",
+        useSecondNormal ? "attribute vec2 uv2;" : "",
       ].join("\n")
     );
     shader.vertexShader = shader.vertexShader.replace(
@@ -657,7 +660,13 @@ function createSekaiOutlineMaterial(
         "outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);",
         "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);",
         useSecondNormal
-          ? "vec3 outlineDirection = normalize(tangent.xyz);"
+          ? [
+              "vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));",
+              "vec3 baseNormal = normalize(normal);",
+              "vec3 baseTangent = normalize(tangent.xyz);",
+              "vec3 baseBitangent = normalize(cross(baseNormal, baseTangent) * tangent.w);",
+              "vec3 outlineDirection = normalize(baseTangent * secondNormalTS.x + baseBitangent * secondNormalTS.y + baseNormal * secondNormalTS.z);",
+            ].join("\n")
           : "vec3 outlineDirection = normalize(normal);",
         useVertexColor
           ? "float outlineScale = clamp(color.r, 0.0, 1.0);"
@@ -673,6 +682,11 @@ function createSekaiOutlineMaterial(
       ].join("\n")
     );
     shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", "");
+  };
+  material.onBeforeRender = (_renderer, _scene, camera) => {
+    if (camera instanceof THREE.PerspectiveCamera) {
+      outlineFactor.z = evaluateSekaiOutlineFovFactor(camera.fov);
+    }
   };
   return material;
 }
@@ -847,6 +861,7 @@ export class Haruki3DEngine {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly postProcessor: SekaiPreviewPostProcessor;
   private readonly controls: HarukiCameraControls | null;
   private readonly cameraTarget = new THREE.Vector3();
   private readonly autoRender: boolean;
@@ -970,14 +985,21 @@ export class Haruki3DEngine {
     this.camera.position.copy(initialCameraPose.position);
 
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: false,
       stencil: true,
       canvas: options.canvas,
     });
     this.renderer.autoClearStencil = true;
-    const initialPixelRatio = Math.min(window.devicePixelRatio, 2);
+    const initialPixelRatio = resolveSekaiPreviewPixelRatio(
+      width,
+      height,
+      window.devicePixelRatio
+    );
     this.renderer.setPixelRatio(initialPixelRatio);
     this.renderer.setSize(width, height, this.ownsCanvas);
+    this.postProcessor = new SekaiPreviewPostProcessor(this.renderer);
+    const initialDrawingBufferSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.postProcessor.setSize(initialDrawingBufferSize.x, initialDrawingBufferSize.y);
     this.viewportWidth = width;
     this.viewportHeight = height;
     this.viewportPixelRatio = initialPixelRatio;
@@ -1716,11 +1738,19 @@ export class Haruki3DEngine {
     return this.renderer.domElement;
   }
 
+  waitForPostProcessorReady() {
+    return this.postProcessor.waitUntilReady();
+  }
+
   setViewportSize(width: number, height: number) {
     const viewportMinimum = this.ownsCanvas ? 320 : 1;
     const nextWidth = Math.max(Math.trunc(width) || 0, viewportMinimum);
     const nextHeight = Math.max(Math.trunc(height) || 0, viewportMinimum);
-    const nextPixelRatio = Math.min(window.devicePixelRatio, 2);
+    const nextPixelRatio = resolveSekaiPreviewPixelRatio(
+      nextWidth,
+      nextHeight,
+      window.devicePixelRatio
+    );
     if (
       this.viewportWidth === nextWidth &&
       this.viewportHeight === nextHeight &&
@@ -1732,6 +1762,8 @@ export class Haruki3DEngine {
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(nextPixelRatio);
     this.renderer.setSize(nextWidth, nextHeight, this.ownsCanvas);
+    const drawingBufferSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.postProcessor.setSize(drawingBufferSize.x, drawingBufferSize.y);
     this.updateCaptureBackgroundTexture(nextWidth, nextHeight);
     this.viewportWidth = nextWidth;
     this.viewportHeight = nextHeight;
@@ -1739,8 +1771,7 @@ export class Haruki3DEngine {
   }
 
   renderFrame() {
-    this.renderer.setRenderTarget(null);
-    this.renderer.render(this.scene, this.camera);
+    this.postProcessor.render(this.scene, this.camera);
   }
 
   stepRuntimeFrame(
@@ -2056,6 +2087,7 @@ export class Haruki3DEngine {
     this.projectedShadow.dispose();
     this.textureLoader.dispose();
     this.captureBackgroundTexture?.dispose();
+    this.postProcessor.dispose();
     this.renderer.dispose();
     if (this.ownsCanvas && this.renderer.domElement.parentElement === this.container) {
       this.renderer.domElement.remove();
@@ -2357,7 +2389,9 @@ export class Haruki3DEngine {
         .find(Boolean);
       const useSecondNormal =
         (lighting?.useOutlineSecondNormal ?? 0) > 0.5 &&
-        Boolean(mesh.geometry.getAttribute("tangent"));
+        Boolean(mesh.geometry.getAttribute("tangent")) &&
+        Boolean(mesh.geometry.getAttribute("uv1")) &&
+        Boolean(mesh.geometry.getAttribute("uv2"));
       const outlineMaterial = createSekaiOutlineMaterial(
         Boolean(mesh.geometry.getAttribute("color")),
         lighting,

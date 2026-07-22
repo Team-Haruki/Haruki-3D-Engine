@@ -19,6 +19,45 @@ import {
   type RuntimeMaterialDebug,
 } from "./characterMaterialRuntime";
 
+export const sekaiCostumeShopOutlineSettings = {
+  widthMin: 0.0004,
+  widthMax: 0.0095,
+  distanceNear: 0.45,
+  distanceFar: 20,
+} as const;
+
+const sekaiOutlineFovCurve = {
+  startTime: -0.013763427734375,
+  startValue: 27.81246566772461,
+  startOutTangent: -0.13214513659477234,
+  endTime: 100.92341613769531,
+  endValue: -0.03620624542236328,
+  endInTangent: -0.5713597536087036,
+} as const;
+
+/** Reconstructs the captured ClampForever, unweighted Unity FOV curve. */
+export function evaluateSekaiOutlineFovFactor(fieldOfView: number) {
+  const fov = Number.isFinite(fieldOfView) ? fieldOfView : 25;
+  const curve = sekaiOutlineFovCurve;
+  let curveValue: number;
+  if (fov <= curve.startTime) {
+    curveValue = curve.startValue;
+  } else if (fov >= curve.endTime) {
+    curveValue = curve.endValue;
+  } else {
+    const duration = curve.endTime - curve.startTime;
+    const t = (fov - curve.startTime) / duration;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    curveValue =
+      (2 * t3 - 3 * t2 + 1) * curve.startValue +
+      (t3 - 2 * t2 + t) * duration * curve.startOutTangent +
+      (-2 * t3 + 3 * t2) * curve.endValue +
+      (t3 - t2) * duration * curve.endInTangent;
+  }
+  return Math.abs(curveValue) > Number.EPSILON ? fov / curveValue : 1;
+}
+
 export type BodyDebugMode =
   | "off" | "skin" | "h_r" | "h_g" | "h_b" | "h_a" | "vertex_r" | "vertex_g"
   | "base_shadow" | "ndotl_raw" | "h_b_adjusted_shadow" | "ambient_target"
