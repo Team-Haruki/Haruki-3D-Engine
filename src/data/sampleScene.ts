@@ -283,7 +283,7 @@ export const sekaiCostumeShopDirectionalLightDirection: Vec3 = {
 export const previewLightDirectionFit: Vec3 =
   sekaiCostumeShopDirectionalLightDirection;
 
-export const previewShadowThresholdFit = 0.33;
+export const previewShadowThresholdFit = 0.40625;
 
 export const previewLightDefaults: PreviewLightState = {
   x: previewLightDirectionFit.x,

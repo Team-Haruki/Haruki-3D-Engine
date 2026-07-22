@@ -291,8 +291,24 @@ export function tuneLightingForPreview(
   kind: string | undefined,
   lighting: MaterialLightingSettings | undefined
 ) {
-  void kind;
-  return lighting ? { ...lighting, shadowTexWeight: lighting.shadowTexWeight } : undefined;
+  return lighting
+    ? {
+        ...lighting,
+        shadowTexWeight: lighting.shadowTexWeight,
+        useLambert: resolvePreviewLambertEnabled(kind, lighting.useLambert),
+      }
+    : undefined;
+}
+
+export function resolvePreviewLambertEnabled(
+  kind: string | undefined,
+  serializedUseLambert: boolean | null | undefined
+) {
+  const normalized = (kind ?? "").toLowerCase();
+  if (normalized === "body" || normalized === "accessory" || normalized === "acc") {
+    return true;
+  }
+  return serializedUseLambert;
 }
 
 export function usesSekaiSkinTint(kind: string | undefined) {

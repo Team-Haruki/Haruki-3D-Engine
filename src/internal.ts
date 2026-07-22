@@ -144,6 +144,7 @@ export {
   configureSekaiFaceLayerStencilPrepass,
   configureSekaiHairStencil,
   createSekaiThroughHairOverlayMesh,
+  resolvePreviewLambertEnabled,
   updateSekaiEyelashPassView,
   type RuntimeMaterialDebug,
 } from "./engine/characterMaterialRuntime";

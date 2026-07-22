@@ -6,9 +6,17 @@ import {
   evaluateSekaiFaceShadow,
   evaluateSekaiFaceSphereShadow,
   previewLightDefaults,
+  resolvePreviewLambertEnabled,
   sekaiCostumeShopDirectionalLightDirection,
   sekaiCostumeShopDirectionalLightRotationDegrees,
 } from "../dist/haruki-3d-engine-internal.js";
+
+test("costume preview keeps directional Lambert on for body and accessories", () => {
+  assert.equal(resolvePreviewLambertEnabled("body", false), true);
+  assert.equal(resolvePreviewLambertEnabled("accessory", false), true);
+  assert.equal(resolvePreviewLambertEnabled("acc", false), true);
+  assert.equal(resolvePreviewLambertEnabled("hair", false), false);
+});
 
 test("costume preview uses the official costume-shop directional transform", () => {
   assert.deepEqual(sekaiCostumeShopDirectionalLightRotationDegrees, {
@@ -29,6 +37,7 @@ test("costume preview uses the official costume-shop directional transform", () 
     previewLightDefaults.y,
     previewLightDefaults.z
   ) - 1) < 1e-12);
+  assert.equal(previewLightDefaults.shadowThreshold, 0.40625);
 });
 
 test("official base toon uses half Lambert only when enabled", () => {
