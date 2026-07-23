@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as THREE from "three";
 
 import {
+  createSekaiBodyMaterial,
+  createSekaiFaceMaterial,
+  createSekaiLayerMaterial,
   rcasSharpnessStopsToLinear,
   resolveSekaiPreviewPostProcessSize,
   resolveSekaiPreviewPixelRatio,
@@ -35,4 +39,35 @@ test("Sekai preview post-processing keeps the official square render target", ()
   assert.equal(resolveSekaiPreviewPixelRatio(1024, 1024, 2), 2);
   assert.equal(resolveSekaiPreviewPixelRatio(1280, 1280, 2), 1.6);
   assert.ok(Math.abs(rcasSharpnessStopsToLinear(0.2) - Math.pow(2, -0.2)) < 1e-12);
+});
+
+test("character shaders defer output encoding to the active render target", () => {
+  const common = {
+    baseColor: "#808080",
+    lightDirection: new THREE.Vector3(0, 1, 0),
+    lightIntensity: 1,
+    ambientIntensity: 1,
+  };
+  const materials = [
+    createSekaiBodyMaterial({
+      ...common,
+      shadowColor: "#404040",
+      shadowThreshold: 0.5,
+      shadowWeight: 1,
+    }),
+    createSekaiFaceMaterial({
+      ...common,
+      warmColor: "#604040",
+    }),
+    createSekaiLayerMaterial(null),
+  ];
+
+  for (const material of materials) {
+    assert.match(
+      material.fragmentShader,
+      /return linearToOutputTexel\(vec4\(color, 1\.0\)\)\.rgb;/
+    );
+    assert.doesNotMatch(material.fragmentShader, /1\.0 \/ 2\.4/);
+    material.dispose();
+  }
 });

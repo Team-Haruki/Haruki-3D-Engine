@@ -227,10 +227,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       ${sekaiCharacterShadowFunctionsGlsl}
 
       vec3 outputColor(vec3 color) {
-        bvec3 cutoff = lessThanEqual(color, vec3(0.0031308));
-        vec3 lower = color * 12.92;
-        vec3 higher = pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) * 1.055 - vec3(0.055);
-        return mix(higher, lower, vec3(cutoff));
+        return linearToOutputTexel(vec4(color, 1.0)).rgb;
       }
 
       vec3 applyMaterialSaturation(vec3 color, float saturation) {
@@ -735,10 +732,7 @@ export function createSekaiFaceMaterial(initial: FaceMaterialUniforms) {
       ${sekaiCharacterShadowFunctionsGlsl}
 
       vec3 outputColor(vec3 color) {
-        bvec3 cutoff = lessThanEqual(color, vec3(0.0031308));
-        vec3 lower = color * 12.92;
-        vec3 higher = pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) * 1.055 - vec3(0.055);
-        return mix(higher, lower, vec3(cutoff));
+        return linearToOutputTexel(vec4(color, 1.0)).rgb;
       }
 
       void main() {
@@ -1055,10 +1049,7 @@ export function createSekaiLayerMaterial(
       varying vec3 vViewNormal;
 
       vec3 outputColor(vec3 color) {
-        bvec3 cutoff = lessThanEqual(color, vec3(0.0031308));
-        vec3 lower = color * 12.92;
-        vec3 higher = pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) * 1.055 - vec3(0.055);
-        return mix(higher, lower, vec3(cutoff));
+        return linearToOutputTexel(vec4(color, 1.0)).rgb;
       }
 
       void main() {
