@@ -130,12 +130,15 @@ export {
   sekaiCostumeShopOutlineSettings,
 } from "./engine/characterLightingRuntime";
 export {
-  SekaiPreviewPostProcessor,
-  rcasSharpnessStopsToLinear,
-  resolveSekaiPreviewPostProcessSize,
   resolveSekaiPreviewPixelRatio,
   sekaiPreviewPostProcessDefaults,
 } from "./engine/sekaiPreviewPostProcessor";
+export {
+  createSekaiOutlineMaterial,
+  evaluateSekaiOutlineColor,
+  readRawMaterialColor,
+  sekaiCostumeShopOutlineControllerDefaults,
+} from "./engine/sekaiOutlineRuntime";
 export {
   buildUnityPrefabSourceGraph,
   createUnityPrefabConstraintRuntime,

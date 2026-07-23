@@ -486,12 +486,14 @@ export async function bindHeadRuntimeMaterials({
     }
 
     material.userData.pjskLighting = lighting;
+    material.userData.pjskRawMaterial = slot.rawMaterial;
     material.userData.pjskMaterialKind = kind;
     material.userData.pjskIsAccessory = isAccessory;
     material.userData.pjskMaterialKey = slot.materialKey;
     material.userData.pjskMaterialSlotIndex = slot.slotIndex;
     if (topLayerMaterial) {
       topLayerMaterial.userData.pjskLighting = lighting;
+      topLayerMaterial.userData.pjskRawMaterial = slot.rawMaterial;
       topLayerMaterial.userData.pjskMaterialKind = kind;
       topLayerMaterial.userData.pjskIsAccessory = isAccessory;
       topLayerMaterial.userData.pjskMaterialKey = slot.materialKey;

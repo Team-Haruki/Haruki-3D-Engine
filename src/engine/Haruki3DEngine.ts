@@ -109,8 +109,6 @@ import {
 } from "./headMaterialRuntime";
 import {
   CharacterLightingRuntime,
-  evaluateSekaiOutlineFovFactor,
-  sekaiCostumeShopOutlineSettings,
   type BodyDebugMode,
   type FaceSdfDebugLightMode,
   type FaceSdfDebugMode,
@@ -119,9 +117,11 @@ import {
 } from "./characterLightingRuntime";
 import { RuntimeTextureLoader } from "./runtimeTextureLoader";
 import {
-  SekaiPreviewPostProcessor,
   resolveSekaiPreviewPixelRatio,
 } from "./sekaiPreviewPostProcessor";
+import {
+  createSekaiOutlineMaterial,
+} from "./sekaiOutlineRuntime";
 
 export type {
   BodyDebugMode,
@@ -149,8 +149,6 @@ export type {
   ProjectedShadowSettingsInput,
   RuntimeProjectedShadowDebug,
 } from "./projectedShadow";
-const SEKAI_OUTLINE_MATERIAL_TINT = { r: 0.52, g: 0.47, b: 0.55 };
-const SEKAI_OUTLINE_GLOBAL_BLENDING = 0.5;
 const COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE = 1.0;
 const COSTUME_SHOP_DIRECTIONAL_LIGHT_ROTATION_DEGREES = new THREE.Vector3(
   sekaiCostumeShopDirectionalLightRotationDegrees.x,
@@ -591,106 +589,6 @@ function extractSekaiOutlineMainTexture(material: THREE.Material): THREE.Texture
   return (material as THREE.Material & { map?: THREE.Texture | null }).map ?? null;
 }
 
-function createSekaiOutlineMaterial(
-  useVertexColor: boolean,
-  lighting?: MaterialLightingSettings,
-  useSecondNormal = false,
-  sourceMainTex: THREE.Texture | null = null
-) {
-  const outlineClipOffset = THREE.MathUtils.clamp(lighting?.outlineOffset ?? 0, 0, 20) * 0.00008;
-  const sourceWeight = 1 - SEKAI_OUTLINE_GLOBAL_BLENDING;
-  const outlineColor = new THREE.Color().setRGB(
-    SEKAI_OUTLINE_MATERIAL_TINT.r * sourceWeight,
-    SEKAI_OUTLINE_MATERIAL_TINT.g * sourceWeight,
-    SEKAI_OUTLINE_MATERIAL_TINT.b * sourceWeight
-  );
-  const material = new THREE.MeshBasicMaterial({
-    color: outlineColor,
-    map: sourceMainTex,
-    side: THREE.BackSide,
-    transparent: false,
-    opacity: 1,
-    depthWrite: true,
-    depthTest: true,
-    blending: THREE.NoBlending,
-    vertexColors: false,
-  });
-  const outlineFactor = new THREE.Vector3(
-    sekaiCostumeShopOutlineSettings.distanceNear,
-    1 / (
-      sekaiCostumeShopOutlineSettings.distanceFar -
-      sekaiCostumeShopOutlineSettings.distanceNear
-    ),
-    evaluateSekaiOutlineFovFactor(25)
-  );
-  material.name = "pjsk_shell_outline";
-  material.userData.pjskBaseOutlineColor = `#${outlineColor.getHexString()}`;
-  material.userData.pjskBaseOutlineOpacity = 1;
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.uSekaiOutlineWidth = {
-      value: new THREE.Vector2(
-        sekaiCostumeShopOutlineSettings.widthMin,
-        sekaiCostumeShopOutlineSettings.widthMax
-      ),
-    };
-    shader.uniforms.uSekaiOutlineFactor = {
-      value: outlineFactor,
-    };
-    shader.uniforms.uOutlineClipOffset = { value: outlineClipOffset };
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <common>",
-      [
-        "#include <common>",
-        "uniform vec2 uSekaiOutlineWidth;",
-        "uniform vec3 uSekaiOutlineFactor;",
-        "uniform float uOutlineClipOffset;",
-        useVertexColor ? "attribute vec3 color;" : "",
-        useSecondNormal ? "attribute vec4 tangent;" : "",
-        useSecondNormal ? "attribute vec2 uv1;" : "",
-        useSecondNormal ? "attribute vec2 uv2;" : "",
-      ].join("\n")
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <begin_vertex>",
-      [
-        "#include <begin_vertex>",
-        "vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;",
-        "float outlineDistance = length(outlineWorldPosition - cameraPosition);",
-        "float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);",
-        "outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);",
-        "float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);",
-        useSecondNormal
-          ? [
-              "vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));",
-              "vec3 baseNormal = normalize(normal);",
-              "vec3 baseTangent = normalize(tangent.xyz);",
-              "vec3 baseBitangent = normalize(cross(baseNormal, baseTangent) * tangent.w);",
-              "vec3 outlineDirection = normalize(baseTangent * secondNormalTS.x + baseBitangent * secondNormalTS.y + baseNormal * secondNormalTS.z);",
-            ].join("\n")
-          : "vec3 outlineDirection = normalize(normal);",
-        useVertexColor
-          ? "float outlineScale = clamp(color.r, 0.0, 1.0);"
-          : "float outlineScale = 1.0;",
-        "transformed += outlineDirection * outlineWidth * outlineScale;",
-      ].join("\n")
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      "#include <project_vertex>",
-      [
-        "#include <project_vertex>",
-        "gl_Position.z += gl_Position.w * uOutlineClipOffset;",
-      ].join("\n")
-    );
-    shader.fragmentShader = shader.fragmentShader.replace("#include <color_fragment>", "");
-  };
-  material.onBeforeRender = (_renderer, _scene, camera) => {
-    if (camera instanceof THREE.PerspectiveCamera) {
-      outlineFactor.z = evaluateSekaiOutlineFovFactor(camera.fov);
-    }
-  };
-  return material;
-}
-
 function normalizeFaceShadowHorizontal(
   target: THREE.Vector2,
   x: number,
@@ -861,7 +759,6 @@ export class Haruki3DEngine {
   private readonly scene: THREE.Scene;
   private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly postProcessor: SekaiPreviewPostProcessor;
   private readonly controls: HarukiCameraControls | null;
   private readonly cameraTarget = new THREE.Vector3();
   private readonly autoRender: boolean;
@@ -997,9 +894,6 @@ export class Haruki3DEngine {
     );
     this.renderer.setPixelRatio(initialPixelRatio);
     this.renderer.setSize(width, height, this.ownsCanvas);
-    this.postProcessor = new SekaiPreviewPostProcessor(this.renderer);
-    const initialDrawingBufferSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    this.postProcessor.setSize(initialDrawingBufferSize.x, initialDrawingBufferSize.y);
     this.viewportWidth = width;
     this.viewportHeight = height;
     this.viewportPixelRatio = initialPixelRatio;
@@ -1739,7 +1633,7 @@ export class Haruki3DEngine {
   }
 
   waitForPostProcessorReady() {
-    return this.postProcessor.waitUntilReady();
+    return Promise.resolve();
   }
 
   setViewportSize(width: number, height: number) {
@@ -1762,8 +1656,6 @@ export class Haruki3DEngine {
     this.camera.updateProjectionMatrix();
     this.renderer.setPixelRatio(nextPixelRatio);
     this.renderer.setSize(nextWidth, nextHeight, this.ownsCanvas);
-    const drawingBufferSize = this.renderer.getDrawingBufferSize(new THREE.Vector2());
-    this.postProcessor.setSize(drawingBufferSize.x, drawingBufferSize.y);
     this.updateCaptureBackgroundTexture(nextWidth, nextHeight);
     this.viewportWidth = nextWidth;
     this.viewportHeight = nextHeight;
@@ -1771,7 +1663,7 @@ export class Haruki3DEngine {
   }
 
   renderFrame() {
-    this.postProcessor.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.camera);
   }
 
   stepRuntimeFrame(
@@ -2087,7 +1979,6 @@ export class Haruki3DEngine {
     this.projectedShadow.dispose();
     this.textureLoader.dispose();
     this.captureBackgroundTexture?.dispose();
-    this.postProcessor.dispose();
     this.renderer.dispose();
     if (this.ownsCanvas && this.renderer.domElement.parentElement === this.container) {
       this.renderer.domElement.remove();
@@ -2375,30 +2266,45 @@ export class Haruki3DEngine {
       const sourceMaterialKind = chooseOutlineSourceMaterialKind(sourceMaterialKinds);
 
       const vertexColorRedMax = getVertexColorRedMax(mesh.geometry);
-      if (vertexColorRedMax !== null && vertexColorRedMax <= 0.01) {
+      if (vertexColorRedMax === null || vertexColorRedMax <= 0.01) {
         continue;
       }
 
       const meshMaterials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const sourceMaterialNames = meshMaterials.map((material) => material.name);
-      const sourceMaterial = meshMaterials.find((material) =>
-        !isFaceLayerMaterialKind(material.userData.pjskMaterialKind)
-      ) ?? meshMaterials[0];
-      const lighting = meshMaterials
-        .map((material) => material.userData.pjskLighting as MaterialLightingSettings | undefined)
-        .find(Boolean);
-      const useSecondNormal =
-        (lighting?.useOutlineSecondNormal ?? 0) > 0.5 &&
-        Boolean(mesh.geometry.getAttribute("tangent")) &&
-        Boolean(mesh.geometry.getAttribute("uv1")) &&
-        Boolean(mesh.geometry.getAttribute("uv2"));
-      const outlineMaterial = createSekaiOutlineMaterial(
-        Boolean(mesh.geometry.getAttribute("color")),
-        lighting,
-        useSecondNormal,
-        extractSekaiOutlineMainTexture(sourceMaterial)
-      );
-      this.characterLighting.applyOutlineMaterial(outlineMaterial);
+      const outlineMaterials = meshMaterials.map((sourceMaterial) => {
+        if (isFaceLayerMaterialKind(sourceMaterial.userData.pjskMaterialKind)) {
+          const skipped = new THREE.MeshBasicMaterial();
+          skipped.name = "pjsk_shell_outline_skipped";
+          skipped.visible = false;
+          return skipped;
+        }
+        const lighting = sourceMaterial.userData.pjskLighting as
+          | MaterialLightingSettings
+          | undefined;
+        const useSecondNormal =
+          (lighting?.useOutlineSecondNormal ?? 0) > 0.5 &&
+          Boolean(mesh.geometry.getAttribute("tangent")) &&
+          Boolean(mesh.geometry.getAttribute("uv1")) &&
+          Boolean(mesh.geometry.getAttribute("uv2"));
+        const outlineMaterial = createSekaiOutlineMaterial(
+          Boolean(mesh.geometry.getAttribute("color")),
+          sourceMaterial.userData.pjskRawMaterial,
+          useSecondNormal,
+          extractSekaiOutlineMainTexture(sourceMaterial)
+        );
+        this.characterLighting.applyOutlineMaterial(outlineMaterial);
+        return outlineMaterial;
+      });
+      if (!outlineMaterials.some((material) => material.visible)) {
+        for (const material of outlineMaterials) {
+          material.dispose();
+        }
+        continue;
+      }
+      const outlineMaterial = Array.isArray(mesh.material)
+        ? outlineMaterials
+        : outlineMaterials[0];
       const outline = mesh instanceof THREE.SkinnedMesh
         ? new THREE.SkinnedMesh(mesh.geometry, outlineMaterial)
         : new THREE.Mesh(mesh.geometry, outlineMaterial);

@@ -1,6 +1,7 @@
 import type {
   BodyAssetManifest,
   HeadAssetManifest,
+  RawMaterialProperties,
 } from "../data/sampleScene";
 import type { RuntimeCombinedCharacterAsset } from "../runtime/runtimeTypes";
 
@@ -2219,6 +2220,7 @@ type MaterialSlotWithTextures = {
   shadowTex?: string | null;
   valueTex?: string | null;
   faceShadowTex?: string | null;
+  rawMaterial?: RawMaterialProperties;
 };
 
 function inheritMissingRoleEyeTextures<T extends MaterialSlotWithTextures>(
@@ -2274,6 +2276,15 @@ function resolveMaterialSlotTextureUrls<T extends MaterialSlotWithTextures>(
     shadowTex: resolveMaybeUrl(slot.shadowTex ?? undefined, resolveUrl) ?? slot.shadowTex,
     valueTex: resolveMaybeUrl(slot.valueTex ?? undefined, resolveUrl) ?? slot.valueTex,
     faceShadowTex: resolveMaybeUrl(slot.faceShadowTex ?? undefined, resolveUrl) ?? slot.faceShadowTex,
+    rawMaterial: slot.rawMaterial
+      ? {
+          ...slot.rawMaterial,
+          textureProperties: slot.rawMaterial.textureProperties.map((texture) => ({
+            ...texture,
+            uri: resolveMaybeUrl(texture.uri ?? undefined, resolveUrl) ?? texture.uri,
+          })),
+        }
+      : slot.rawMaterial,
   };
 }
 

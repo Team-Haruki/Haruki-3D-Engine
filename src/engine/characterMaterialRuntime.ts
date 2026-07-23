@@ -593,6 +593,7 @@ export async function bindBodyRuntimeMaterials({
       bodyDebugMode,
     });
     material.userData.pjskLighting = lighting;
+    material.userData.pjskRawMaterial = slot.rawMaterial;
     material.userData.pjskMaterialKind = slot.materialKind;
     material.userData.pjskMaterialKey = slot.materialKey;
     material.userData.pjskMaterialSlotIndex = slot.slotIndex;

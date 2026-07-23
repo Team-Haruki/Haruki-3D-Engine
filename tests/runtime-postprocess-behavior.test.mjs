@@ -6,37 +6,17 @@ import {
   createSekaiBodyMaterial,
   createSekaiFaceMaterial,
   createSekaiLayerMaterial,
-  rcasSharpnessStopsToLinear,
-  resolveSekaiPreviewPostProcessSize,
   resolveSekaiPreviewPixelRatio,
   sekaiPreviewPostProcessDefaults,
 } from "../dist/haruki-3d-engine-internal.js";
 
-test("Sekai preview post-processing keeps the official square render target", () => {
+test("Sekai preview renders natively at up to 2K with post-processing disabled", () => {
   assert.deepEqual(sekaiPreviewPostProcessDefaults, {
-    referenceSize: 1024,
     maxOutputSize: 2048,
-    maxLinearUpscale: 2,
-    sceneSamples: 2,
-    rcasSharpnessStops: 0,
+    enabled: false,
   });
-  assert.deepEqual(resolveSekaiPreviewPostProcessSize(2048, 2048), {
-    inputWidth: 1024,
-    inputHeight: 1024,
-    outputWidth: 2048,
-    outputHeight: 2048,
-  });
-  assert.throws(
-    () => resolveSekaiPreviewPostProcessSize(2048, 1080),
-    /square output surface/
-  );
-  assert.throws(
-    () => resolveSekaiPreviewPostProcessSize(4096, 4096),
-    /must not exceed 2048x2048/
-  );
   assert.equal(resolveSekaiPreviewPixelRatio(1024, 1024, 2), 2);
   assert.equal(resolveSekaiPreviewPixelRatio(1280, 1280, 2), 1.6);
-  assert.equal(rcasSharpnessStopsToLinear(0), 1);
 });
 
 test("character shaders defer output encoding to the active render target", () => {

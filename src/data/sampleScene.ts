@@ -139,6 +139,62 @@ export type MaterialLightingSettings = {
   hairShadow?: boolean | null;
 };
 
+export type RawMaterialTextureProperty = {
+  name: string;
+  textureName?: string | null;
+  textureFileId: number;
+  texturePathId: number;
+  textureKey?: string | null;
+  scaleX: number;
+  scaleY: number;
+  offsetX: number;
+  offsetY: number;
+  colorSpace: number;
+  uri?: string | null;
+  sourceWidth: number;
+  sourceHeight: number;
+  sourceMipCount: number;
+  sourceFormat: number;
+  filterMode: number;
+  anisoLevel: number;
+  mipBias: number;
+  wrapU: number;
+  wrapV: number;
+  wrapW: number;
+};
+
+export type RawMaterialColorProperty = {
+  name: string;
+  r: number;
+  g: number;
+  b: number;
+  a: number;
+};
+
+export type RawMaterialScalarProperty = {
+  name: string;
+  value: number;
+};
+
+export type RawMaterialProperties = {
+  shaderName?: string | null;
+  shaderFileId: number;
+  shaderPathId: number;
+  shaderKey?: string | null;
+  textureProperties: RawMaterialTextureProperty[];
+  colorProperties: RawMaterialColorProperty[];
+  floatProperties: RawMaterialScalarProperty[];
+  intProperties: RawMaterialScalarProperty[];
+  validKeywords: string[];
+  invalidKeywords: string[];
+  lightmapFlags: number;
+  enableInstancingVariants: boolean;
+  doubleSidedGi: boolean;
+  customRenderQueue: number;
+  stringTags: Record<string, string>;
+  disabledShaderPasses: string[];
+};
+
 export type BodyMaterialSlot = {
   meshName: string;
   slotIndex: number;
@@ -151,6 +207,7 @@ export type BodyMaterialSlot = {
   shadowTex?: string;
   valueTex?: string;
   lighting?: MaterialLightingSettings;
+  rawMaterial?: RawMaterialProperties;
 };
 
 export type FaceMaterialSlot = {
@@ -168,6 +225,7 @@ export type FaceMaterialSlot = {
   mode: FaceMode;
   isAccessory?: boolean;
   lighting?: MaterialLightingSettings;
+  rawMaterial?: RawMaterialProperties;
 };
 
 export type BodyAssetManifest = {

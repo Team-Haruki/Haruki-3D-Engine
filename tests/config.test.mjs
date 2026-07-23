@@ -249,6 +249,10 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
     path.join(repoRoot, "src/engine/unityPrefabRuntime.ts"),
     "utf8"
   );
+  const outlineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/sekaiOutlineRuntime.ts"),
+    "utf8"
+  );
 
   assert.ok(engineSource.includes("function shouldSkipOutlineMaterialKinds"));
   assert.ok(engineSource.includes("function getOutlineSourceMaterialKinds"));
@@ -257,37 +261,43 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(!engineSource.includes("function getSekaiOutlineProfile"));
   assert.match(engineSource, /return kinds\.length > 0 && kinds\.every\(isFaceLayerMaterialKind\);/);
   assert.match(engineSource, /return kinds\.find\(\(kind\) => !isFaceLayerMaterialKind\(kind\)\) \?\? kinds\[0\] \?\? null;/);
-  assert.ok(engineSource.includes('material.name = "pjsk_shell_outline";'));
+  assert.ok(outlineSource.includes('material.name = "pjsk_shell_outline";'));
   assert.ok(engineSource.includes("function extractSekaiOutlineMainTexture"));
-  assert.ok(engineSource.includes("map: sourceMainTex"));
-  assert.ok(engineSource.includes("SEKAI_OUTLINE_MATERIAL_TINT"));
-  assert.ok(engineSource.includes("SEKAI_OUTLINE_GLOBAL_BLENDING"));
-  assert.ok(engineSource.includes("vertexColors: false"));
-  assert.ok(engineSource.includes('useVertexColor ? "attribute vec3 color;" : ""'));
-  assert.ok(engineSource.includes("transparent: false"));
-  assert.ok(engineSource.includes("depthWrite: true"));
-  assert.ok(engineSource.includes("blending: THREE.NoBlending"));
-  assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineWidth = {"));
-  assert.ok(engineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
-  assert.ok(engineSource.includes("sekaiCostumeShopOutlineSettings.widthMin"));
-  assert.ok(engineSource.includes("evaluateSekaiOutlineFovFactor(camera.fov)"));
-  assert.ok(!engineSource.includes("SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE"));
-  assert.ok(!engineSource.includes("polygonOffset: true"));
-  assert.ok(engineSource.includes("vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;"));
-  assert.ok(engineSource.includes("float outlineDistance = length(outlineWorldPosition - cameraPosition);"));
-  assert.ok(engineSource.includes("float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
-  assert.ok(engineSource.includes("outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);"));
-  assert.ok(engineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);"));
-  assert.ok(!engineSource.includes("2.41400003 / projectionMatrix[1][1]"));
-  assert.ok(engineSource.includes("vec3 outlineDirection = normalize(normal);"));
-  assert.ok(engineSource.includes("vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));"));
-  assert.ok(engineSource.includes("cross(baseNormal, baseTangent) * tangent.w"));
+  assert.ok(outlineSource.includes("map: sourceMainTex"));
+  assert.ok(outlineSource.includes('readRawMaterialColor(rawMaterial, "_OutlineColor")'));
+  assert.ok(outlineSource.includes("vertexColors: false"));
+  assert.ok(outlineSource.includes('useVertexColor ? "attribute vec3 color;" : ""'));
+  assert.ok(outlineSource.includes("transparent: false"));
+  assert.ok(outlineSource.includes("depthWrite: true"));
+  assert.ok(outlineSource.includes("blending: THREE.NoBlending"));
+  assert.ok(outlineSource.includes("shader.uniforms.uSekaiOutlineWidth = {"));
+  assert.ok(outlineSource.includes("shader.uniforms.uSekaiOutlineFactor = {"));
+  assert.ok(outlineSource.includes("sekaiCostumeShopOutlineSettings.widthMin"));
+  assert.ok(outlineSource.includes("evaluateSekaiOutlineFovFactor(camera.fov)"));
+  assert.ok(outlineSource.includes("uSekaiCharacterOutlineColor"));
+  assert.ok(outlineSource.includes("uSekaiCharacterOutlineBlending"));
+  assert.ok(outlineSource.includes("vSekaiMainTexUv = uv * uSekaiMainTexST.xy + uSekaiMainTexST.zw;"));
+  assert.ok(outlineSource.includes('readRawMaterialFloat(rawMaterial, "_UseAlphaClip")'));
+  assert.ok(outlineSource.includes('readRawMaterialFloat(rawMaterial, "_Cutoff")'));
+  assert.match(outlineSource, /diffuseColor\.rgb = mix\(/);
+  assert.doesNotMatch(outlineSource, /OutlineClipOffset|0\.00008/);
+  assert.ok(!outlineSource.includes("SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE"));
+  assert.ok(!outlineSource.includes("polygonOffset: true"));
+  assert.ok(outlineSource.includes("vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;"));
+  assert.ok(outlineSource.includes("float outlineDistance = length(outlineWorldPosition - cameraPosition);"));
+  assert.ok(outlineSource.includes("float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
+  assert.ok(outlineSource.includes("outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);"));
+  assert.ok(outlineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);"));
+  assert.ok(!outlineSource.includes("2.41400003 / projectionMatrix[1][1]"));
+  assert.ok(outlineSource.includes("vec3 outlineDirection = normalize(normal);"));
+  assert.ok(outlineSource.includes("vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));"));
+  assert.ok(outlineSource.includes("cross(baseNormal, baseTangent) * tangent.w"));
   assert.ok(prefabRuntimeSource.includes('geometry.setAttribute("tangent"'));
   assert.ok(prefabRuntimeSource.includes('geometry.setAttribute("uv2"'));
   assert.ok(!prefabRuntimeSource.includes('geometry.setAttribute("uv2", new THREE.Float32BufferAttribute(source.uv1!'));
-  assert.ok(!engineSource.includes("vec3 outlineDirection = objectNormal;"));
-  assert.ok(engineSource.includes("float outlineScale = clamp(color.r, 0.0, 1.0);"));
-  assert.ok(!engineSource.includes("if (vOutlineMask <= 0.01) discard;"));
+  assert.ok(!outlineSource.includes("vec3 outlineDirection = objectNormal;"));
+  assert.ok(outlineSource.includes("float outlineScale = clamp(color.r, 0.0, 1.0);"));
+  assert.ok(!outlineSource.includes("if (vOutlineMask <= 0.01) discard;"));
 });
 
 test("engine head material render order follows documented Sekai render queues", () => {
@@ -1390,6 +1400,8 @@ test("part composer resolves material textures relative to each source package",
   assert.match(composerSource, /shadowTex:\s*resolveMaybeUrl\(slot\.shadowTex/);
   assert.match(composerSource, /valueTex:\s*resolveMaybeUrl\(slot\.valueTex/);
   assert.match(composerSource, /faceShadowTex:\s*resolveMaybeUrl\(slot\.faceShadowTex/);
+  assert.match(composerSource, /textureProperties:\s*slot\.rawMaterial\.textureProperties\.map/);
+  assert.match(composerSource, /uri:\s*resolveMaybeUrl\(texture\.uri/);
   assert.match(composerSource, /runtime\.materialSlots \?\? \[\]/);
   assert.match(composerSource, /resolveMaterialSlotTextureUrls\(slot, resolvePartUrl\)/);
 });
@@ -1506,11 +1518,18 @@ test("capture waits for the rendered frame before using the native DevTools scre
   assert.match(serverSource, /await this\.client\.send\("Page\.captureScreenshot"/);
 });
 
-test("preview post-processing resolves geometric edges before sharpening", () => {
-  const source = fs.readFileSync(
+test("preview rendering bypasses all post-processing and RCAS", () => {
+  const sizingSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/sekaiPreviewPostProcessor.ts"),
     "utf8"
   );
+  const engineSource = fs.readFileSync(
+    path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
+    "utf8"
+  );
 
-  assert.match(source, /samples:\s*sekaiPreviewPostProcessDefaults\.sceneSamples/);
+  assert.doesNotMatch(sizingSource, /rcas/i);
+  assert.doesNotMatch(sizingSource, /FullScreenQuad|WebGLRenderTarget|ShaderMaterial/);
+  assert.doesNotMatch(engineSource, /SekaiPreviewPostProcessor|postProcessor\./);
+  assert.match(engineSource, /renderFrame\(\)\s*\{\s*this\.renderer\.render\(this\.scene, this\.camera\);/s);
 });
