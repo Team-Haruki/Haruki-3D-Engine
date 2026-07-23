@@ -1505,3 +1505,12 @@ test("capture waits for the rendered frame before using the native DevTools scre
   assert.match(serverSource, /await this\.client\.send\("Runtime\.evaluate"/);
   assert.match(serverSource, /await this\.client\.send\("Page\.captureScreenshot"/);
 });
+
+test("preview post-processing resolves geometric edges before sharpening", () => {
+  const source = fs.readFileSync(
+    path.join(repoRoot, "src/engine/sekaiPreviewPostProcessor.ts"),
+    "utf8"
+  );
+
+  assert.match(source, /samples:\s*sekaiPreviewPostProcessDefaults\.sceneSamples/);
+});

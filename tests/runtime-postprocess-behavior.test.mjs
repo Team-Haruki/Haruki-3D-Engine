@@ -17,10 +17,8 @@ test("Sekai preview post-processing keeps the official square render target", ()
     referenceSize: 1024,
     maxOutputSize: 2048,
     maxLinearUpscale: 2,
-    smaaSearchSteps: 16,
-    smaaDiagonalSearchSteps: 8,
-    smaaCornerRounding: 25,
-    rcasSharpnessStops: 0.2,
+    sceneSamples: 2,
+    rcasSharpnessStops: 0,
   });
   assert.deepEqual(resolveSekaiPreviewPostProcessSize(2048, 2048), {
     inputWidth: 1024,
@@ -38,7 +36,7 @@ test("Sekai preview post-processing keeps the official square render target", ()
   );
   assert.equal(resolveSekaiPreviewPixelRatio(1024, 1024, 2), 2);
   assert.equal(resolveSekaiPreviewPixelRatio(1280, 1280, 2), 1.6);
-  assert.ok(Math.abs(rcasSharpnessStopsToLinear(0.2) - Math.pow(2, -0.2)) < 1e-12);
+  assert.equal(rcasSharpnessStopsToLinear(0), 1);
 });
 
 test("character shaders defer output encoding to the active render target", () => {

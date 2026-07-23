@@ -1,24 +1,12 @@
 import * as THREE from "three";
 import { FullScreenQuad } from "three/examples/jsm/postprocessing/Pass.js";
-import {
-  PRESETS as SMAA_PRESETS,
-  SMAA_BLEND_FRAG,
-  SMAA_BLEND_VERT,
-  SMAA_EDGES_FRAG,
-  SMAA_EDGES_VERT,
-  SMAA_WEIGHTS_FRAG,
-  SMAA_WEIGHTS_VERT,
-  SMAATextures,
-} from "glsl-smaa";
 
 export const sekaiPreviewPostProcessDefaults = {
   referenceSize: 1024,
   maxOutputSize: 2048,
   maxLinearUpscale: 2,
-  smaaSearchSteps: 16,
-  smaaDiagonalSearchSteps: 8,
-  smaaCornerRounding: 25,
-  rcasSharpnessStops: 0.2,
+  sceneSamples: 2,
+  rcasSharpnessStops: 0,
 } as const;
 
 export function rcasSharpnessStopsToLinear(stops: number) {
@@ -278,139 +266,6 @@ const rcasFragmentShader = /* glsl */`
   }
 `;
 
-function adaptSmaaVertexShader(shader: string) {
-  return shader
-    .replace("attribute vec2 aPosition;", "")
-    .split("aPosition")
-    .join("position.xy");
-}
-
-function createSmaaLookupTexture(name: string, source: string, filter: THREE.MagnificationTextureFilter) {
-  const image = new Image();
-  const texture = new THREE.Texture(image);
-  texture.name = name;
-  texture.minFilter = filter;
-  texture.magFilter = filter;
-  texture.generateMipmaps = false;
-  texture.flipY = false;
-  const ready = new Promise<void>((resolve, reject) => {
-    image.onload = () => {
-      texture.needsUpdate = true;
-      resolve();
-    };
-    image.onerror = () => reject(new Error(`Failed to load ${name} lookup texture.`));
-  });
-  image.src = source;
-  return { texture, ready };
-}
-
-class SmaaHighPass {
-  private readonly edgesTarget = new THREE.WebGLRenderTarget(1, 1, {
-    depthBuffer: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    type: THREE.UnsignedByteType,
-  });
-  private readonly weightsTarget = new THREE.WebGLRenderTarget(1, 1, {
-    depthBuffer: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    type: THREE.UnsignedByteType,
-  });
-  private readonly areaLookup = createSmaaLookupTexture(
-    "SMAA.area",
-    SMAATextures.area,
-    THREE.LinearFilter
-  );
-  private readonly searchLookup = createSmaaLookupTexture(
-    "SMAA.search",
-    SMAATextures.search,
-    THREE.NearestFilter
-  );
-  readonly ready = Promise.all([
-    this.areaLookup.ready,
-    this.searchLookup.ready,
-  ]).then(() => undefined);
-  private readonly texelSize = new THREE.Vector2(1, 1);
-  private readonly viewportSize = new THREE.Vector2(1, 1);
-  private readonly edgesMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      uColorTexture: { value: null },
-      uTexelSize: { value: this.texelSize },
-    },
-    vertexShader: adaptSmaaVertexShader(SMAA_EDGES_VERT),
-    fragmentShader: `#define SMAA_PRESET_HIGH\n#define SMAA_EDGES_COLOR\n${SMAA_PRESETS}\n${SMAA_EDGES_FRAG}`,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  private readonly weightsMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      uEdgesTexture: { value: this.edgesTarget.texture },
-      uAreaTexture: { value: this.areaLookup.texture },
-      uSearchTexture: { value: this.searchLookup.texture },
-      uTexelSize: { value: this.texelSize },
-      uViewportSize: { value: this.viewportSize },
-    },
-    vertexShader: `#define SMAA_PRESET_HIGH\n${SMAA_PRESETS}\n${adaptSmaaVertexShader(SMAA_WEIGHTS_VERT)}`,
-    fragmentShader: `#define SMAA_PRESET_HIGH\n${SMAA_PRESETS}\n${SMAA_WEIGHTS_FRAG}`,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  private readonly blendMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      uColorTexture: { value: null },
-      uBlendTexture: { value: this.weightsTarget.texture },
-      uTexelSize: { value: this.texelSize },
-    },
-    vertexShader: adaptSmaaVertexShader(SMAA_BLEND_VERT),
-    fragmentShader: SMAA_BLEND_FRAG,
-    depthTest: false,
-    depthWrite: false,
-    toneMapped: false,
-  });
-  private readonly fullScreenQuad = new FullScreenQuad();
-
-  setSize(width: number, height: number) {
-    this.edgesTarget.setSize(width, height);
-    this.weightsTarget.setSize(width, height);
-    this.texelSize.set(1 / width, 1 / height);
-    this.viewportSize.set(width, height);
-  }
-
-  render(
-    renderer: THREE.WebGLRenderer,
-    input: THREE.WebGLRenderTarget,
-    output: THREE.WebGLRenderTarget
-  ) {
-    this.edgesMaterial.uniforms.uColorTexture.value = input.texture;
-    this.fullScreenQuad.material = this.edgesMaterial;
-    renderer.setRenderTarget(this.edgesTarget);
-    this.fullScreenQuad.render(renderer);
-
-    this.fullScreenQuad.material = this.weightsMaterial;
-    renderer.setRenderTarget(this.weightsTarget);
-    this.fullScreenQuad.render(renderer);
-
-    this.blendMaterial.uniforms.uColorTexture.value = input.texture;
-    this.fullScreenQuad.material = this.blendMaterial;
-    renderer.setRenderTarget(output);
-    this.fullScreenQuad.render(renderer);
-  }
-
-  dispose() {
-    this.edgesTarget.dispose();
-    this.weightsTarget.dispose();
-    this.areaLookup.texture.dispose();
-    this.searchLookup.texture.dispose();
-    this.edgesMaterial.dispose();
-    this.weightsMaterial.dispose();
-    this.blendMaterial.dispose();
-    this.fullScreenQuad.dispose();
-  }
-}
-
 export class SekaiPreviewPostProcessor {
   private readonly sceneTarget = new THREE.WebGLRenderTarget(1, 1, {
     depthBuffer: true,
@@ -418,13 +273,7 @@ export class SekaiPreviewPostProcessor {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
     type: THREE.UnsignedByteType,
-  });
-  private readonly smaaTarget = new THREE.WebGLRenderTarget(1, 1, {
-    depthBuffer: false,
-    stencilBuffer: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    type: THREE.UnsignedByteType,
+    samples: sekaiPreviewPostProcessDefaults.sceneSamples,
   });
   private readonly easuTarget = new THREE.WebGLRenderTarget(1, 1, {
     depthBuffer: false,
@@ -433,7 +282,6 @@ export class SekaiPreviewPostProcessor {
     magFilter: THREE.LinearFilter,
     type: THREE.UnsignedByteType,
   });
-  private readonly smaaPass = new SmaaHighPass();
   private readonly easuMaterial = new THREE.ShaderMaterial({
     uniforms: {
       tInput: { value: null },
@@ -468,16 +316,14 @@ export class SekaiPreviewPostProcessor {
   constructor(private readonly renderer: THREE.WebGLRenderer) {}
 
   waitUntilReady() {
-    return this.smaaPass.ready;
+    return Promise.resolve();
   }
 
   setSize(outputWidth: number, outputHeight: number) {
     this.size = resolveSekaiPreviewPostProcessSize(outputWidth, outputHeight);
     const { inputWidth, inputHeight } = this.size;
     this.sceneTarget.setSize(inputWidth, inputHeight);
-    this.smaaTarget.setSize(inputWidth, inputHeight);
     this.easuTarget.setSize(this.size.outputWidth, this.size.outputHeight);
-    this.smaaPass.setSize(inputWidth, inputHeight);
     this.easuMaterial.uniforms.uInputSize.value.set(inputWidth, inputHeight);
     this.easuMaterial.uniforms.uOutputSize.value.set(
       this.size.outputWidth,
@@ -494,9 +340,7 @@ export class SekaiPreviewPostProcessor {
     this.renderer.setRenderTarget(this.sceneTarget);
     this.renderer.render(scene, camera);
 
-    this.smaaPass.render(this.renderer, this.sceneTarget, this.smaaTarget);
-
-    this.easuMaterial.uniforms.tInput.value = this.smaaTarget.texture;
+    this.easuMaterial.uniforms.tInput.value = this.sceneTarget.texture;
     this.fullScreenQuad.material = this.easuMaterial;
     this.renderer.setRenderTarget(this.easuTarget);
     this.fullScreenQuad.render(this.renderer);
@@ -512,9 +356,7 @@ export class SekaiPreviewPostProcessor {
 
   dispose() {
     this.sceneTarget.dispose();
-    this.smaaTarget.dispose();
     this.easuTarget.dispose();
-    this.smaaPass.dispose();
     this.easuMaterial.dispose();
     this.rcasMaterial.dispose();
     this.fullScreenQuad.dispose();
