@@ -103,6 +103,8 @@ function pushBoundMaterialDebug(
     shaderSpecularPower: uniforms?.uSpecularPower?.value ?? null,
     shaderRimThreshold: uniforms?.uRimThreshold?.value ?? null,
     shaderControllerRimRange: uniforms?.uControllerRimRange?.value ?? null,
+    shaderControllerRimEdgeSmoothness:
+      uniforms?.uControllerRimEdgeSmoothness?.value ?? null,
     shaderRimColorAlpha: uniforms?.uRimColorAlpha?.value ?? null,
     shaderControllerRimEmission: uniforms?.uControllerRimEmission?.value ?? null,
     shaderControllerRimLightInfluence:
@@ -210,12 +212,12 @@ function cloneFaceShaderMaterial(
 ) {
   const material = source.clone();
   updateSekaiFaceMaterial(material, {
-    baseColor: params.baseColor ?? `#${source.uniforms.uBaseColor.value.getHexString()}`,
-    warmColor: params.warmColor ?? `#${source.uniforms.uWarmColor.value.getHexString()}`,
+    baseColor: params.baseColor ?? source.uniforms.uBaseColor.value.clone(),
+    warmColor: params.warmColor ?? source.uniforms.uWarmColor.value.clone(),
     skinColorDefault:
-      params.skinColorDefault ?? `#${source.uniforms.uSkinColorDefault.value.getHexString()}`,
-    skinColor1: params.skinColor1 ?? `#${source.uniforms.uSkinColor1.value.getHexString()}`,
-    skinColor2: params.skinColor2 ?? `#${source.uniforms.uSkinColor2.value.getHexString()}`,
+      params.skinColorDefault ?? source.uniforms.uSkinColorDefault.value.clone(),
+    skinColor1: params.skinColor1 ?? source.uniforms.uSkinColor1.value.clone(),
+    skinColor2: params.skinColor2 ?? source.uniforms.uSkinColor2.value.clone(),
     mainTex: params.mainTex ?? null,
     shadowTex: params.shadowTex ?? null,
     valueTex: params.valueTex ?? null,
@@ -249,7 +251,7 @@ function cloneFaceShaderMaterial(
       source.uniforms.uFaceSkinShadowStrength?.value ??
       0.1,
     skinAmbientColor: source.uniforms.uSkinAmbientColor
-      ? `#${source.uniforms.uSkinAmbientColor.value.getHexString()}`
+      ? source.uniforms.uSkinAmbientColor.value.clone()
       : "#ffffff",
     hueSinAngle: params.lighting?.hueSinAngle ?? source.uniforms.uHueSinAngle?.value ?? 0,
     hueCosAngle: params.lighting?.hueCosAngle ?? source.uniforms.uHueCosAngle?.value ?? 1,
@@ -259,11 +261,11 @@ function cloneFaceShaderMaterial(
     partsAmbientColor:
       params.lighting?.partsAmbientColor ??
       (source.uniforms.uPartsAmbientColor
-        ? `#${source.uniforms.uPartsAmbientColor.value.getHexString()}`
+        ? source.uniforms.uPartsAmbientColor.value.clone()
         : "#ffffff"),
     partsAmbientAlpha: source.uniforms.uPartsAmbientAlpha?.value ?? 0,
     controllerAmbientColor: source.uniforms.uControllerAmbientColor
-      ? `#${source.uniforms.uControllerAmbientColor.value.getHexString()}`
+      ? source.uniforms.uControllerAmbientColor.value.clone()
       : new THREE.Color().setRGB(
           sekaiCostumeShopControllerDefaults.ambientColor.r,
           sekaiCostumeShopControllerDefaults.ambientColor.g,
@@ -271,7 +273,7 @@ function cloneFaceShaderMaterial(
         ),
     controllerAmbientIntensity: source.uniforms.uControllerAmbientIntensity?.value ?? 1,
     globalShadowColor: source.uniforms.uGlobalShadowColor
-      ? `#${source.uniforms.uGlobalShadowColor.value.getHexString()}`
+      ? source.uniforms.uGlobalShadowColor.value.clone()
       : "#ffffff",
     globalShadowAlpha: source.uniforms.uGlobalShadowAlpha?.value ?? 1,
     finalSaturation: source.uniforms.uFinalSaturation?.value ?? 1,

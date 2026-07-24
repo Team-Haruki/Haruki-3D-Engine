@@ -950,6 +950,7 @@ export class Haruki3DEngine {
       characterAmbientIntensity: light.characterAmbient,
       rimColorAlpha: light.rimColorAlpha,
       controllerRimRange: light.rimRange,
+      controllerRimEdgeSmoothness: light.rimEdgeSmoothness,
       controllerRimEmission: light.rimEmission,
       controllerRimLightInfluence: light.rimLightInfluence,
       controllerRimShadowSharpness: light.rimShadowSharpness,
@@ -968,6 +969,7 @@ export class Haruki3DEngine {
       characterAmbientIntensity: light.characterAmbient,
       rimColorAlpha: light.rimColorAlpha,
       controllerRimRange: light.rimRange,
+      controllerRimEdgeSmoothness: light.rimEdgeSmoothness,
       controllerRimEmission: light.rimEmission,
       controllerRimLightInfluence: light.rimLightInfluence,
       controllerRimShadowSharpness: light.rimShadowSharpness,
@@ -1960,6 +1962,7 @@ export class Haruki3DEngine {
   }
 
   updateLightControllerRimShape(shape: {
+    edgeSmoothness?: number | null;
     emission?: number | null;
     shadowSharpness?: number | null;
   }) {

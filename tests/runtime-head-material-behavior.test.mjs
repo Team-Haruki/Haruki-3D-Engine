@@ -4,6 +4,7 @@ import * as THREE from "three";
 import {
   bindHeadRuntimeMaterials,
   createSekaiBodyMaterial,
+  createSekaiFaceMaterial,
 } from "../dist/haruki-3d-engine-internal.js";
 
 test("head material binding installs the official through-hair layers for the exact Unity slot", async () => {
@@ -120,4 +121,80 @@ test("head material binding installs the official through-hair layers for the ex
     "eyelash_stencil_prepass",
     "eyelash_through_hair",
   ]);
+});
+
+test("face material cloning preserves Unity Gamma controller values", async () => {
+  const original = new THREE.MeshBasicMaterial();
+  original.userData.pjskMaterialKey = "face:0";
+  const mesh = new THREE.Mesh(new THREE.BufferGeometry(), original);
+  mesh.name = "Face";
+  const root = new THREE.Group();
+  root.add(mesh);
+  const bodyTemplate = createSekaiBodyMaterial({
+    baseColor: "#ffffff",
+    shadowColor: "#808080",
+    lightDirection: new THREE.Vector3(0, 1, 0),
+    lightIntensity: 1,
+    ambientIntensity: 1,
+    shadowThreshold: 0.5,
+    shadowWeight: 1,
+  });
+  const faceTemplate = createSekaiFaceMaterial({
+    baseColor: "#808080",
+    warmColor: "#404040",
+    lightDirection: new THREE.Vector3(0, 1, 0),
+    lightIntensity: 1,
+    ambientIntensity: 1,
+    controllerAmbientColor: "#123456",
+    partsAmbientColor: "#234567",
+    globalShadowColor: "#345678",
+  });
+
+  await bindHeadRuntimeMaterials({
+    root,
+    headAsset: {
+      id: "head",
+      displayName: "Head",
+      source: { bundleRoot: "", manifestUrl: "", meshUrl: "" },
+      rawImportOffset: { x: 0, y: 0, z: 0 },
+      assembly: {
+        expectedSkeletonId: "head",
+        attachOrigin: { fallbackPosition: { x: 0, y: 0, z: 0 } },
+      },
+      defaultFaceMode: "clean",
+      faceMaterials: [{
+        meshName: "Face",
+        slotIndex: 0,
+        materialKey: "face:0",
+        materialFileId: 1,
+        materialPathId: 2,
+        materialName: "mtl_chr_face_00",
+        materialKind: "face",
+        mode: "clean",
+      }],
+      proxy: {
+        faceColor: "#abcdef",
+        faceShadeColor: "#654321",
+        hairColor: "#ffffff",
+        hairShadowColor: "#808080",
+        headRadius: 1,
+        faceDepth: 1,
+        hairArc: 1,
+      },
+    },
+    textureLoader: { async loadAsync() { throw new Error("unexpected texture load"); } },
+    templates: { body: bodyTemplate, hair: bodyTemplate, face: faceTemplate },
+    view: { bodyDebugMode: 0, faceDebugMode: 0, faceSdfEnabled: true },
+    hair: {
+      controllerPresent: true,
+      proximityShadowEnabled: true,
+      headPosition: new THREE.Vector3(),
+    },
+  });
+
+  const gammaHex = color => color.getHexString(THREE.LinearSRGBColorSpace);
+  assert.ok(mesh.material instanceof THREE.ShaderMaterial);
+  assert.equal(gammaHex(mesh.material.uniforms.uControllerAmbientColor.value), "123456");
+  assert.equal(gammaHex(mesh.material.uniforms.uPartsAmbientColor.value), "234567");
+  assert.equal(gammaHex(mesh.material.uniforms.uGlobalShadowColor.value), "345678");
 });

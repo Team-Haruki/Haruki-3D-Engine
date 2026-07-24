@@ -93,7 +93,10 @@ The example file is safe for public use and should not contain machine-specific 
 
 For the HTTP service, set `HARUKI_ENGINE_CONFIG=<json>` or place `haruki-3d-engine.config.json` in the working directory. Server environment variables such as `HARUKI_RUNTIME_ROOT`, `HARUKI_CAPTURE_OUTPUT_DIR`, `HARUKI_CAPTURE_SCALE`, `HARUKI_CAPTURE_TIMEOUT_MS`, `HARUKI_CAPTURE_IDLE_SHUTDOWN`, `HARUKI_SERVER_HOST`, `CHROMIUM`, and `PORT` override config values.
 
-Current product 3D previews keep FaceSDF disabled by default. Use `capture.faceSdfEnabled: true`, `HARUKI_CAPTURE_FACE_SDF_ENABLED=true`, or a per-request `faceSdfEnabled: true` only for explicit FaceSDF research captures.
+Current product 3D previews enable FaceSDF by default for exported
+FaceSDF-capable materials. Use `capture.faceSdfEnabled: false`,
+`HARUKI_CAPTURE_FACE_SDF_ENABLED=false`, or a per-request
+`faceSdfEnabled: false` only when isolating the non-SDF fallback.
 
 ## Runtime Behavior
 

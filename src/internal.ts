@@ -83,11 +83,9 @@ export {
 export {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
-  evaluateSekaiFaceSphereShadow,
   evaluateSekaiHighlightRolloff,
   type SekaiBaseShadowInput,
   type SekaiFaceShadowInput,
-  type SekaiFaceSphereShadowInput,
 } from "./materials/sekaiCharacterLighting";
 export {
   normalizeHarukiRenderRecipe,

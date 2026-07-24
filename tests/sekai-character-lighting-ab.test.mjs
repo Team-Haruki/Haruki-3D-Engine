@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
-  evaluateSekaiFaceSphereShadow,
 } from "../dist/haruki-3d-engine-internal.js";
 
 function saturate(value) {
@@ -32,17 +31,6 @@ function legacyFaceShadow({ sdf, faceFront, faceSoftness }) {
   );
   const width = 0.018 + (0.11 - 0.018) * saturate(faceSoftness);
   return 1 - smooth01((sdf - (limit - width)) / (width * 2));
-}
-
-function legacyHeadShadow({ worldPosition, headPosition, lightDirection, shadow }) {
-  const fromHead = worldPosition.map((value, index) => value - headPosition[index]);
-  const distance = Math.hypot(...fromHead);
-  const direction = fromHead.map((value) => value / distance);
-  const behind = smooth01((
-    -direction.reduce((sum, value, index) => sum + value * lightDirection[index], 0) - 0.1
-  ) / (0.92 - 0.1));
-  const proximity = 1 - smooth01((distance - 0.18) / (0.78 - 0.18));
-  return Math.max(shadow, behind * proximity * 0.42);
 }
 
 test("fixed shoulder input proves the zero-width default was already algebraically equal", () => {
@@ -93,25 +81,4 @@ test("fixed face input removes the legacy reconstructed-angle gate", () => {
 
   assert.ok(official > 0.9);
   assert.equal(legacy, 0);
-});
-
-test("fixed back-head input removes the legacy proximity falloff", () => {
-  const common = {
-    shadow: 0.2,
-    headPosition: [1, 0, 0],
-    lightDirection: [0, 0, 1],
-    edge: 0,
-    smoothness: 0.5,
-    weight: 0.4,
-  };
-  const nearPosition = [1, 0, -0.4];
-  const farPosition = [1, 0, -100];
-  const officialNear = evaluateSekaiFaceSphereShadow({ ...common, worldPosition: nearPosition });
-  const officialFar = evaluateSekaiFaceSphereShadow({ ...common, worldPosition: farPosition });
-  const legacyNear = legacyHeadShadow({ ...common, worldPosition: nearPosition });
-  const legacyFar = legacyHeadShadow({ ...common, worldPosition: farPosition });
-
-  assert.equal(officialNear, officialFar);
-  assert.notEqual(legacyNear, legacyFar);
-  assert.equal(legacyFar, common.shadow);
 });

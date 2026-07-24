@@ -167,6 +167,10 @@ test("body shader starts with the captured CostumeShop controller state", () => 
   assert.equal(body.uniforms.uControllerRimColorWeight.value, 1);
   assert.equal(body.uniforms.uControllerShadowRimColorWeight.value, 1);
   assert.equal(body.uniforms.uControllerRimRange.value, 7);
+  assert.equal(
+    body.uniforms.uControllerRimEdgeSmoothness.value,
+    0.0010000000474974513
+  );
   assert.equal(body.uniforms.uControllerRimEmission.value, 0);
   assert.equal(body.uniforms.uControllerRimLightInfluence.value, 1);
   assert.equal(body.uniforms.uControllerRimShadowSharpness.value, 0.5);

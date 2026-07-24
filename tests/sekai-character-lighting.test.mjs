@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
-  evaluateSekaiFaceSphereShadow,
   evaluateSekaiHighlightRolloff,
   previewLightDefaults,
   sekaiCostumeShopControllerDefaults,
@@ -36,6 +35,7 @@ test("costume preview uses the official costume-shop directional transform", () 
   assert.equal(previewLightDefaults.characterAmbient, 1);
   assert.equal(previewLightDefaults.rimColorAlpha, 1);
   assert.equal(previewLightDefaults.rimRange, 7);
+  assert.equal(previewLightDefaults.rimEdgeSmoothness, 0.0010000000474974513);
   assert.equal(previewLightDefaults.rimEmission, 0);
   assert.equal(previewLightDefaults.rimLightInfluence, 1);
   assert.equal(previewLightDefaults.rimShadowSharpness, 0.5);
@@ -123,30 +123,6 @@ test("official FaceSDF mirrors UV choice and reuses the toon band", () => {
   assert.equal(result.sdf, 0.1);
   assert.equal(result.threshold, 0.25);
   assert.ok(Math.abs(result.shadow - 0.9259259259259258) < 1e-6);
-});
-
-test("official head sphere shadow is additive and independent of distance", () => {
-  const near = evaluateSekaiFaceSphereShadow({
-    shadow: 0.2,
-    worldPosition: [1, 0, -1],
-    headPosition: [1, 0, 0],
-    lightDirection: [0, 0, 1],
-    edge: 0,
-    smoothness: 0.5,
-    weight: 0.4,
-  });
-  const far = evaluateSekaiFaceSphereShadow({
-    shadow: 0.2,
-    worldPosition: [1, 0, -100],
-    headPosition: [1, 0, 0],
-    lightDirection: [0, 0, 1],
-    edge: 0,
-    smoothness: 0.5,
-    weight: 0.4,
-  });
-
-  assert.ok(Math.abs(near - 0.6) < 1e-6);
-  assert.ok(Math.abs(far - 0.6) < 1e-6);
 });
 
 test("official highlight rolloff preserves mids and compresses bright channels", () => {

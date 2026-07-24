@@ -489,6 +489,7 @@ export class CharacterLightingRuntime {
       characterAmbientIntensity: next.characterAmbient,
       rimColorAlpha: next.rimColorAlpha,
       controllerRimRange: next.rimRange,
+      controllerRimEdgeSmoothness: next.rimEdgeSmoothness,
       controllerRimEmission: next.rimEmission,
       controllerRimLightInfluence: next.rimLightInfluence,
       rimDirection: getSekaiPreviewRimDirection(),
@@ -525,6 +526,7 @@ export class CharacterLightingRuntime {
       characterAmbientIntensity: next.characterAmbient,
       rimColorAlpha: next.rimColorAlpha,
       controllerRimRange: next.rimRange,
+      controllerRimEdgeSmoothness: next.rimEdgeSmoothness,
       controllerRimEmission: next.rimEmission,
       controllerRimLightInfluence: next.rimLightInfluence,
       rimDirection: getSekaiPreviewRimDirection(),
@@ -590,6 +592,9 @@ export class CharacterLightingRuntime {
       if (uniforms.uCharacterAmbientIntensity) uniforms.uCharacterAmbientIntensity.value = next.characterAmbient;
       if (uniforms.uRimColorAlpha) uniforms.uRimColorAlpha.value = next.rimColorAlpha;
       if (uniforms.uControllerRimRange) uniforms.uControllerRimRange.value = next.rimRange;
+      if (uniforms.uControllerRimEdgeSmoothness) {
+        uniforms.uControllerRimEdgeSmoothness.value = next.rimEdgeSmoothness;
+      }
       if (uniforms.uControllerRimEmission) {
         uniforms.uControllerRimEmission.value = next.rimEmission;
       }
@@ -674,9 +679,15 @@ export class CharacterLightingRuntime {
   }
 
   updateControllerRimShape(shape: {
+    edgeSmoothness?: number | null;
     emission?: number | null;
     shadowSharpness?: number | null;
   }) {
+    const edgeSmoothness = Math.max(
+      shape.edgeSmoothness ??
+        sekaiCostumeShopControllerDefaults.rimEdgeSmoothness,
+      0
+    );
     const emission = Math.max(
       shape.emission ?? sekaiCostumeShopControllerDefaults.rimEmission,
       0
@@ -688,6 +699,9 @@ export class CharacterLightingRuntime {
       1
     );
     const apply = (material: THREE.ShaderMaterial) => {
+      if (material.uniforms.uControllerRimEdgeSmoothness) {
+        material.uniforms.uControllerRimEdgeSmoothness.value = edgeSmoothness;
+      }
       if (material.uniforms.uControllerRimEmission) {
         material.uniforms.uControllerRimEmission.value = emission;
       }

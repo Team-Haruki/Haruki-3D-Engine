@@ -43,6 +43,7 @@ export type RuntimeMaterialDebug = {
   shaderSpecularPower?: number | null;
   shaderRimThreshold?: number | null;
   shaderControllerRimRange?: number | null;
+  shaderControllerRimEdgeSmoothness?: number | null;
   shaderRimColorAlpha?: number | null;
   shaderControllerRimEmission?: number | null;
   shaderControllerRimLightInfluence?: number | null;
@@ -163,6 +164,9 @@ export function cloneBodyShaderMaterial(
     controllerRimRange:
       source.uniforms.uControllerRimRange?.value ??
       sekaiCostumeShopControllerDefaults.rimRange,
+    controllerRimEdgeSmoothness:
+      source.uniforms.uControllerRimEdgeSmoothness?.value ??
+      sekaiCostumeShopControllerDefaults.rimEdgeSmoothness,
     controllerRimEmission:
       source.uniforms.uControllerRimEmission?.value ??
       sekaiCostumeShopControllerDefaults.rimEmission,
@@ -191,9 +195,6 @@ export function cloneBodyShaderMaterial(
       params.lighting?.useLambert ??
       ((source.uniforms.uUseLambert?.value ?? 1) > 0.5),
     headPosition: params.headPosition ?? source.uniforms.uHeadPosition?.value.clone(),
-    faceSphereShadowEdge: params.lighting?.faceSphereShadowEdge ?? 0,
-    faceSphereShadowSmoothness: params.lighting?.faceSphereShadowSmoothness ?? 0,
-    faceSphereShadowWeight: params.lighting?.faceSphereShadowWeight ?? 0,
     saturation: params.lighting?.saturation ?? source.uniforms.uSaturation.value,
     value: params.lighting?.value ?? source.uniforms.uValue?.value ?? 0.5,
     contrast: params.lighting?.contrast ?? source.uniforms.uContrast?.value ?? 0.5,
@@ -420,15 +421,6 @@ export function tuneLightingForPreview(
     faceSkinShadowStrength:
       readRawMaterialFloat(rawMaterial, "_FaceSkinShadowStrength") ??
       lighting.faceSkinShadowStrength,
-    faceSphereShadowEdge:
-      readRawMaterialFloat(rawMaterial, "_FaceSphereShadowEdge") ??
-      lighting.faceSphereShadowEdge,
-    faceSphereShadowSmoothness:
-      readRawMaterialFloat(rawMaterial, "_FaceSphereShadowSmoothness") ??
-      lighting.faceSphereShadowSmoothness,
-    faceSphereShadowWeight:
-      readRawMaterialFloat(rawMaterial, "_FaceSphereShadowWeight") ??
-      lighting.faceSphereShadowWeight,
     hairShadow: boolean("_HairShadow", "_HAIR_SHADOW", lighting.hairShadow),
   };
 }
@@ -851,6 +843,8 @@ export async function bindBodyRuntimeMaterials({
         shaderSpecularPower: uniforms.uSpecularPower?.value ?? null,
         shaderRimThreshold: uniforms.uRimThreshold?.value ?? null,
         shaderControllerRimRange: uniforms.uControllerRimRange?.value ?? null,
+        shaderControllerRimEdgeSmoothness:
+          uniforms.uControllerRimEdgeSmoothness?.value ?? null,
         shaderRimColorAlpha: uniforms.uRimColorAlpha?.value ?? null,
         shaderControllerRimEmission: uniforms.uControllerRimEmission?.value ?? null,
         shaderControllerRimLightInfluence:

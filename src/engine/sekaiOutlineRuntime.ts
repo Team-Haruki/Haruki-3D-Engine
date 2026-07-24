@@ -180,6 +180,7 @@ export function createSekaiOutlineMaterial(
     side: THREE.BackSide,
     transparent: false,
     opacity: 1,
+    depthFunc: THREE.LessDepth,
     depthWrite: true,
     depthTest: true,
     blending: THREE.NoBlending,

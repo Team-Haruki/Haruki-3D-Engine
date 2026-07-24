@@ -13,7 +13,7 @@
     "springRuntimeMode": "unity-prefab",
     "cameraPreset": "capture",
     "cameraProfile": "full-body",
-    "faceSdfEnabled": false,
+    "faceSdfEnabled": true,
     "projectedShadow": {
       "width": 0.72,
       "height": 1.06,

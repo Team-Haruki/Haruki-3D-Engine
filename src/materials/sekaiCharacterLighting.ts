@@ -21,16 +21,6 @@ export type SekaiFaceShadowInput = {
   fadeMode: number;
 };
 
-export type SekaiFaceSphereShadowInput = {
-  shadow: number;
-  worldPosition: readonly [number, number, number];
-  headPosition: readonly [number, number, number];
-  lightDirection: readonly [number, number, number];
-  edge: number;
-  smoothness: number;
-  weight: number;
-};
-
 function saturate(value: number) {
   return Math.min(Math.max(value, 0), 1);
 }
@@ -70,29 +60,6 @@ export function evaluateSekaiFaceShadow(input: SekaiFaceShadowInput) {
     : saturate((sdf - threshold) / Math.max((1 - threshold) * width, 1e-5));
   const shadow = input.fadeMode < 0.5 ? smooth01(q) : 1 - smooth01(q);
   return { sdf, threshold, shadow };
-}
-
-export function evaluateSekaiFaceSphereShadow(input: SekaiFaceSphereShadowInput) {
-  const headLengthSquared = input.headPosition.reduce((sum, value) => sum + value * value, 0);
-  if (input.weight <= 0.001 || headLengthSquared <= 1e-6) {
-    return saturate(input.shadow);
-  }
-  const fromHead = input.worldPosition.map(
-    (value, index) => value - input.headPosition[index]
-  );
-  const fromHeadLength = Math.hypot(...fromHead);
-  const lightLength = Math.hypot(...input.lightDirection);
-  if (fromHeadLength <= 1e-6 || lightLength <= 1e-6) {
-    return saturate(input.shadow);
-  }
-  const dot = fromHead.reduce(
-    (sum, value, index) =>
-      sum + value / fromHeadLength * input.lightDirection[index] / lightLength,
-    0
-  );
-  const width = Math.max(input.smoothness, 0);
-  const q = saturate((dot - (input.edge - width)) / Math.max(width * 2, 1e-5));
-  return saturate(input.shadow + (1 - smooth01(q)) * input.weight);
 }
 
 export function evaluateSekaiHighlightRolloff(

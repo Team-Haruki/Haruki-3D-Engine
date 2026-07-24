@@ -15,6 +15,7 @@ export type PreviewLightState = {
   characterAmbient: number;
   rimColorAlpha: number;
   rimRange: number;
+  rimEdgeSmoothness: number;
   rimEmission: number;
   rimLightInfluence: number;
   rimShadowSharpness: number;
@@ -42,6 +43,7 @@ export type SekaiRuntimeMaterialProfile = {
     characterAmbientIntensity: number;
     rimColorAlpha: number;
     rimRange: number;
+    rimEdgeSmoothness: number;
     rimEmission: number;
     rimLightInfluence: number;
     rimShadowSharpness: number;
@@ -137,9 +139,6 @@ export type MaterialLightingSettings = {
   useFaceShadowLimiter?: boolean | null;
   rangeLimit?: number | null;
   faceSkinShadowStrength?: number | null;
-  faceSphereShadowEdge?: number | null;
-  faceSphereShadowSmoothness?: number | null;
-  faceSphereShadowWeight?: number | null;
   hairShadow?: boolean | null;
 };
 
@@ -379,6 +378,7 @@ export const previewLightDefaults: PreviewLightState = {
   characterAmbient: sekaiCostumeShopControllerDefaults.ambientIntensity,
   rimColorAlpha: sekaiCostumeShopControllerDefaults.rimColorAlpha,
   rimRange: sekaiCostumeShopControllerDefaults.rimRange,
+  rimEdgeSmoothness: sekaiCostumeShopControllerDefaults.rimEdgeSmoothness,
   rimEmission: sekaiCostumeShopControllerDefaults.rimEmission,
   rimLightInfluence: sekaiCostumeShopControllerDefaults.rimLightInfluence,
   rimShadowSharpness: sekaiCostumeShopControllerDefaults.rimShadowSharpness,
@@ -406,6 +406,7 @@ export const sekaiRuntimeMaterialProfile: SekaiRuntimeMaterialProfile = {
     characterAmbientIntensity: sekaiCostumeShopControllerDefaults.ambientIntensity,
     rimColorAlpha: sekaiCostumeShopControllerDefaults.rimColorAlpha,
     rimRange: sekaiCostumeShopControllerDefaults.rimRange,
+    rimEdgeSmoothness: sekaiCostumeShopControllerDefaults.rimEdgeSmoothness,
     rimEmission: sekaiCostumeShopControllerDefaults.rimEmission,
     rimLightInfluence: sekaiCostumeShopControllerDefaults.rimLightInfluence,
     rimShadowSharpness: sekaiCostumeShopControllerDefaults.rimShadowSharpness,

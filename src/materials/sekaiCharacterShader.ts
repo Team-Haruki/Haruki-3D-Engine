@@ -30,6 +30,7 @@ export type BodyMaterialUniforms = {
   characterAmbientIntensity?: number;
   rimColorAlpha?: number;
   controllerRimRange?: number;
+  controllerRimEdgeSmoothness?: number;
   controllerRimEmission?: number;
   controllerRimLightInfluence?: number;
   rimDirection?: THREE.Vector3;
@@ -42,9 +43,6 @@ export type BodyMaterialUniforms = {
   hairShadowEnabled?: boolean;
   useLambert?: boolean;
   headPosition?: THREE.Vector3;
-  faceSphereShadowEdge?: number;
-  faceSphereShadowSmoothness?: number;
-  faceSphereShadowWeight?: number;
   saturation?: number;
   value?: number;
   contrast?: number;
@@ -162,6 +160,11 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uControllerRimRange: {
         value: initial.controllerRimRange ?? sekaiCostumeShopControllerDefaults.rimRange,
       },
+      uControllerRimEdgeSmoothness: {
+        value:
+          initial.controllerRimEdgeSmoothness ??
+          sekaiCostumeShopControllerDefaults.rimEdgeSmoothness,
+      },
       uControllerRimEmission: {
         value:
           initial.controllerRimEmission ??
@@ -222,9 +225,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uHeadPosition: {
         value: (initial.headPosition ?? new THREE.Vector3()).clone(),
       },
-      uFaceSphereShadowEdge: { value: initial.faceSphereShadowEdge ?? 0.0 },
-      uFaceSphereShadowSmoothness: { value: initial.faceSphereShadowSmoothness ?? 0.0 },
-      uFaceSphereShadowWeight: { value: initial.faceSphereShadowWeight ?? 0.0 },
       uSaturation: { value: initial.saturation ?? 0.5 },
       uValue: { value: initial.value ?? 0.5 },
       uContrast: { value: initial.contrast ?? 0.5 },
@@ -295,6 +295,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uniform float uControllerRimColorWeight;
       uniform float uControllerShadowRimColorWeight;
       uniform float uControllerRimRange;
+      uniform float uControllerRimEdgeSmoothness;
       uniform float uControllerRimEmission;
       uniform float uControllerRimLightInfluence;
       uniform float uControllerRimShadowSharpness;
@@ -328,9 +329,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
       uniform float uHairShadowEnabled;
       uniform float uUseLambert;
       uniform vec3 uHeadPosition;
-      uniform float uFaceSphereShadowEdge;
-      uniform float uFaceSphereShadowSmoothness;
-      uniform float uFaceSphereShadowWeight;
       uniform float uSaturation;
       uniform float uValue;
       uniform float uContrast;
@@ -444,24 +442,6 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         );
         float shadowBand = mix(geometricShadowBand, officialShadowBand, valueShadowInfluence) * uShadowWeight;
         float litBand = clamp(1.0 - shadowBand, 0.0, 1.0);
-        if (
-          uHairShadowEnabled > 0.5 &&
-          uFaceSphereShadowWeight > 0.001 &&
-          dot(uHeadPosition, uHeadPosition) > 0.000001
-        ) {
-          vec3 fromHead = normalize(vWorldPosition - uHeadPosition);
-          float sphereLight = smoothstep(
-            uFaceSphereShadowEdge - uFaceSphereShadowSmoothness,
-            uFaceSphereShadowEdge + uFaceSphereShadowSmoothness,
-            dot(fromHead, lightDir)
-          );
-          shadowBand = clamp(
-            shadowBand + (1.0 - sphereLight) * uFaceSphereShadowWeight,
-            0.0,
-            1.0
-          );
-        }
-        litBand = clamp(1.0 - shadowBand, 0.0, 1.0);
 
         vec3 adjustedMainColor = applyMaterialHsvc(mainColor);
         vec3 fallbackShadowColor = mainColor * uShadowColor;
@@ -537,7 +517,9 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
         float rimFactorX = max(uControllerRimRange, 0.0);
         rimFactorX = rimFactorX > 10.0 ? rimFactorX * 0.01 : rimFactorX;
         rimFactorX = min(rimFactorX, 10.0);
-        float rimFactorZ = max(uControllerRimEmission, 0.0001);
+        float rimFactorY = max(uControllerRimEdgeSmoothness, 0.00001);
+        // uControllerRimEmission remains independently bound. Its pixel-stage
+        // operation is not yet closed by the available GPU data.
         float rimFactorW = clamp(uControllerRimLightInfluence, 0.0, 1.0);
         float viewFresnel = pow(
           1.0 - nDotV,
@@ -548,7 +530,7 @@ export function createSekaiBodyMaterial(initial: BodyMaterialUniforms) {
           ? directedRim
           : directedRim * (1.0 - 2.0 * rimFactorW);
         float rim = sekaiSmooth01(clamp(
-          (sidedRim - uRimThreshold) / rimFactorZ,
+          (sidedRim - uRimThreshold) / rimFactorY,
           0.0,
           1.0
         ));
@@ -683,6 +665,9 @@ export function updateSekaiBodyMaterial(
     material.uniforms.uControllerShadowRimColorWeight.value;
   material.uniforms.uControllerRimRange.value =
     next.controllerRimRange ?? material.uniforms.uControllerRimRange.value;
+  material.uniforms.uControllerRimEdgeSmoothness.value =
+    next.controllerRimEdgeSmoothness ??
+    material.uniforms.uControllerRimEdgeSmoothness.value;
   material.uniforms.uControllerRimEmission.value =
     next.controllerRimEmission ?? material.uniforms.uControllerRimEmission.value;
   material.uniforms.uControllerRimLightInfluence.value =
@@ -730,9 +715,6 @@ export function updateSekaiBodyMaterial(
   if (next.headPosition && material.uniforms.uHeadPosition) {
     material.uniforms.uHeadPosition.value.copy(next.headPosition);
   }
-  material.uniforms.uFaceSphereShadowEdge.value = next.faceSphereShadowEdge ?? 0.0;
-  material.uniforms.uFaceSphereShadowSmoothness.value = next.faceSphereShadowSmoothness ?? 0.0;
-  material.uniforms.uFaceSphereShadowWeight.value = next.faceSphereShadowWeight ?? 0.0;
   material.uniforms.uCharacterAmbientIntensity.value = next.characterAmbientIntensity ?? 0.3;
   material.uniforms.uRimColorAlpha.value =
     next.rimColorAlpha ?? material.uniforms.uRimColorAlpha.value;

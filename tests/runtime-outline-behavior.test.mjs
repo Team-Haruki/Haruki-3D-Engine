@@ -103,6 +103,7 @@ test("official outline consumes material tint, main texture transform, and alpha
   assert.equal(material.map, texture);
   assert.equal(material.alphaTest, 0.375);
   assert.equal(material.side, THREE.BackSide);
+  assert.equal(material.depthFunc, THREE.LessDepth);
   assert.equal(material.depthWrite, true);
   assert.equal(material.blending, THREE.NoBlending);
   assert.equal(material.polygonOffset, false);
