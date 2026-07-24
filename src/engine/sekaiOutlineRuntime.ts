@@ -2,6 +2,16 @@ import * as THREE from "three";
 import type {
   RawMaterialProperties,
 } from "../data/sampleScene";
+import {
+  readRawMaterialColor,
+  readRawMaterialFloat,
+  readRawMaterialTexture,
+} from "./rawMaterialRuntime";
+import { setSekaiGammaColor } from "../materials/sekaiCharacterShader";
+
+export {
+  readRawMaterialColor,
+} from "./rawMaterialRuntime";
 
 export const sekaiCostumeShopOutlineSettings = {
   widthMin: 0.0004,
@@ -69,56 +79,6 @@ type SekaiOutlineControllerState = {
   blending: number;
 };
 
-export function readRawMaterialColor(
-  rawMaterial: RawMaterialProperties | null | undefined,
-  propertyName: string
-): SekaiRgba | null {
-  const property = rawMaterial?.colorProperties?.find(
-    (entry) => entry.name.toLowerCase() === propertyName.toLowerCase()
-  );
-  if (
-    !property ||
-    !Number.isFinite(property.r) ||
-    !Number.isFinite(property.g) ||
-    !Number.isFinite(property.b) ||
-    !Number.isFinite(property.a)
-  ) {
-    return null;
-  }
-  return {
-    r: property.r,
-    g: property.g,
-    b: property.b,
-    a: property.a,
-  };
-}
-
-function readRawMaterialFloat(
-  rawMaterial: RawMaterialProperties | null | undefined,
-  propertyName: string
-) {
-  const normalizedName = propertyName.toLowerCase();
-  const floatProperty = rawMaterial?.floatProperties?.find(
-    (entry) => entry.name.toLowerCase() === normalizedName
-  );
-  if (Number.isFinite(floatProperty?.value)) {
-    return floatProperty!.value;
-  }
-  const intProperty = rawMaterial?.intProperties?.find(
-    (entry) => entry.name.toLowerCase() === normalizedName
-  );
-  return Number.isFinite(intProperty?.value) ? intProperty!.value : null;
-}
-
-function readRawMaterialTexture(
-  rawMaterial: RawMaterialProperties | null | undefined,
-  propertyName: string
-) {
-  return rawMaterial?.textureProperties?.find(
-    (entry) => entry.name.toLowerCase() === propertyName.toLowerCase()
-  ) ?? null;
-}
-
 export function evaluateSekaiOutlineColor(
   mainTexture: SekaiRgb,
   materialOutline: SekaiRgb,
@@ -161,13 +121,14 @@ export function applySekaiOutlineController(
   ) {
     state.color.setRGB(color.r, color.g, color.b);
   } else {
-    state.color.set(
+    setSekaiGammaColor(
+      state.color,
       color ??
-      new THREE.Color().setRGB(
-        sekaiCostumeShopOutlineControllerDefaults.color.r,
-        sekaiCostumeShopOutlineControllerDefaults.color.g,
-        sekaiCostumeShopOutlineControllerDefaults.color.b
-      )
+        new THREE.Color().setRGB(
+          sekaiCostumeShopOutlineControllerDefaults.color.r,
+          sekaiCostumeShopOutlineControllerDefaults.color.g,
+          sekaiCostumeShopOutlineControllerDefaults.color.b
+        )
     );
   }
   state.blending = THREE.MathUtils.clamp(
@@ -323,6 +284,7 @@ export function createSekaiOutlineMaterial(
         "  #ifdef DECODE_VIDEO_TEXTURE",
         "    sampledDiffuseColor = sRGBTransferEOTF(sampledDiffuseColor);",
         "  #endif",
+        "  sampledDiffuseColor = sRGBTransferOETF(sampledDiffuseColor);",
         "  diffuseColor *= sampledDiffuseColor;",
         "#endif",
       ].join("\n")
@@ -337,6 +299,10 @@ export function createSekaiOutlineMaterial(
         "  clamp(uSekaiCharacterOutlineBlending, 0.0, 1.0)",
         ");",
       ].join("\n")
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <colorspace_fragment>",
+      ""
     );
   };
   material.customProgramCacheKey = () =>

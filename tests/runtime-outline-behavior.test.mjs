@@ -6,7 +6,9 @@ import {
   createSekaiOutlineMaterial,
   evaluateSekaiOutlineColor,
   evaluateSekaiOutlineFovFactor,
+  readRawMaterialBoolean,
   readRawMaterialColor,
+  readRawMaterialFloat,
   sekaiCostumeShopOutlineControllerDefaults,
   sekaiCostumeShopOutlineSettings,
 } from "../dist/haruki-3d-engine-internal.js";
@@ -57,23 +59,32 @@ test("raw material lookup preserves unknown exported color properties", () => {
   );
 });
 
-test("outline material consumes raw color, alpha clip, and texture transform", () => {
+test("raw material feature state prefers values and preserves keyword truth", () => {
+  const raw = rawMaterial({
+    floatProperties: [{ name: "_UseLambert", value: 0 }],
+    intProperties: [{ name: "_USELAMBERT", value: 1 }],
+    validKeywords: ["_HAIR_SHADOW"],
+    invalidKeywords: ["_USE_FACE_SDF"],
+  });
+
+  assert.equal(readRawMaterialFloat(raw, "_uselambert"), 0);
+  assert.equal(readRawMaterialBoolean(raw, "_UseLambert", "_LAMBERT"), false);
+  assert.equal(readRawMaterialBoolean(raw, "_HairShadow", "_hair_shadow"), true);
+  assert.equal(readRawMaterialBoolean(raw, "_UseFaceSDF", "_use_face_sdf"), false);
+});
+
+test("official outline consumes material tint, main texture transform, and alpha clip", () => {
   const texture = new THREE.Texture();
   const material = createSekaiOutlineMaterial(
     true,
     rawMaterial({
       textureProperties: [{
         name: "_MainTex",
-        textureName: "main",
-        textureFileId: 0,
-        texturePathId: 1,
-        textureKey: "ref:0:1",
+        textureKey: "tex",
         scaleX: 2,
         scaleY: 3,
         offsetX: 0.25,
         offsetY: 0.5,
-        colorSpace: 0,
-        uri: "/main.ktx2",
       }],
       colorProperties: [
         { name: "_OutlineColor", r: 0.2, g: 0.3, b: 0.4, a: 1 },
@@ -86,13 +97,15 @@ test("outline material consumes raw color, alpha clip, and texture transform", (
     true,
     texture
   );
-  assert.ok(Math.abs(material.color.r - 0.2) < 1e-7);
-  assert.ok(Math.abs(material.color.g - 0.3) < 1e-7);
-  assert.ok(Math.abs(material.color.b - 0.4) < 1e-7);
+  assert.ok(Math.abs(material.color.r - 0.2) < 1e-6);
+  assert.ok(Math.abs(material.color.g - 0.3) < 1e-6);
+  assert.ok(Math.abs(material.color.b - 0.4) < 1e-6);
+  assert.equal(material.map, texture);
   assert.equal(material.alphaTest, 0.375);
   assert.equal(material.side, THREE.BackSide);
   assert.equal(material.depthWrite, true);
   assert.equal(material.blending, THREE.NoBlending);
+  assert.equal(material.polygonOffset, false);
 
   const shader = {
     uniforms: THREE.UniformsUtils.clone(THREE.ShaderLib.basic.uniforms),
@@ -100,10 +113,24 @@ test("outline material consumes raw color, alpha clip, and texture transform", (
     fragmentShader: THREE.ShaderLib.basic.fragmentShader,
   };
   material.onBeforeCompile(shader, {});
-  assert.deepEqual(shader.uniforms.uSekaiMainTexST.value.toArray(), [2, 3, 0.25, 0.5]);
-  assert.match(shader.vertexShader, /vSekaiMainTexUv = uv \* uSekaiMainTexST\.xy \+ uSekaiMainTexST\.zw;/);
+  assert.equal(
+    shader.uniforms.uSekaiOutlineWidth.value.x,
+    sekaiCostumeShopOutlineSettings.widthMin
+  );
+  assert.equal(
+    shader.uniforms.uSekaiOutlineWidth.value.y,
+    sekaiCostumeShopOutlineSettings.widthMax
+  );
+  assert.deepEqual(
+    shader.uniforms.uSekaiMainTexST.value.toArray(),
+    [2, 3, 0.25, 0.5]
+  );
+  assert.match(shader.vertexShader, /vSekaiMainTexUv = uv \* uSekaiMainTexST\.xy/);
   assert.match(shader.fragmentShader, /texture2D\(map, vSekaiMainTexUv\)/);
+  assert.match(shader.fragmentShader, /sRGBTransferOETF\(sampledDiffuseColor\)/);
   assert.match(shader.fragmentShader, /diffuseColor\.rgb = mix\(/);
+  assert.doesNotMatch(shader.fragmentShader, /#include <colorspace_fragment>/);
+  assert.doesNotMatch(shader.vertexShader, /uOutlineClipOffset/);
 
   material.dispose();
   texture.dispose();

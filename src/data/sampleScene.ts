@@ -13,16 +13,18 @@ export type PreviewLightState = {
   shadowThreshold: number;
   shadowWeight: number;
   characterAmbient: number;
-  rimIntensity: number;
-  rimThreshold: number;
-  rimDirectionality: number;
+  rimColorAlpha: number;
+  rimRange: number;
+  rimEmission: number;
+  rimLightInfluence: number;
+  rimShadowSharpness: number;
   characterHeight: number;
 };
 
 export type SekaiRuntimeMaterialProfile = {
   version: number;
   bodyPipeline: "sekai_csh_toon";
-  facePipeline: "character_tint_with_weak_sdf";
+  facePipeline: "sekai_csh_toon";
   layerPipeline: "sekai_eye_layers";
   vrmStrategy: "prefab_native_runtime_only";
   textureRoles: {
@@ -38,9 +40,11 @@ export type SekaiRuntimeMaterialProfile = {
     shadowThreshold: number;
     shadowWeight: number;
     characterAmbientIntensity: number;
-    rimIntensity: number;
-    rimThreshold: number;
-    rimDirectionality: number;
+    rimColorAlpha: number;
+    rimRange: number;
+    rimEmission: number;
+    rimLightInfluence: number;
+    rimShadowSharpness: number;
     rimRotationDegrees: Vec3;
   };
   viewerTunedPreview: PreviewLightState;
@@ -338,6 +342,27 @@ export const sekaiCostumeShopDirectionalLightDirection: Vec3 = {
   z: 0.6208851530148456,
 };
 
+export const sekaiCostumeShopRimLightDirection: Vec3 = {
+  x: 0.8137976813493737,
+  y: -0.3420201433256687,
+  z: 0.4698463103929543,
+};
+
+export const sekaiCostumeShopControllerDefaults = {
+  ambientColor: { r: 0.5, g: 0.5, b: 0.5 },
+  ambientIntensity: 1,
+  specularColor: { r: 1, g: 1, b: 1 },
+  specularIntensity: 1,
+  rimColor: { r: 0.5, g: 0.5, b: 0.5 },
+  rimColorAlpha: 1,
+  rimRange: 7,
+  rimEdgeSmoothness: 0.0010000000474974513,
+  rimEmission: 0,
+  rimLightInfluence: 1,
+  shadowRimColor: { r: 0.5, g: 0.5, b: 0.5 },
+  rimShadowSharpness: 0.5,
+} as const;
+
 export const previewLightDirectionFit: Vec3 =
   sekaiCostumeShopDirectionalLightDirection;
 
@@ -347,21 +372,23 @@ export const previewLightDefaults: PreviewLightState = {
   x: previewLightDirectionFit.x,
   y: previewLightDirectionFit.y,
   z: previewLightDirectionFit.z,
-  intensity: 0.48,
-  ambient: 0.16,
+  intensity: 1,
+  ambient: 0,
   shadowThreshold: previewShadowThresholdFit,
   shadowWeight: 1,
-  characterAmbient: 0.12,
-  rimIntensity: 0.18,
-  rimThreshold: 0.18,
-  rimDirectionality: 0.85,
+  characterAmbient: sekaiCostumeShopControllerDefaults.ambientIntensity,
+  rimColorAlpha: sekaiCostumeShopControllerDefaults.rimColorAlpha,
+  rimRange: sekaiCostumeShopControllerDefaults.rimRange,
+  rimEmission: sekaiCostumeShopControllerDefaults.rimEmission,
+  rimLightInfluence: sekaiCostumeShopControllerDefaults.rimLightInfluence,
+  rimShadowSharpness: sekaiCostumeShopControllerDefaults.rimShadowSharpness,
   characterHeight: 1,
 };
 
 export const sekaiRuntimeMaterialProfile: SekaiRuntimeMaterialProfile = {
-  version: 1,
+  version: 3,
   bodyPipeline: "sekai_csh_toon",
-  facePipeline: "character_tint_with_weak_sdf",
+  facePipeline: "sekai_csh_toon",
   layerPipeline: "sekai_eye_layers",
   vrmStrategy: "prefab_native_runtime_only",
   textureRoles: {
@@ -372,15 +399,17 @@ export const sekaiRuntimeMaterialProfile: SekaiRuntimeMaterialProfile = {
   },
   pluginPreview: {
     directionalLocation: sekaiReferenceDirectionalLocation,
-    directionalEnergy: 0.48,
-    ambientIntensity: 0.16,
+    directionalEnergy: 1,
+    ambientIntensity: 0,
     shadowThreshold: previewShadowThresholdFit,
     shadowWeight: 1,
-    characterAmbientIntensity: 0.12,
-    rimIntensity: 0.18,
-    rimThreshold: 0.18,
-    rimDirectionality: 0.85,
-    rimRotationDegrees: { x: 135, y: 0, z: -90 },
+    characterAmbientIntensity: sekaiCostumeShopControllerDefaults.ambientIntensity,
+    rimColorAlpha: sekaiCostumeShopControllerDefaults.rimColorAlpha,
+    rimRange: sekaiCostumeShopControllerDefaults.rimRange,
+    rimEmission: sekaiCostumeShopControllerDefaults.rimEmission,
+    rimLightInfluence: sekaiCostumeShopControllerDefaults.rimLightInfluence,
+    rimShadowSharpness: sekaiCostumeShopControllerDefaults.rimShadowSharpness,
+    rimRotationDegrees: { x: 20, y: -60, z: 0 },
   },
   viewerTunedPreview: previewLightDefaults,
 };

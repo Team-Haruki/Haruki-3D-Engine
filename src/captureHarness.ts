@@ -99,7 +99,9 @@ function readCaptureConfig(): CaptureConfig | null {
     warmupFrames: Math.max(Math.trunc(Number.isFinite(warmupFrames) ? warmupFrames : 0), 0),
     warmupMode: warmupModeParam === "runtime" ? "runtime" : "animation",
     bodyDebugMode: readBodyDebugMode(params),
-    faceSdfEnabled: readBoolean(params.get("faceSdfEnabled")),
+    faceSdfEnabled: params.has("faceSdfEnabled")
+      ? readBoolean(params.get("faceSdfEnabled"))
+      : true,
     faceSdfDebugMode: readFaceSdfDebugMode(params),
     faceSdfDebugLightMode: readFaceSdfDebugLightMode(params),
     renderIsolation: readRenderIsolationMode(params),

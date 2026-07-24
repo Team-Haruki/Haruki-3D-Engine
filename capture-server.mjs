@@ -75,13 +75,6 @@ const MAX_CAPTURE_TIMEOUT_MS = 300000;
 const MAX_TRACE_EVENTS = 10000;
 let pendingCaptureCount = 0;
 
-if (defaultWidth !== defaultHeight) {
-  throw new Error(`Capture defaults must be square, got ${defaultWidth}x${defaultHeight}.`);
-}
-if (defaultWidth * defaultScale > MAX_CAPTURE_DIMENSION) {
-  throw new Error(`Capture defaults must not exceed ${MAX_CAPTURE_DIMENSION} physical pixels per side.`);
-}
-
 function enqueue(task) {
   if (pendingCaptureCount >= MAX_PENDING_CAPTURES) {
     throw new Error("Capture queue is full.");
@@ -295,12 +288,6 @@ function validateCaptureRequest(input) {
   const width = readIntInRange(input.width, defaultWidth, 320, MAX_CAPTURE_DIMENSION);
   const height = readIntInRange(input.height, defaultHeight, 320, MAX_CAPTURE_DIMENSION);
   const scale = Math.min(Math.max(readNumber(input.scale, defaultScale), 1), 2);
-  if (width !== height) {
-    throw new Error(`Capture output must be square, got ${width}x${height}.`);
-  }
-  if (width * scale > MAX_CAPTURE_DIMENSION) {
-    throw new Error(`Capture output must not exceed ${MAX_CAPTURE_DIMENSION} physical pixels per side.`);
-  }
   return {
     imageId,
     cacheMode,

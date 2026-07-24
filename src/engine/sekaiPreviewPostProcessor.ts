@@ -1,5 +1,5 @@
 export const sekaiPreviewPostProcessDefaults = {
-  maxOutputSize: 2048,
+  maxOutputSize: 2800,
   enabled: false,
 } as const;
 

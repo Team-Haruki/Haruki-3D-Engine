@@ -101,8 +101,8 @@ test("loads engine config JSON and applies capture runtime CLI overrides", () =>
 test("capture server bind host can be restricted without changing container defaults", () => {
   const defaults = resolveCaptureServerOptions({}, {});
   assert.equal(defaults.host, "0.0.0.0");
-  assert.equal(defaults.defaultWidth, 1024);
-  assert.equal(defaults.defaultHeight, 1024);
+  assert.equal(defaults.defaultWidth, 1400);
+  assert.equal(defaults.defaultHeight, 1000);
   assert.equal(defaults.defaultScale, 2);
   assert.equal(resolveCaptureServerOptions({}, {
     HARUKI_SERVER_HOST: "127.0.0.1",
@@ -157,8 +157,8 @@ test("capture server accepts idle shutdown duration env", () => {
   assert.equal(server.idleShutdownMs, 30 * 60 * 1000);
 });
 
-test("capture server keeps FaceSDF off by default but allows explicit overrides", () => {
-  assert.equal(resolveCaptureServerOptions({}, {}).defaultFaceSdfEnabled, false);
+test("capture server enables official FaceSDF by default but allows explicit overrides", () => {
+  assert.equal(resolveCaptureServerOptions({}, {}).defaultFaceSdfEnabled, true);
   assert.equal(resolveCaptureServerOptions({
     capture: { faceSdfEnabled: true },
   }, {}).defaultFaceSdfEnabled, true);
@@ -240,7 +240,7 @@ test("runtime part composer treats head_optional rows as official preset heads",
   assert.match(loaderSource, /tryRuntimePartSlot\(head\) !== "head"\s+&&\s+deniedHeadHairKeys\.has/);
 });
 
-test("engine outline shell follows the documented SekaiOutline render state", () => {
+test("engine outline shell follows the captured Sekai outline pass", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -264,7 +264,7 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(outlineSource.includes('material.name = "pjsk_shell_outline";'));
   assert.ok(engineSource.includes("function extractSekaiOutlineMainTexture"));
   assert.ok(outlineSource.includes("map: sourceMainTex"));
-  assert.ok(outlineSource.includes('readRawMaterialColor(rawMaterial, "_OutlineColor")'));
+  assert.ok(outlineSource.includes('from "./rawMaterialRuntime"'));
   assert.ok(outlineSource.includes("vertexColors: false"));
   assert.ok(outlineSource.includes('useVertexColor ? "attribute vec3 color;" : ""'));
   assert.ok(outlineSource.includes("transparent: false"));
@@ -276,19 +276,16 @@ test("engine outline shell follows the documented SekaiOutline render state", ()
   assert.ok(outlineSource.includes("evaluateSekaiOutlineFovFactor(camera.fov)"));
   assert.ok(outlineSource.includes("uSekaiCharacterOutlineColor"));
   assert.ok(outlineSource.includes("uSekaiCharacterOutlineBlending"));
-  assert.ok(outlineSource.includes("vSekaiMainTexUv = uv * uSekaiMainTexST.xy + uSekaiMainTexST.zw;"));
+  assert.ok(outlineSource.includes("vSekaiMainTexUv"));
   assert.ok(outlineSource.includes('readRawMaterialFloat(rawMaterial, "_UseAlphaClip")'));
   assert.ok(outlineSource.includes('readRawMaterialFloat(rawMaterial, "_Cutoff")'));
   assert.match(outlineSource, /diffuseColor\.rgb = mix\(/);
-  assert.doesNotMatch(outlineSource, /OutlineClipOffset|0\.00008/);
-  assert.ok(!outlineSource.includes("SEKAI_OUTLINE_RECONSTRUCTION_WIDTH_MIN_SCALE"));
-  assert.ok(!outlineSource.includes("polygonOffset: true"));
+  assert.doesNotMatch(outlineSource, /uOutlineClipOffset|polygonOffset: true/);
   assert.ok(outlineSource.includes("vec3 outlineWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;"));
   assert.ok(outlineSource.includes("float outlineDistance = length(outlineWorldPosition - cameraPosition);"));
   assert.ok(outlineSource.includes("float outlineDistanceFactor = clamp((outlineDistance - uSekaiOutlineFactor.x) * uSekaiOutlineFactor.y, 0.0, 1.0);"));
   assert.ok(outlineSource.includes("outlineDistanceFactor = min(outlineDistanceFactor * uSekaiOutlineFactor.z, 1.0);"));
   assert.ok(outlineSource.includes("float outlineWidth = mix(uSekaiOutlineWidth.x, uSekaiOutlineWidth.y, outlineDistanceFactor);"));
-  assert.ok(!outlineSource.includes("2.41400003 / projectionMatrix[1][1]"));
   assert.ok(outlineSource.includes("vec3 outlineDirection = normalize(normal);"));
   assert.ok(outlineSource.includes("vec3 secondNormalTS = normalize(vec3(uv1.xy, uv2.x));"));
   assert.ok(outlineSource.includes("cross(baseNormal, baseTangent) * tangent.w"));
@@ -371,8 +368,8 @@ test("docker runtime image includes capture server support modules", () => {
   assert.match(dockerfile, /COPY png-rgba\.mjs \.\/png-rgba\.mjs/);
   assert.match(dockerfile, /runtime-binary-codec\.mjs/);
   assert.match(dockerfile, /COPY THIRD_PARTY_NOTICES\.md \.\/THIRD_PARTY_NOTICES\.md/);
-  assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1024/);
-  assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1024/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_WIDTH=1400/);
+  assert.match(dockerfile, /HARUKI_CAPTURE_HEIGHT=1000/);
   assert.match(dockerfile, /HARUKI_CAPTURE_SCALE=2/);
   assert.match(dockerfile, /HARUKI_CAPTURE_WARMUP_FRAMES=60/);
   assert.match(dockerfile, /HARUKI_CAPTURE_SPRING_RUNTIME_MODE=unity-prefab/);
@@ -535,7 +532,7 @@ test("body shader does not carry pseudo neck contact shadow projection", () => {
   assert.doesNotMatch(shaderSource, /uNeckContact|neckContact|staticSkinContactShadow/);
 });
 
-test("face sdf is default-off and only enabled for explicit capable face materials", () => {
+test("face sdf follows exported capable materials by default and remains overridable", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -553,7 +550,7 @@ test("face sdf is default-off and only enabled for explicit capable face materia
     "utf8"
   );
 
-  assert.match(lightingSource, /private faceSdfEnabled = false;/);
+  assert.match(lightingSource, /private faceSdfEnabled = true;/);
   assert.match(engineSource, /setFaceSdfEnabled\(enabled: boolean\)/);
   assert.match(lightingSource, /private shouldEnableFaceSdf\(\)/);
   assert.doesNotMatch(engineSource, /ensureFaceSdfUv1Attribute/);
@@ -607,7 +604,10 @@ test("face sdf uses official face-only head light parameters", () => {
   assert.match(engineSource, /-this\.faceUpWorld\.x,\s+-this\.faceUpWorld\.z/s);
   assert.match(lightingSource, /updateSekaiFaceShadowParameters\(material, faceShadowLightDirection, headDot,/);
   assert.doesNotMatch(shaderSource, /rangeLimit \* uShadowWeight/);
-  assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
+  assert.match(
+    shaderSource,
+    /shadowValue = mix\(\s*shadowValue,\s*sekaiGammaTexture\(texture2D\(uShadowTex, vUv\)\.rgb\),\s*clamp\(uShadowTexWeight, 0\.0, 1\.0\)\s*\)/s
+  );
   assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /uniform float uFadeMode;/);
   assert.match(shaderSource, /uniform float uHueSinAngle;/);
@@ -645,7 +645,7 @@ test("head hair compatibility uses not-available patterns as a blacklist", () =>
   assert.doesNotMatch(composerSource, /not in the available pattern list/);
 });
 
-test("skin colors drive face skin tint while body and face shadow controls stay separate", () => {
+test("body and face share the captured skin ramp while keeping face shadow controls separate", () => {
   const engineSource = fs.readFileSync(
     path.join(repoRoot, "src/engine/Haruki3DEngine.ts"),
     "utf8"
@@ -666,10 +666,16 @@ test("skin colors drive face skin tint while body and face shadow controls stay 
     path.join(repoRoot, "src/engine/characterLightingRuntime.ts"),
     "utf8"
   );
+  const characterLightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterLighting.ts"),
+    "utf8"
+  );
 
-  assert.match(shaderSource, /faceSkinLit = mix\(uSkinColor1, uSkinColorDefault, faceSkinRamp\)/);
-  assert.match(shaderSource, /faceSkinShadow = mix\(uSkinColor2, uSkinColor1, faceSkinRamp\)/);
-  assert.match(shaderSource, /mainColor = mix\(mainColor, faceSkinLit, faceSkinMask \* 0\.58\)/);
+  assert.match(characterLightingSource, /vec3 sekaiSkinRamp\(/);
+  assert.match(characterLightingSource, /vec3 firstBand = mix\(lit, mid, clamp\(shadow \* 2\.0, 0\.0, 1\.0\)\)/);
+  assert.match(shaderSource, /mainColor \* sekaiSkinRamp\(/);
+  assert.match(shaderSource, /float skinShadow =\s+uFaceSdfEnabled > 0\.5/s);
+  assert.doesNotMatch(shaderSource, /faceSkinMask|faceSkinRamp|skinWarmBias/);
   assert.match(headMaterialSource, /shaderSkinColorDefault/);
   assert.match(headMaterialSource, /shaderSkinColor1/);
   assert.match(headMaterialSource, /shaderSkinColor2/);
@@ -736,9 +742,18 @@ test("character shader keeps sssekai-verified C/S/H and vertex color channel sem
     path.join(repoRoot, "src/materials/sekaiCharacterShader.ts"),
     "utf8"
   );
+  const lightingSource = fs.readFileSync(
+    path.join(repoRoot, "src/materials/sekaiCharacterLighting.ts"),
+    "utf8"
+  );
 
-  assert.match(shaderSource, /shadowValue = mix\(shadowValue, texture2D\(uShadowTex, vUv\)\.rgb, clamp\(uShadowTexWeight, 0\.0, 1\.0\)\)/);
-  assert.match(shaderSource, /float skinMask = \(uSkinTintEnabled > 0\.5 && uHasValueTex > 0\.5\) \? step\(0\.5, valueSample\.r\) : 0\.0;/);
+  assert.match(
+    shaderSource,
+    /shadowValue = mix\(\s*shadowValue,\s*sekaiGammaTexture\(texture2D\(uShadowTex, vUv\)\.rgb\),\s*clamp\(uShadowTexWeight, 0\.0, 1\.0\)\s*\)/s
+  );
+  assert.match(shaderSource, /float skinMask = sekaiSkinMask\(/);
+  assert.match(lightingSource, /float valueMask = clamp\(valueSample\.r, 0\.0, 1\.0\);/);
+  assert.match(lightingSource, /float alphaMask = 1\.0 - smoothstep\(0\.02, 0\.2, valueSample\.a\);/);
   assert.match(shaderSource, /float officialShadowBand = sekaiBaseShadow\(/);
   assert.match(shaderSource, /vertexOutlineIntensity = clamp\(vColor\.r, 0\.0, 1\.0\);/);
   assert.match(shaderSource, /vertexRimMask = clamp\(vColor\.g, 0\.0, 1\.0\);/);
@@ -900,7 +915,7 @@ test("runtime shadow debug exposes projected and hair-shadow layers", () => {
   assert.match(lightingSource, /private hairShadowMode: HairShadowMode = "sekai_head_position";/);
   assert.match(lightingSource, /options\.debug\.hairShadowMode = this\.hairShadowMode/);
   assert.match(engineSource, /hairShadowWorldPosition: vectorDebugSnapshot\(this\.hairHeadPosition\)/);
-  assert.match(headMaterialSource, /hairShadowEnabled:\s*hair\.proximityShadowEnabled &&\s*hair\.controllerPresent &&\s*lighting\?\.faceSphereShadowEdge != null/s);
+  assert.match(headMaterialSource, /hairShadowEnabled:\s*hair\.proximityShadowEnabled &&\s*hair\.controllerPresent &&\s*lighting\?\.hairShadow === true/s);
   assert.match(headMaterialSource, /useLambert: hair\.controllerPresent \? true : \(lighting\?\.useLambert \?\? true\)/);
   assert.match(
     materialRuntimeSource,

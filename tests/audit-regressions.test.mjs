@@ -345,16 +345,16 @@ test("capture request bounds renderer work supplied by callers", () => {
   assert.ok(request.traceUtjMaxEvents <= 10000);
 });
 
-test("capture request rejects stretched or larger-than-2K physical output", () => {
+test("capture request preserves the established 1400x1000 aspect ratio and scale", () => {
   const validateCaptureRequest = loadCaptureRequestValidator();
-  assert.throws(
-    () => validateCaptureRequest(validCaptureRequest({ width: 1024, height: 768 })),
-    /must be square/
-  );
-  assert.throws(
-    () => validateCaptureRequest(validCaptureRequest({ width: 2048, height: 2048, scale: 2 })),
-    /must not exceed 2048 physical pixels/
-  );
+  const request = validateCaptureRequest(validCaptureRequest({
+    width: 1400,
+    height: 1000,
+    scale: 2,
+  }));
+  assert.equal(request.width, 1400);
+  assert.equal(request.height, 1000);
+  assert.equal(request.scale, 2);
 });
 
 test("DevTools commands reject when Chromium does not answer", async () => {

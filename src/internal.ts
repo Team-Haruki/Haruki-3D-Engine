@@ -71,8 +71,10 @@ export {
 } from "./parts/runtimePartComposer";
 export {
   previewLightDefaults,
+  sekaiCostumeShopControllerDefaults,
   sekaiCostumeShopDirectionalLightDirection,
   sekaiCostumeShopDirectionalLightRotationDegrees,
+  sekaiCostumeShopRimLightDirection,
   type BodyAssetManifest,
   type HeadAssetManifest,
   type PreviewLightState,
@@ -82,6 +84,7 @@ export {
   evaluateSekaiBaseShadow,
   evaluateSekaiFaceShadow,
   evaluateSekaiFaceSphereShadow,
+  evaluateSekaiHighlightRolloff,
   type SekaiBaseShadowInput,
   type SekaiFaceShadowInput,
   type SekaiFaceSphereShadowInput,
@@ -136,9 +139,14 @@ export {
 export {
   createSekaiOutlineMaterial,
   evaluateSekaiOutlineColor,
-  readRawMaterialColor,
   sekaiCostumeShopOutlineControllerDefaults,
 } from "./engine/sekaiOutlineRuntime";
+export {
+  readRawMaterialBoolean,
+  readRawMaterialColor,
+  readRawMaterialFloat,
+  readRawMaterialTexture,
+} from "./engine/rawMaterialRuntime";
 export {
   buildUnityPrefabSourceGraph,
   createUnityPrefabConstraintRuntime,
@@ -151,12 +159,12 @@ export {
   type SpringTimelineControl,
 } from "./engine/unityPrefabSpringRuntimeAdapter";
 export {
+  applyRawMaterialShaderUniforms,
   bindBodyRuntimeMaterials,
   configureSekaiEyelashPass,
   configureSekaiFaceLayerStencilPrepass,
   configureSekaiHairStencil,
   createSekaiThroughHairOverlayMesh,
-  resolvePreviewLambertEnabled,
   updateSekaiEyelashPassView,
   type RuntimeMaterialDebug,
 } from "./engine/characterMaterialRuntime";

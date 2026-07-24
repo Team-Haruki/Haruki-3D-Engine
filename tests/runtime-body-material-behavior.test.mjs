@@ -2,9 +2,53 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
 import {
+  applyRawMaterialShaderUniforms,
   bindBodyRuntimeMaterials,
   createSekaiBodyMaterial,
 } from "../dist/haruki-3d-engine-internal.js";
+
+test("raw Unity material colors and alpha feature state override proxy defaults", () => {
+  const material = createSekaiBodyMaterial({
+    baseColor: "#ffffff",
+    shadowColor: "#808080",
+    lightDirection: new THREE.Vector3(0, 1, 0),
+    lightIntensity: 1,
+    ambientIntensity: 1,
+    shadowThreshold: 0.5,
+    shadowWeight: 1,
+    alphaCutoff: 0.02,
+  });
+  applyRawMaterialShaderUniforms(material, {
+    shaderFileId: 0,
+    shaderPathId: 1,
+    textureProperties: [],
+    colorProperties: [
+      { name: "_DefaultSkinColor", r: 0.9, g: 0.8, b: 0.7, a: 1 },
+      { name: "_Shadow1SkinColor", r: 0.6, g: 0.5, b: 0.4, a: 1 },
+      { name: "_Shadow2SkinColor", r: 0.3, g: 0.2, b: 0.1, a: 1 },
+      { name: "_PartsAmbientColor", r: 0.4, g: 0.5, b: 0.6, a: 0.75 },
+    ],
+    floatProperties: [
+      { name: "_UseAlphaClip", value: 1 },
+      { name: "_Cutoff", value: 0.375 },
+    ],
+    intProperties: [],
+    validKeywords: [],
+    invalidKeywords: [],
+    lightmapFlags: 0,
+    enableInstancingVariants: false,
+    doubleSidedGi: false,
+    customRenderQueue: -1,
+    stringTags: {},
+    disabledShaderPasses: [],
+  });
+
+  assert.deepEqual(material.uniforms.uSkinColorDefault.value.toArray(), [0.9, 0.8, 0.7]);
+  assert.deepEqual(material.uniforms.uSkinColor1.value.toArray(), [0.6, 0.5, 0.4]);
+  assert.deepEqual(material.uniforms.uSkinColor2.value.toArray(), [0.3, 0.2, 0.1]);
+  assert.equal(material.uniforms.uPartsAmbientAlpha.value, 0.75);
+  assert.equal(material.uniforms.uAlphaCutoff.value, 0.375);
+});
 
 test("body material binding preserves exact Unity slots and texture sampling state", async () => {
   const loaded = [];
@@ -135,7 +179,7 @@ test("body material binding preserves exact Unity slots and texture sampling sta
   assert.equal(replacementMap.minFilter, originalMap.minFilter);
   assert.equal(replacementMap.anisotropy, originalMap.anisotropy);
   assert.equal(replacementMap.flipY, originalMap.flipY);
-  assert.equal(replacementMap.colorSpace, originalMap.colorSpace);
+  assert.equal(replacementMap.colorSpace, THREE.SRGBColorSpace);
   assert.equal(fallbackReplacementMaterial.uniforms.uMainTex.value, fallbackMap);
   assert.equal(fallbackReplacementMaterial.uniforms.uUseMainTex.value, 1);
   assert.equal(fallbackReplacementMaterial.uniforms.uBaseColor.value.getHex(), 0xffffff);

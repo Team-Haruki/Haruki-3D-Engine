@@ -948,9 +948,11 @@ export class Haruki3DEngine {
       shadowWeight: light.shadowWeight,
       valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE,
       characterAmbientIntensity: light.characterAmbient,
-      rimIntensity: light.rimIntensity,
-      controllerRimThreshold: light.rimThreshold,
-      rimDirectionality: light.rimDirectionality,
+      rimColorAlpha: light.rimColorAlpha,
+      controllerRimRange: light.rimRange,
+      controllerRimEmission: light.rimEmission,
+      controllerRimLightInfluence: light.rimLightInfluence,
+      controllerRimShadowSharpness: light.rimShadowSharpness,
       rimDirection: getSekaiPreviewRimDirection(),
       skinTintEnabled: true,
     });
@@ -964,9 +966,11 @@ export class Haruki3DEngine {
       shadowWeight: light.shadowWeight,
       valueShadowInfluence: COSTUME_SHOP_BODY_VALUE_SHADOW_INFLUENCE,
       characterAmbientIntensity: light.characterAmbient,
-      rimIntensity: light.rimIntensity,
-      controllerRimThreshold: light.rimThreshold,
-      rimDirectionality: light.rimDirectionality,
+      rimColorAlpha: light.rimColorAlpha,
+      controllerRimRange: light.rimRange,
+      controllerRimEmission: light.rimEmission,
+      controllerRimLightInfluence: light.rimLightInfluence,
+      controllerRimShadowSharpness: light.rimShadowSharpness,
       rimDirection: getSekaiPreviewRimDirection(),
       skinTintEnabled: false,
       hairShadowEnabled: false,
@@ -1940,12 +1944,15 @@ export class Haruki3DEngine {
     );
   }
 
-  updateGlobalShadowColor(color: THREE.ColorRepresentation) {
-    this.characterLighting.updateGlobalShadowColor(color);
+  updateGlobalShadowColor(color: THREE.ColorRepresentation, alpha = 1) {
+    this.characterLighting.updateGlobalShadowColor(color, alpha);
   }
 
   updateLightControllerColors(colors: {
     ambientColor?: THREE.ColorRepresentation | null;
+    ambientIntensity?: number | null;
+    specularColor?: THREE.ColorRepresentation | null;
+    specularIntensity?: number | null;
     rimColor?: THREE.ColorRepresentation | null;
     shadowRimColor?: THREE.ColorRepresentation | null;
   }) {
@@ -1953,7 +1960,7 @@ export class Haruki3DEngine {
   }
 
   updateLightControllerRimShape(shape: {
-    edgeSmoothness?: number | null;
+    emission?: number | null;
     shadowSharpness?: number | null;
   }) {
     this.characterLighting.updateControllerRimShape(shape);
