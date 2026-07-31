@@ -17,6 +17,8 @@ export type Haruki3DKernel = {
   play(): void;
   pause(): void;
   resize(width: number, height: number): void;
+  /** Rotates the loaded character around its vertical axis (viewer drag-orbit). */
+  setCharacterYawDegrees(degrees: number): void;
   destroy(): Promise<void>;
 };
 
@@ -28,6 +30,7 @@ type Haruki3DKernelEngine = Pick<
   | "destroy"
   | "loadRenderRecipe"
   | "renderFrame"
+  | "setCharacterYawDegrees"
   | "setViewportSize"
   | "stepRuntimeFrame"
 > & Partial<Pick<Haruki3DEngine, "waitForPostProcessorReady">>;
@@ -152,6 +155,13 @@ export function createHaruki3DKernelRuntime(
       assertActive();
       engine.setViewportSize(width, height);
       engine.renderFrame();
+    },
+    setCharacterYawDegrees(degrees) {
+      assertActive();
+      engine.setCharacterYawDegrees(degrees);
+      if (!running) {
+        engine.renderFrame();
+      }
     },
     destroy() {
       if (destroySettled) return destroySettled;
